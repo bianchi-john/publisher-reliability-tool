@@ -1,119 +1,153 @@
-# Publisher Reliability Tool - Specification
+# Publisher Reliability Tool
 
-This repository contains the initial product and scientific specification for a
-local tool derived from the paper *From Articles to Publishers: Aggregating
-Language Model Predictions for News Source Reliability Inference*.
+This repository is the normative specification and public prediction dataset
+for a local application derived from the paper *From Articles to Publishers:
+Aggregating Language Model Predictions for News Source Reliability Inference*.
 
-The repository is intentionally documentation-only. Its purpose is to settle
-the behavior of the tool before implementation begins.
+The application runs on Linux, starts from a terminal either natively or with
+Docker Compose, and exposes the same functionality through:
 
-## Product in one sentence
+- a browser interface at `http://127.0.0.1:8000/`;
+- a versioned local REST API under `http://127.0.0.1:8000/api/v1`;
+- interactive API documentation at `http://127.0.0.1:8000/api/docs`.
 
-A Linux command starts a local web application that can browse bundled or
-user-supplied historical article predictions, load one or more locally stored
-Transformer checkpoints, run a missing article prediction, and aggregate
-compatible article predictions into a publisher-level reliability estimate.
+All model inference and persistent state remain local. Internet access is used
+only when an explicit request requires an article that is not usable from the
+local CSV data, when publisher discovery needs additional articles, or when the
+user explicitly downloads a missing model dependency.
 
-## Current product boundary
+## Locked MVP decisions
 
-- The application runs locally and is started from a Linux terminal.
-- The browser interface is served on `localhost` by default.
-- Model inference is local; article text is not sent to a remote inference API.
-- Models are supplied as local paths at startup or registered from the local
-  browser interface.
-- Released `bert_fold_N.pt`, `roberta_fold_N.pt`, and `llama_fold_N.pt`
-  checkpoints use notebook-derived built-in loading recipes; any fold may be
-  selected independently.
-- Released Mistral folds are PEFT directories built on
-  `mistralai/Mistral-Small-24B-Base-2501`; they are not single `.pt` files.
-- A validated, sharded public prediction release supplies the initial history;
-  the user may additionally import a schema-compatible CSV at startup or
-  through the frontend, and `dataset/sampleDataset.csv` remains the synthetic
-  structural example.
-- Private source datasets such as `dataset/fullDataset.csv` remain local and
-  are excluded from Git. A generated public release may be tracked only after
-  protected reference-provider fields have been removed and validation passes.
-- New predictions and publisher evaluations persist across restarts.
-- If no model is available, the server still starts in history-only mode and
-  explains model setup in both the terminal and browser interface.
-- The browser accepts one article URL, several article URLs from one publisher,
-  or one publisher homepage URL at a time.
-- The browser provides searchable histories for evaluated publishers and
-  articles, and lets the user select existing articles for a new evaluation.
-- Article and publisher detail pages include compact probability and
-  aggregation charts backed by accessible data tables.
-- All terminal messages, frontend text, and documentation presented by the
-  software are in English; inference accepts English-language articles only.
-- New article text is extracted with `newspaper3k`, validated with `langdetect`,
-  and sent unchanged to the selected tokenizer; no additional text cleaning is
-  applied.
-- Publisher-level inference follows the paper's majority-vote aggregation for
-  the reproducible default and also exposes explicitly named alternative
-  aggregation methods when their required outputs are available.
-- Model training is not part of the first version.
+- **Runtime:** Python 3.12, FastAPI, Uvicorn, React, TypeScript, Vite, and
+  Chart.js. Frontend assets are built into and served by the backend; no CDN is
+  used.
+- **Deployment:** native Linux and a single-container Docker image orchestrated
+  by Docker Compose. Both expose the same CLI, API, UI, and data formats.
+- **Binding:** native execution binds to `127.0.0.1:8000`; Compose publishes
+  container port `8000` only on host address `127.0.0.1`.
+- **Persistence:** the authoritative local database is a set of UTF-8 CSV
+  ledgers under the configured data directory. SQLite and other database
+  engines are outside the MVP.
+- **Bundled history:** `dataset/predictions/manifest.json` and its ordered CSV
+  parts are verified and imported idempotently on first startup.
+- **Models:** official or explicitly configured compatible artifacts are loaded
+  from local paths. The program never trains models.
+- **Language:** software text and API messages are English; newly inferred
+  articles must be detected as English.
+- **Identity:** an article is identified by its canonical URL, a publisher by
+  its normalized hostname, and a prediction by article plus exact model
+  identity.
+- **Reuse:** a compatible stored prediction is returned without refetching or
+  comparing article text. Stored article text can be used for a missing model
+  prediction without a network connection.
+- **Aggregation:** `majority_vote` is the paper-compatible default. The MVP
+  also implements `ordinal_mean` and `mean_probabilities` under the exact rules
+  in `docs/scientific-contract.md`.
+- **Article counts:** publisher and explicit multi-article evaluations accept
+  2 through 50 articles; the publisher-discovery default is 10.
+- **Jobs:** model loading, retrieval, inference, import, and aggregation execute
+  as inspectable background jobs. The API returns a job identifier immediately.
+- **Security:** no authentication is required for native loopback or the
+  documented loopback-published Compose service. Every other non-loopback bind
+  is rejected unless an API key is configured.
 
-## Essential documents
+## Offline and online behavior
 
-| Document | Purpose |
+The following work without internet access after software dependencies, CSV
+state, and selected model dependencies are present locally:
+
+- browse, search, filter, paginate, and export local article and publisher
+  history;
+- inspect stored predictions, probabilities, jobs, and evaluations;
+- aggregate existing compatible predictions;
+- infer with a local model from article text already stored in CSV;
+- use the frontend, API documentation, and charts.
+
+Network access is required only for:
+
+- fetching an article whose usable text is absent locally;
+- resolving redirects or a page-declared canonical URL after the offline URL
+  lookup misses;
+- discovering additional articles from a publisher homepage;
+- explicitly downloading a missing base model or tokenizer.
+
+Starting with `--offline` or `PRT_OFFLINE=true` disables every outbound HTTP
+request. An operation that cannot complete locally fails with the stable error
+code `NETWORK_REQUIRED`; browsing and other local operations remain available.
+
+## User input modes
+
+The Evaluate page and `POST /api/v1/evaluation-jobs` accept exactly one of:
+
+1. one article URL;
+2. a list of 2–50 article URLs from one normalized publisher;
+3. one publisher homepage URL plus a requested count of 2–50 articles.
+
+For a publisher request, the user selects `stored_only`, `stored_first`, or
+`web_only`. `stored_first` is the default: eligible local articles are used
+before the application attempts web discovery for the missing count.
+
+## Repository map
+
+| Path | Normative purpose |
 | --- | --- |
-| [`docs/product-specification.md`](docs/product-specification.md) | Scope, users, requirements, workflows, and open product decisions |
-| [`docs/scientific-contract.md`](docs/scientific-contract.md) | Meaning of labels, predictions, aggregation, and model compatibility |
-| [`docs/architecture.md`](docs/architecture.md) | Minimal local architecture, persistence, security, and data flow |
-| [`docs/acceptance-tests.md`](docs/acceptance-tests.md) | Observable conditions that an implementation must satisfy |
+| `docs/product-specification.md` | Product scope, workflows, UI behavior, requirements, and error rules |
+| `docs/architecture.md` | Fixed technology stack, components, data flow, concurrency, security, and deployment architecture |
+| `docs/api-contract.md` | REST resources, payloads, status codes, pagination, jobs, and error envelope |
+| `docs/csv-storage-contract.md` | Authoritative local CSV database layout, schemas, transactions, recovery, and import rules |
+| `docs/scientific-contract.md` | Model recipes, class outputs, text pipeline, reuse, aggregation, and scientific warnings |
+| `docs/deployment.md` | Exact native Linux, Docker, Compose, configuration, model mounts, and offline commands |
+| `docs/acceptance-tests.md` | End-to-end conditions required before the MVP is releasable |
+| `docs/traceability.md` | Mapping from every functional/non-functional requirement to acceptance coverage |
+| `dataset/README.md` | Public dataset generation, verification, licensing notice, and runtime import behavior |
+| `models/README.md` | Official artifact layouts and local registration behavior |
 
-## Status notation
+If two documents appear to conflict, the more specific contract governs:
 
-The documents use three markers:
+1. scientific behavior: `scientific-contract.md`;
+2. CSV persistence: `csv-storage-contract.md`;
+3. HTTP behavior: `api-contract.md`;
+4. deployment behavior: `deployment.md`;
+5. product presentation and workflows: `product-specification.md`.
 
-- **DECIDED**: accepted starting point;
-- **PROPOSED**: recommended design, still changeable;
-- **OPEN**: a decision or artifact is still required.
+An ambiguity discovered during implementation is a specification defect. It
+must be resolved in these documents and covered by an acceptance test before
+the implementation is merged.
 
-## Source material available at initialization
+## Public and protected data boundary
 
-- Paper draft dated July 2026.
-- A diagnostic summary of the experimental DataFrame, consulted only to
-  identify the model-output fields that may be released.
-- `dataset/sampleDataset.csv`, which defines the example import structure.
-- `dataset/predictions/manifest.json` and its CSV parts, which contain the
-  validated public article fields and model outputs. Repeated exact source URLs
-  are resolved deterministically by retaining their first CSV occurrence, with
-  all skipped counts recorded in the manifest.
-- The BERT/RoBERTa/Llama and Mistral training notebooks, used to derive built-in
-  loading recipes for the released fold checkpoints.
-- The model release referenced by the paper:
-  <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
+The repository contains model-produced outputs and scraped article fields. It
+must never contain original reference-provider labels, scores, score ranges, or
+provider-supplied metadata. The public classes are displayed only as `Class 0`
+through `Class 4`; the tool contains no mapping back to protected names or score
+ranges.
 
-The tracked sample contains synthetic values only. The private source dataset
-and model weights are local inputs and must not be committed. The generated
-public dataset contains scraped article fields and model outputs, but excludes
-the original label, score, and all other NewsGuard-supplied metadata.
+The private source dataset and model weights are ignored by Git. The generated
+public release retains the first source occurrence of each exact URL and records
+the deduplication counts in its manifest. Article titles, bodies, and author
+strings remain attributable to their respective publishers; inclusion does not
+change their copyright status.
 
-If a private input CSV contains blocked reference-provider columns, the importer
-projects only the permitted fields and never persists the blocked values.
+Before an application release, the project owner must add `LICENSE` for the
+software and `MODEL-OUTPUT-LICENSE.md` for generated predictions. Those terms
+must not claim to relicense third-party article text. Absence of either file is
+a release blocker, not permission inferred from public access.
 
-A released BERT, RoBERTa, or Llama `.pt` contains a `state_dict`, not a
-self-contained Transformers package. A released Mistral fold contains a PEFT
-adapter and tokenizer but not its 24B base weights. The application recipe
-reconstructs the correct architecture, while every missing base dependency
-must be present in the local cache or downloaded during explicit setup.
+## Official model release
 
-The terminal and frontend Models page always show the official OSF link. When
-no compatible model is installed, they also explain how to download, extract
-when necessary, place, and register an artifact.
+The terminal and Models page always show the official download location:
 
-## Terminology
+<https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
-- **Protected reference data**: original labels, scores, and provider-supplied
-  metadata used in the research. These data are excluded from the repository,
-  imports, database, UI, and exports.
-- **Article**: a record identified uniquely by its canonical URL.
-- **Publisher**: a record identified uniquely by its normalized domain, with
-  its homepage URL stored for navigation.
-- **Article prediction**: the freely releasable output produced by one
-  identified model artifact for one canonical article URL.
-- **Publisher evaluation**: an aggregation of compatible article predictions
-  belonging to one publisher.
+BERT, RoBERTa, and Llama folds are released as notebook-defined `.pt`
+`state_dict` files. Mistral folds are PEFT directories and require the declared
+24B base model. Exact loader contracts are normative in
+`docs/scientific-contract.md`.
 
-The tool exposes model predictions, not the protected labels against which the
-models were evaluated.
+## Definition of done
+
+The MVP is complete only when every acceptance test passes in native Linux and
+Docker Compose, the OpenAPI document matches `docs/api-contract.md`, all local
+state is inspectable as CSV, browsing works with outbound networking disabled,
+and no protected reference field is present in Git history, runtime state,
+logs, API responses, UI state, or exports.

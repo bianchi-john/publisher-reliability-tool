@@ -1,258 +1,361 @@
 # Architecture
 
-**Status:** Minimal proposed architecture. Technology choices remain provisional
-until released checkpoints have passed the compatibility tests.
+**Status:** Normative MVP architecture
 
-## 1. Architectural constraints
+## 1. Fixed technology stack
 
-- Linux-first command-line startup.
-- Local browser interface.
-- Local model inference.
-- English-only software interface and English-only article inference.
-- One user and one machine in the MVP.
-- A bundled manifest and ordered CSV parts supply the initial public history;
-  an optional user-selected CSV or manifest directory may supply more.
-- New results stored in each user's transactional personal local database.
-- Model files remain outside the database.
-- Large-model failures must not corrupt stored history.
+| Layer | Required technology |
+| --- | --- |
+| Language/runtime | Python 3.12 |
+| HTTP/API | FastAPI with generated OpenAPI 3.1 |
+| ASGI server | Uvicorn, exactly one worker |
+| Validation | Pydantic v2 models shared by API and services |
+| Frontend | React + TypeScript built by Vite |
+| Charts | Chart.js bundled locally |
+| Styling | Project-owned CSS; no runtime CDN or remote font |
+| Persistence | Python CSV module over append-only UTF-8 CSV ledgers |
+| Data frames | Optional Polars for bounded streaming import/query indexes; never authoritative storage |
+| Background work | In-process bounded executor with persisted CSV job state |
+| HTTP retrieval | `httpx` plus `newspaper3k` extraction |
+| Language check | `langdetect` with `DetectorFactory.seed = 0` |
+| Models | PyTorch, Transformers, PEFT, and bitsandbytes where required |
+| Packaging | Python wheel, OCI image, Docker Compose v2 |
 
-## 2. Component view
+Changing one of these technologies is an architecture change and requires an
+updated contract and acceptance coverage before implementation.
+
+## 2. Process topology
 
 ```mermaid
-flowchart TD
-    CLI["Linux CLI"] --> APP["Local web application"]
-    UI["Browser UI"] --> APP
-    RELEASE["Bundled manifest + CSV parts"] --> APP
-    CSV["User CSV or manifest"] --> APP
-    APP --> DB["Local database"]
-    APP --> RUNTIME["Model runtime"]
-    RUNTIME --> FILES["Local model directories"]
-    APP -. explicit request .-> WEB["Article retrieval"]
+flowchart LR
+    CLI[Linux CLI] --> APP[Single FastAPI process]
+    UI[Bundled React UI] --> API[/api/v1]
+    CLIENT[Local API client] --> API
+    APP --> JOBS[Bounded background executor]
+    APP --> CSV[CSV store + in-memory indexes]
+    JOBS --> MODELS[Local model runtimes]
+    JOBS --> RETRIEVAL[Controlled article retrieval]
+    RETRIEVAL -. explicit network need .-> WEB[Publisher/article sites]
+    MODELS --> ARTIFACTS[Mounted/local model artifacts]
 ```
 
-The first implementation may run as one application process, but long model
-loads and inference calls should execute as managed background jobs. A separate
-distributed queue is not required for the MVP.
+The UI is static content served by FastAPI and communicates only with the same
+origin API. There is no separate frontend server in production. Native and
+container deployments run one application process, one CSV writer, and one job
+executor.
 
-## 3. Suggested module boundaries
+## 3. Module boundaries
 
-| Module | Responsibility |
+| Python package | Responsibility |
 | --- | --- |
-| CLI/configuration | Parse paths and options, validate configuration, start the server |
-| Web/UI | Present minimal navigation, searchable histories, article selection, model status, exact tables, and charts |
-| Import service | Validate manifests and incrementally project allowed fields from bundled or user-selected CSV parts without modifying them |
-| URL/article service | Resolve canonical article URLs and normalized publisher domains |
-| Model registry | Discover checkpoints, recognize family/fold filenames, and expose compatibility status |
-| Model loader registry | Reconstruct notebook-defined base/tokenizer recipes and safely load supported `state_dict` files or PEFT adapter directories |
-| Inference service | Encode extracted text, run local prediction, apply softmax, and record run metadata |
-| Aggregation service | Build publisher evaluations from compatible article predictions |
-| Persistence | Store imports, entities, jobs, predictions, and evaluation provenance |
-| Retrieval service | Use `newspaper3k` to fetch one article or discover and extract a requested number from one publisher |
-| Language service | Use `langdetect` after extraction and reject or exclude content not detected as English |
+| `config` | CLI/environment parsing, typed settings, safety validation |
+| `api` | Versioned routes, authentication, error envelope, OpenAPI |
+| `services` | Shared use cases used by API and startup commands |
+| `storage` | CSV schema, transactions, locks, indexes, recovery, compaction |
+| `imports` | Streaming dataset/manifest verification and projection |
+| `identity` | URL normalization, canonical resolution, publisher hostname identity |
+| `retrieval` | Safe HTTP, robots policy, discovery, `newspaper3k` extraction |
+| `language` | Deterministic English and minimum-text validation |
+| `models.registry` | Artifact discovery, manifests, compatibility, identity |
+| `models.loaders` | Versioned BERT, RoBERTa, Llama, and Mistral adapters |
+| `inference` | Tokenization, execution, softmax validation, provenance |
+| `aggregation` | Versioned aggregation formulas and availability checks |
+| `jobs` | Queue, progress, cancellation, recovery, concurrency limits |
+| `frontend` | Compiled React assets only; source lives in a separate frontend tree |
 
-## 4. Storage strategy
+No API route reads or writes CSV directly. It calls a service, which validates
+the command and uses the storage abstraction. This enforces identical behavior
+for UI, API, CLI imports, and startup seed import.
 
-Using the user's CSV as the mutable application database would make
-deduplication, concurrent jobs, schema evolution, and provenance unnecessarily
-fragile.
+## 4. Authoritative data architecture
 
-The initial storage design is therefore:
+The authoritative mutable database is the CSV store described in
+`csv-storage-contract.md`. It consists of append-only entity ledgers plus a
+transaction ledger. In-memory indexes accelerate reads but are disposable and
+are rebuilt from committed CSV rows at startup.
 
-- **bundled public release:** immutable manifest plus ordered, checksummed CSV
-  parts imported on first use;
-- **user-selected CSV or manifest directory:** optional, immutable import
-  source whose size and row count are not fixed;
-- **tracked sample CSV:** small synthetic schema example, not automatically
-  imported as product history;
-- **SQLite:** proposed personal local database containing allowed imported
-  records and every new article, prediction, and publisher evaluation;
-- **model directories:** external local artifacts referenced by path and
-  checksum;
-- **application data directory:** logs, database, cached metadata, and optional
-  managed model copies.
+The repository seed release is immutable input. On first startup it is verified
+and projected into the local CSV store. The source parts are never edited. New
+articles and predictions are written only to the configured data directory.
 
-SQLite is a proposal, not yet a locked technology choice, but it matches the
-single-user local scope and the current dataset size.
+The application shall not use SQLite as a cache, index, queue, or fallback. A
+process-local Python index is allowed because CSV remains authoritative and a
+restart can reconstruct the exact state.
 
-### Minimum persistent entities
+## 5. Write transaction model
 
-| Entity | Essential identity or content |
+Only one application process may own a data directory. Startup acquires an
+exclusive POSIX `flock` on `<data-dir>/.writer.lock` and retains it until clean
+shutdown. Failure to acquire it is `STORAGE_LOCKED`.
+
+Every logical mutation uses this sequence:
+
+1. Acquire the process write mutex.
+2. Append a `BEGIN` record with a UUID transaction identifier to
+   `transactions.csv`; flush and `fsync`.
+3. Append all entity versions carrying that transaction identifier; flush and
+   `fsync` each affected ledger.
+4. Append `COMMITTED` to `transactions.csv`; flush and `fsync`.
+5. Apply the committed versions to in-memory indexes.
+6. Release the mutex.
+
+Readers expose only rows whose latest transaction state is `COMMITTED`. An
+interruption before step 4 leaves invisible rows. Recovery reports and ignores
+uncommitted transactions. A malformed final physical row is backed up and
+truncated only by the explicit recovery routine before the HTTP server binds.
+
+Multi-ledger consistency is therefore determined by the transaction commit
+marker, not by assuming several file appends are atomically simultaneous.
+
+## 6. Read architecture and indexes
+
+Startup streams committed latest record versions into indexes for:
+
+- article by canonical URL and article ID;
+- publisher by normalized hostname and publisher ID;
+- model by model ID and artifact path;
+- prediction by `(article_id, model_id)`;
+- evaluations by publisher, model, method, and time;
+- jobs and imports by ID and status;
+- case-folded title, URL, hostname, and display-name search fields.
+
+Article bodies are not retained in a duplicate search index. Detail reads seek
+the applicable CSV row using a byte-offset index. The index retains lightweight
+`(record_id,record_version,commit_sequence,offset)` history needed to resolve a
+pagination snapshot, but not historical article bodies. Pagination sorts by an
+indexed stable tuple and uses the commit watermark defined by the API contract.
+
+After a transaction commits, its new versions update indexes synchronously
+before the HTTP response reports success. Failed index update is fatal: the
+process stops and rebuilds from CSV on restart rather than serving stale state.
+
+## 7. Background execution
+
+The API creates a job in a committed transaction before work is queued. The
+executor has separate bounded lanes:
+
+- network/extraction lane: maximum 4 concurrent tasks;
+- CPU inference lane: exactly 1 concurrent task;
+- GPU inference lane: exactly 1 concurrent task;
+- CSV commit lane: exactly 1 writer through the storage mutex.
+
+Job phase identifiers are `validating`, `local_lookup`, `discovering`,
+`fetching`, `extracting`, `language_check`, `loading_model`, `inferencing`,
+`aggregating`, and `committing`. Phase and integer progress are persisted at
+meaningful boundaries, not for every token or HTTP byte.
+
+On startup, `queued` jobs return to the queue. A job left `running` is appended
+as `failed` with `PROCESS_INTERRUPTED`; it is never silently resumed after a
+potentially partial model or network operation. The user can retry it as a new
+job linked by `retry_of_job_id`.
+
+## 8. URL and publisher identity flow
+
+### 8.1 Offline normalization
+
+For an HTTP(S) URL the application uses Python `urllib.parse` and:
+
+1. trims surrounding whitespace;
+2. rejects control characters and every `%` not followed by two hexadecimal
+   digits, then parses with `urllib.parse.urlsplit`, rejects user-info, and
+   accepts only an explicit case-insensitive `http` or `https` scheme plus a
+   non-empty host;
+3. lowercases the scheme, lowercases and IDNA-normalizes the hostname, and
+   preserves a valid non-default numeric port;
+4. removes the fragment;
+5. removes default port `80` for HTTP and `443` for HTTPS;
+6. normalizes an empty path to `/`;
+7. parses the query with `urllib.parse.parse_qsl(keep_blank_values=True)`,
+   removes every pair whose key, compared with ASCII case-insensitivity,
+   matches `utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid`, or
+   `homepageposition`;
+8. sorts remaining decoded `(key,value)` pairs lexicographically, preserving
+   duplicate pairs, then encodes them with `urllib.parse.urlencode`;
+9. does not alter path case, trailing slash, or percent-encoded path data.
+
+Malformed percent escapes, an invalid port, missing host, username/password,
+or control character make the URL `INVALID_URL`. A syntactically valid URL with
+a scheme other than HTTP(S) is `UNSUPPORTED_SCHEME`. Internationalized
+hostnames are stored in lowercase ASCII IDNA form. Query normalization
+deliberately normalizes equivalent encodings; it never discards a
+non-allowlisted query key.
+
+This normalized candidate is checked locally before any network operation.
+
+### 8.2 Online canonical resolution
+
+Only after a local miss and when offline mode is false, retrieval follows at
+most five safe redirects. Relative canonical links are resolved against the
+final response URL. The canonical URL is the first document-order
+`<link rel="canonical">` whose normalized publisher identity equals that of
+the final response; invalid or cross-publisher canonical links are ignored with
+a warning. If none qualifies, the final response URL is used. The result is
+normalized again and checked locally a second time. Reading a canonical link
+does not trigger a request to that link.
+
+### 8.3 Publisher identity
+
+Publisher identity is the canonical article hostname lowercased and
+IDNA-normalized with one leading `www.` removed. Other subdomains are preserved
+and are different publishers unless an explicit user-managed alias feature is
+added after the MVP. Registrable-domain guessing is not used.
+
+## 9. Retrieval safety
+
+The retrieval client:
+
+- accepts only `http` and `https`;
+- resolves DNS and rejects loopback, link-local, multicast, unspecified,
+  private, and reserved destination addresses before every request and redirect;
+- uses the fixed user agent `PublisherReliabilityTool/<version> (+project URL)`;
+- respects `robots.txt`; denial is `ROBOTS_DENIED`;
+- limits redirects to 5;
+- uses 10-second connect and 30-second total response timeouts;
+- retries at most twice for connection failures, `408`, `429`, and `5xx`, with
+  bounded exponential backoff and `Retry-After` support;
+- allows at most one request per second per hostname;
+- accepts HTML/XHTML responses only;
+- stops after 10 MiB decompressed response body per page;
+- never sends cookies, credentials, browser session state, or referrer data;
+- does not bypass access controls or execute page JavaScript.
+
+Robots policy is evaluated for the fixed user agent before each homepage or
+article fetch. A successful robots response is parsed with Python
+`urllib.robotparser`; an explicit denial is `ROBOTS_DENIED`. HTTP `404` or
+`410` means no robots rules. Other robots `4xx`, `5xx`, DNS, TLS, timeout, or
+parse failures stop that candidate with the corresponding safe HTTP/network
+error rather than assuming permission. One robots result per
+`(scheme,hostname,port)` is cached only for the lifetime of the job.
+
+Publisher discovery uses `newspaper3k` only to produce candidate links. Every
+candidate still passes URL, hostname, robots, response-size, extraction,
+language, and duplicate validation.
+
+`newspaper3k` never performs an unchecked network request. The retrieval
+component fetches robots files, homepages, and article HTML through the safe
+`httpx` client above, then supplies already downloaded HTML to newspaper's
+parsing/building APIs. Redirect and DNS validation therefore cannot be bypassed
+by the extraction library.
+
+## 10. Model lifecycle
+
+Artifacts are discovered from configured roots, excluding hidden directories,
+temporary files, and symlinks that resolve outside a configured root. Registry
+states are:
+
+- `compatible`: artifact and every runtime dependency are ready;
+- `historical_only`: virtual imported model identity whose predictions can be
+  browsed and aggregated but which has no runnable artifact;
+- `dependency_missing`: artifact recognized but base/tokenizer/runtime missing;
+- `resource_unavailable`: recognized but required device/resources unavailable;
+- `invalid`: expected artifact has a validation failure;
+- `unsupported`: no explicit supported recipe or custom manifest.
+
+Only `compatible` models can start inference. `historical_only` models remain
+selectable only for aggregating stored predictions. Loading is lazy and cached
+by model ID. The cache contains at most one large quantized model at a time and
+evicts an idle model before another is loaded. Eviction never deletes artifact
+files.
+
+Preflight checks disk readability, artifact checksum, expected tensors/config,
+base/tokenizer availability, device backend, and a conservative free-memory
+estimate. Failure produces a specific state without terminating historical
+browsing.
+
+## 11. API and frontend boundary
+
+FastAPI serves:
+
+- `/` and frontend routes with SPA fallback;
+- `/assets/*` immutable fingerprinted frontend assets;
+- `/api/v1/*` JSON and streaming CSV responses;
+- `/api/docs` Swagger UI using locally bundled assets;
+- `/api/openapi.json` OpenAPI 3.1;
+- `/health/live` process liveness;
+- `/health/ready` storage/index readiness.
+
+The frontend never parses CSV directly. It uses documented API resources. API
+responses never include unrestricted server paths; artifact paths are displayed
+as redacted basename plus configured root label.
+
+## 12. Network exposure and authentication
+
+Native loopback binding requires no login and CORS is disabled because UI and
+API are same-origin. The only no-key non-loopback process bind is the official
+container's internal `0.0.0.0:8000`, and only when
+`PRT_CONTAINER_LOOPBACK_ONLY=true`; the official Compose file simultaneously
+publishes that port on host `127.0.0.1` only. This flag is invalid for native
+execution—recognized by the absence of the image-baked read-only marker
+`/opt/publisher-reliability/.container-image`—and invalid together with an API
+key. Its name and startup warning make the trust boundary explicit because the
+process cannot inspect the container engine's host publishing rule.
+
+Every other non-loopback `--host` requires an API key of at least 32 random
+bytes. The API accepts it only as `Authorization: Bearer <key>`. The frontend
+prompts for the key and stores it in session memory only, never local storage or
+CSV.
+
+For non-loopback mode, allowed origins must be explicitly configured; wildcard
+CORS is rejected. TLS termination is outside the MVP, so documentation labels
+non-loopback HTTP as appropriate only for a trusted private network behind a
+user-managed secure proxy.
+
+## 13. Native and container deployment
+
+Native execution binds directly to `127.0.0.1`. The container listens on
+`0.0.0.0:8000` internally, while Compose publishes
+`127.0.0.1:8000:8000` and sets `PRT_CONTAINER_LOOPBACK_ONLY=true`. Compose
+mounts:
+
+- `./data:/data` read-write;
+- `./models:/models:ro`;
+- `./dataset:/app/dataset:ro`;
+- an optional Hugging Face cache read-write at `/cache/huggingface`.
+
+The image contains application and frontend assets, not model weights or base
+model caches. The service runs as a non-root UID/GID configurable to match the
+host. Compose declares one replica and never starts multiple workers.
+
+GPU execution is a separate Compose profile that requests NVIDIA devices. CPU
+and GPU profiles use the same image version and CSV directory but must not run
+simultaneously because the writer lock prevents it.
+
+## 14. Observability and privacy
+
+Structured JSON logs include timestamp, level, request ID, job ID, phase, error
+code, duration, and safe identifiers. They exclude article bodies, protected
+values, API keys, authorization headers, cookies, full upload paths, and model
+tensor contents. URLs are logged only at `debug`; normal logs use article ID and
+hostname.
+
+Logs rotate at 10 MiB with five retained files. Metrics are available only from
+the loopback endpoint `/api/v1/status`; no telemetry leaves the machine.
+
+## 15. Failure strategy
+
+| Failure | Required behavior |
 | --- | --- |
-| `publishers` | unique normalized domain, homepage URL, and optional display metadata |
-| `articles` | unique canonical URL, publisher domain, detected language, and optional title, text, and author metadata |
-| `models` | model ID, path, checksum, family, fold, loader-recipe version, base/tokenizer dependencies, compatibility status |
-| `prediction_runs` | status, timing, parameters, runtime, hardware, error |
-| `article_predictions` | canonical article URL, model, run, predicted class, five optional model probabilities |
-| `publisher_evaluations` | publisher, model, aggregation version, result, warnings |
-| `evaluation_articles` | exact predictions included in each publisher evaluation |
-| `imports` | source path/checksum, schema version, time, row counts, projected columns, warnings, errors |
+| Missing model | History remains usable; evaluation is blocked with setup guidance |
+| Missing base/tokenizer | Model is `dependency_missing`; no implicit download during inference |
+| Network unavailable | Local operations continue; network-dependent job returns `NETWORK_REQUIRED` or `NETWORK_TIMEOUT` |
+| Too few publisher articles | No aggregate unless partial is allowed and at least two succeed |
+| Mixed publishers | No publisher evaluation transaction commits |
+| Missing probabilities | Hard-class methods remain available; probability mean is disabled |
+| CSV tail interrupted | Recovery backs up and removes only the malformed uncommitted tail |
+| CSV checksum/schema failure | Readiness fails; no mutation or HTTP serving beyond liveness |
+| Process interruption | Running jobs become failed on restart; committed data remains visible |
+| Insufficient RAM/VRAM | Preflight fails the job before model load and preserves browsing |
+| Frontend build missing | Production readiness fails and the server does not bind |
 
-Imported and locally created records carry an origin flag, for example an
-import checksum or `local`, while remaining searchable through one interface.
-Reimporting an unchanged source is idempotent, and application updates must not
-erase the user's personal records.
+## 16. Architecture invariants
 
-### Protected-data boundary
-
-The bundled release has already been projected through the public allowlist.
-The user's private full experimental CSV may also be selected locally, but the
-importer must apply the same explicit allowlist before persistence.
-
-It must omit, before persistence:
-
-- original reference labels;
-- original reference scores;
-- metadata supplied by the reference rating provider;
-- any field whose redistribution status has not been approved.
-
-Import warnings may name a blocked column but must not log its values. Protected
-fields must not enter SQLite, caches, API responses, browser state, or exports.
-
-## 5. Request flow
-
-```mermaid
-flowchart TD
-    A["Prediction request"] --> B{"Exact cached result?"}
-    B -- Yes --> C["Return with provenance"]
-    B -- No --> D{"Compatible model available?"}
-    D -- No --> E["Explain missing model"]
-    D -- Yes --> F["Run local inference"]
-    F --> G["Store result or failure"]
-```
-
-The cache first resolves the canonical URL. A stored prediction is reusable
-when both canonical URL and selected model identity match. No text hash or page
-revision check is performed in the MVP.
-
-Before a multi-article job starts, all final canonical URLs must resolve to one
-normalized publisher domain. A mismatch is a validation error and no partial
-inference should begin.
-
-For a publisher homepage request, `newspaper3k` receives a user-chosen article
-count, discovers candidate URLs, validates that they belong to the same
-publisher domain, extracts their text, and then passes accepted articles
-through the normal cache/inference flow.
-
-Every newly extracted text is checked with `langdetect` before an inference job
-is created. Only `en` is accepted. The extracted text is sent unchanged to the
-model tokenizer; there is no separate text-cleaning stage. A rejected language
-result is stored only as diagnostic job metadata and never as a completed
-prediction.
-
-## 6. Startup and model availability
-
-Startup model discovery checks default model locations plus any command-line
-paths. Each candidate is classified as compatible, invalid, or unavailable.
-
-No-model startup is a supported state:
-
-- any imported history and personal database remain browsable;
-- the server starts normally;
-- the terminal prints the official OSF release URL, expected artifact layouts,
-  directory structure, and example command;
-- the frontend displays model status, the same setup guidance, and a clickable
-  OSF download link;
-- new evaluation controls are disabled or redirect to model setup.
-
-No-dataset startup is also supported: the application opens the existing
-personal database or an empty history and displays the CSV import instructions.
-
-The Models page always exposes the official release URL:
-
-<https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
-
-Recognized official filenames such as `bert_fold_1.pt` select a built-in
-family recipe. Mistral is recognized as an extracted PEFT fold directory by its
-adapter configuration, adapter weights, tokenizer files, and approved 24B base
-identity. The fold number is recorded, but no particular fold and no complete
-set of five folds is required. All four family recipes are derived from the
-supplied notebooks and remain subject to release-artifact compatibility tests.
-
-## 7. Model registration and security
-
-Custom Transformers artifacts are not automatically safe. Some model formats
-or loading options can execute Python code, and unsafe serialized files can
-execute code during deserialization.
-
-The MVP should therefore:
-
-- accept only explicitly trusted local model artifacts;
-- prefer `safetensors` weights;
-- load official plain PyTorch checkpoints as tensor-only `state_dict` data,
-  using `weights_only=True` where the supported PyTorch version provides it;
-- validate a Mistral PEFT directory's declared base model, LoRA configuration,
-  tokenizer files, and adapter weight format before loading it;
-- keep `trust_remote_code` disabled by default;
-- never download or execute model-supplied code implicitly;
-- validate paths and prevent path traversal outside approved model roots;
-- show exactly which base model, adapter, and revision will be loaded;
-- require explicit confirmation for any configuration that can execute custom
-  code.
-
-Registration through the browser should normally register a local path. Copying
-multi-gigabyte models into application storage should be an explicit separate
-operation.
-
-## 8. Network behavior
-
-- Default bind address: `127.0.0.1`.
-- No network access is required to browse imported history.
-- No article text is sent to a remote inference service.
-- No remote translation service is used; non-English articles are unsupported.
-- Outbound network access occurs only for an explicit article fetch, an
-  explicit model setup/download action, or retrieval of a required base
-  configuration/tokenizer that the user has approved.
-- Once base models, tokenizers, and dependencies are cached, inference can run
-  without network access.
-- A submitted URL is normalized and checked locally first. Only a local miss
-  may trigger redirects and canonical-page lookup, followed by a second local
-  history check.
-- Binding to another interface is outside the default local security model and
-  must display a warning; authentication would then be required.
-
-## 9. Technology direction
-
-The likely implementation direction is a Python backend because the existing
-models use the Transformers ecosystem. A local web framework and SQLite are
-appropriate candidates. The frontend technology should be chosen only after
-the required screens and deployment method are settled; a heavy client-side
-framework is not automatically necessary.
-
-The frontend uses a small set of reusable components: searchable tables,
-article-selection controls, status banners, model result cards, and accessible
-bar charts. Chart input comes from the same API response as the exact numeric
-table so visual and tabular values cannot diverge.
-
-Packaging options to evaluate after a vertical prototype:
-
-- Python package plus virtual environment;
-- `pipx`-installable command;
-- container image;
-- standalone application bundle.
-
-Containerization may simplify dependencies but can complicate GPU access and
-large local model mounts, so it should not be selected without a hardware test.
-
-## 10. Primary technical risks
-
-| Risk | Initial mitigation |
-| --- | --- |
-| A `.pt` checkpoint lacks tokenizer/configuration files | Use versioned built-in recipes and preflight the required local cache or approved download |
-| Released checkpoint keys differ from notebook assumptions | Strict key/shape compatibility test before model registration |
-| A released Mistral directory is incomplete or differs from `save_pretrained()` output | Validate its standard PEFT files/configuration and fail closed before loading the 24B base |
-| Mistral 24B cannot run on ordinary hardware | Preflight RAM/VRAM checks and document supported precision/quantization |
-| Historical rows are reused under the wrong model | Unique canonical-URL and model-identity prediction constraint |
-| Prediction-file import consumes excessive memory | Stream/chunk import and index in SQLite |
-| A protected source field enters the public database | Explicit allowlist, blocked-column test, and value-free error logging |
-| Browser freezes during inference | Background jobs and progress/status polling |
-| A custom model executes code | Trusted-local policy, safe formats, remote code disabled |
-| An article changes while retaining its URL | Accepted MVP limitation: the existing prediction is reused until an explicit refresh feature is added |
-| Publisher aggregation mixes incompatible predictions | Database constraints and explicit compatibility validation |
-| A multi-article request mixes publishers | Resolve all URLs and reject mixed normalized domains before inference |
-| Publisher crawling returns too few or irrelevant pages | Define discovery sources, article filters, ordering, and user-visible partial-result behavior |
-| No models are installed | Supported history-only state with synchronized terminal and frontend setup instructions |
-| Application update overwrites personal results | Keep import sources immutable and personal data in a separate persistent database |
-| Historical probabilities are missing for some models | Show `Not available`; disable probability aggregation without fabricating values |
-| Softmax values are interpreted as calibrated confidence | Label them as model probabilities and show a calibration warning |
-| `langdetect` rejects valid English articles | Expose the detected result and define/test failure behavior for short or ambiguous texts |
-| Minimal UI hides required capabilities | Keep five primary navigation items and place advanced detail within article/publisher pages |
+1. CSV is the only authoritative mutable persistence.
+2. One data directory has at most one writer process.
+3. Uncommitted transaction rows are never visible.
+4. UI and API share service and validation logic.
+5. A stored compatible prediction prevents article network access.
+6. A publisher evaluation references exact prediction records from one model.
+7. No protected reference field passes the import boundary.
+8. Offline mode creates no outbound application connection.
+9. Container and native modes produce byte-compatible CSV state.
+10. Every externally observable behavior is covered by an acceptance test.

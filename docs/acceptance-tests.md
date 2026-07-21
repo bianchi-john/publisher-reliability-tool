@@ -1,404 +1,540 @@
-# Acceptance Tests
+# MVP Acceptance Tests
 
-**Status:** Initial executable-behavior checklist for the MVP. These tests are
-technology-independent and should later be automated.
+**Status:** Normative release gate
 
-## AT-001 - Local startup
+Every test is automated unless marked as a hardware-specific matrix test. The
+MVP is releasable only when native Ubuntu 24.04 and Docker Compose CPU runs pass
+the complete applicable suite. Tests inspect observable behavior and CSV state,
+not private implementation methods.
 
-**Given** a valid data directory and no model paths,
-**when** the user starts the application,
-**then** the server binds to `127.0.0.1`, prints its URL, and allows historical
-browsing without requiring a model or GPU; the terminal explains where and how
-to add compatible models.
+## A. Startup and deployment
 
-## AT-002 - Historical import is repeatable
+### AT-001 — Native startup
 
-**Given** a user-selected schema-compatible CSV has already been imported,
-**when** the application starts again with the same file checksum,
-**then** it does not duplicate articles or predictions and does not modify the
-source file.
+**Given** a clean supported Ubuntu environment and installed locked package,
+**when** `publisher-reliability serve` starts, **then** readiness succeeds, the
+terminal prints UI/API/docs URLs, and `127.0.0.1:8000` serves all three.
 
-## AT-003 - Historical prediction display
+### AT-002 — Compose startup
 
-**Given** an imported article identifier with predictions from several model
-families,
-**when** the user opens it,
-**then** each model's predicted class and fold are displayed and no original
-reference label or score is present.
+**Given** the committed image and Compose file, **when** `docker compose up`
+starts, **then** the UI is reachable only through host
+`127.0.0.1:${PRT_PORT}`, readiness passes, and the container runs non-root.
 
-## AT-004 - Exact prediction reuse
+### AT-003 — Native/container state compatibility
 
-**Given** a stored prediction with the same canonical article URL and selected
-model identity,
-**when** the user requests that article prediction again,
-**then** the application returns the existing result without running inference
-and labels the result as reused.
+**Given** state created natively while stopped, **when** the same data directory
+is mounted into the same application version in Compose, **then** storage
+verification passes and API resources are identical except deployment metadata.
 
-## AT-005 - URL normalization
+### AT-004 — Graceful shutdown
 
-**Given** a stored canonical article URL and a submitted URL that resolves to it
-after redirects, canonical-page lookup, or removal of navigation parameters,
-**when** the user requests a prediction,
-**then** the application recognizes the existing article and does not create a
-duplicate record.
+**Given** queued and running jobs, **when** the process receives `SIGTERM`,
+**then** it rejects new jobs, reaches a safe boundary within 30 seconds, flushes
+CSV, marks unfinished jobs interrupted on restart, and exits without committed
+record loss.
 
-## AT-006 - Different models are not interchangeable
+### AT-005 — Port conflict
 
-**Given** a BERT prediction exists for an article,
-**when** the user requests a RoBERTa prediction,
-**then** the BERT result does not satisfy the request and RoBERTa inference runs
-if a compatible RoBERTa model is available.
+**Given** the configured port is occupied, **when** startup runs, **then** it
+exits nonzero with one actionable message and does not modify CSV state.
 
-## AT-007 - Missing model
+### AT-006 — Missing models
 
-**Given** no compatible model is registered,
-**when** the user requests a new prediction,
-**then** no result is fabricated and the interface explains which model
-requirements are missing, links to the frontend model-setup instructions, and
-shows the official OSF model-release URL.
+**Given** no compatible artifact, **when** startup completes, **then** browsing
+works, model status and the OSF link are visible in terminal/UI, and evaluation
+requiring inference returns `MODEL_NOT_FOUND` or a dependency-specific code.
 
-## AT-008 - Invalid custom model
+### AT-007 — Missing seed dataset
 
-**Given** an unrecognized checkpoint has no explicit supported family or
-manifest, has an ambiguous predicted-class mapping, or requires executable
-custom code,
-**when** the user registers it,
-**then** registration fails safely with specific validation errors and no model
-code is executed implicitly.
+**Given** no seed dataset and an empty valid CSV store, **when** startup runs,
+**then** it serves an empty history and import instructions rather than failing.
 
-## AT-009 - Successful local inference
+### AT-008 — Invalid configuration
 
-**Given** a compatible registered model and a valid article,
-**when** the user starts inference,
-**then** the UI remains responsive, the completed prediction is stored, and its
-canonical URL, model, extraction/tokenizer settings, timing, and origin are
-inspectable.
+**Given** an unknown option, invalid port, malformed boolean, or unwritable data
+directory, **when** startup runs, **then** it exits code `2` before binding HTTP.
 
-## AT-010 - Failed inference
+## B. CSV storage
 
-**Given** inference fails because of insufficient memory or another runtime
-error,
-**when** the job ends,
-**then** the failure and actionable error are recorded, no completed prediction
-is created, and the application remains usable.
+### AT-009 — CSV-only authoritative state
 
-## AT-011 - Publisher majority vote
+**Given** a completed workflow, **when** the data directory is audited, **then**
+all authoritative records exist in documented CSV ledgers and no SQLite,
+database, browser-storage, or opaque persistent index file is required to
+reconstruct the API state.
 
-**Given** one publisher has ten compatible predictions from the selected model,
-six in `Class 4` and four in `Class 3`,
-**when** the user creates a publisher evaluation,
-**then** the result is `Class 4` and the exact ten predictions are linked to the
-stored evaluation.
+### AT-010 — Exact headers and physical format
 
-## AT-012 - No silent model mixing
+**Given** a fresh store, **when** every ledger is parsed, **then** it is UTF-8,
+has the exact version-1 header, uses valid CSV quoting for embedded article
+newlines, and every field passes its documented type rule.
 
-**Given** a publisher has predictions from two incompatible model artifacts,
-**when** the user requests a single-model publisher evaluation,
-**then** only predictions matching the selected model are included and excluded
-predictions are reported.
+### AT-011 — Single writer lock
 
-## AT-013 - Unresolved aggregation policy
+**Given** one running process owns a data directory, **when** a second native or
+container process starts against it, **then** the second fails with
+`STORAGE_LOCKED` and neither process corrupts state.
 
-**Given** majority voting results in a tie or the article count is below the
-eventual minimum,
-**when** no approved policy resolves that condition,
-**then** the tool reports the evaluation as unresolved rather than choosing a
-class implicitly.
+### AT-012 — Transaction visibility
 
-## AT-014 - Persistence
+**Given** entity rows whose transaction lacks a `COMMITTED` event, **when** the
+store is loaded, **then** none of those rows appear in indexes or API responses.
 
-**Given** a new prediction and publisher evaluation have completed,
-**when** the application is stopped and restarted,
-**then** both results and their complete provenance remain available.
+### AT-013 — Interrupted append recovery
 
-## AT-015 - Local privacy boundary
+**Given** a final malformed physical row belonging to an uncommitted
+transaction, **when** startup recovery runs, **then** it creates a backup,
+removes only the malformed tail, records the abort/warning, and passes verify.
 
-**Given** the user requests inference for supplied article text,
-**when** the model runs,
-**then** no article content is transmitted over the network and any network
-attempt outside an explicit fetch/download operation is treated as a defect.
+### AT-014 — Committed corruption fails closed
 
-## AT-016 - Protected columns are blocked
+**Given** a malformed committed middle row or broken committed foreign key,
+**when** startup runs, **then** readiness fails with `STORAGE_CORRUPT` and no
+automatic guessed repair occurs.
 
-**Given** an import file contains an original reference label, score, or another
-blocked provider field,
-**when** the user attempts to import it,
-**then** the application removes the blocked columns before any persistence,
-reports only the column names, and never logs their values.
+### AT-015 — Record version semantics
 
-## AT-017 - Exports contain model outputs only
+**Given** several committed versions and a final delete for one ID, **when**
+current state is read, **then** the highest committed version governs and a
+latest `DELETE` makes the record absent.
 
-**Given** historical and newly computed predictions are available,
-**when** the user exports results,
-**then** the export contains predicted classes, permitted probabilities,
-provenance, and only approved identifiers or metadata; it contains no original
-reference label, score, or protected provider field.
+### AT-016 — Multi-ledger evaluation commit
 
-## AT-018 - Historical grouping uses URL and domain
+**Given** a publisher evaluation, **when** its transaction commits, **then** the
+evaluation, exact contiguous evaluation-article rows, and job success become
+visible together; no partial combination is ever visible.
 
-**Given** imported prediction records contain canonical `url` and normalized
-`domain` values,
-**when** the user opens a historical publisher evaluation,
-**then** the tool groups article predictions by `domain` and links each record
-to its canonical article URL.
+### AT-017 — Compaction equivalence
 
-## AT-019 - Existing URL is not rechecked for changes
+**Given** a valid stopped store with old versions and aborted rows, **when**
+`storage compact` completes, **then** an independent verify passes and every
+current API resource and scientific value matches the pre-compaction snapshot.
 
-**Given** a canonical article URL already has a stored prediction for the
-selected model,
-**when** the user requests it again,
-**then** the application returns the stored output without refetching the page,
-hashing the text, or checking whether the article has changed.
+### AT-018 — Restart persistence
 
-## AT-020 - Duplicate URL import
+**Given** locally inferred predictions and evaluations, **when** the application
+is stopped and restarted, **then** every committed record remains searchable and
+the seed import is not duplicated.
 
-**Given** two imported rows resolve to the same canonical URL,
-**when** their model outputs agree,
-**then** they are associated with one article; if outputs for the same model
-conflict, the importer reports the conflict instead of choosing silently.
+## C. Public dataset and imports
 
-## AT-021 - Startup model discovery
+### AT-019 — Bundled release verification
 
-**Given** default model directories and command-line paths contain a mixture of
-compatible `.pt` checkpoints, Mistral PEFT directories, invalid artifacts, and
-missing paths,
-**when** the application starts,
-**then** the terminal lists each candidate's status and the frontend model page
-shows the same usable-model inventory.
+**Given** `dataset/predictions/manifest.json`, **when** verification runs,
+**then** four listed parts match sizes and SHA-256, no part exceeds 24 MiB, and
+the result reports 19,476 source rows, 19,429 released unique URLs, 42 duplicate
+source groups, and 47 skipped later occurrences.
 
-## AT-022 - Several articles from one publisher
+### AT-020 — Protected source data absent
 
-**Given** several submitted article URLs resolve to the same normalized domain,
-**when** the user confirms the evaluation,
-**then** compatible cached predictions are reused, missing predictions are
-computed, the selected aggregation is applied, and all results are saved.
+**Given** every bundled part, local ledger, API response, UI payload, export,
+log, and reachable Git object, **when** the protected-data audit runs, **then**
+bundled and runtime CSV headers contain no protected source columns and no
+original label, score, range, or reference-provider metadata value is present.
+Blocked column names may appear only in documentation, manifest exclusion
+metadata, and value-free warnings.
 
-## AT-023 - Mixed publishers are rejected
+### AT-021 — Seed import idempotency
 
-**Given** submitted article URLs resolve to two or more normalized domains,
-**when** the user requests one evaluation,
-**then** the application shows the conflicting domains, starts no inference
-job, and stores no partial publisher evaluation.
+**Given** the bundled release was imported, **when** startup repeats, **then**
+the first import yields exactly 19,411 canonical articles, 77,708 unique
+predictions, and 20 historical virtual models; the same checksum/schema then
+resolves to the existing import and those counts do not change.
 
-## AT-024 - Publisher URL requests an article count
+### AT-022 — Streaming large import
 
-**Given** the user submits one publisher homepage URL,
-**when** the input is recognized as a publisher,
-**then** the frontend asks for the number of articles, discovers up to that
-number from the normalized domain, and shows the actual count before inference.
+**Given** a schema-compatible source larger than available browser memory,
+**when** it is uploaded/imported, **then** backend memory remains bounded, the UI
+shows job progress, and the browser never loads the complete file.
 
-## AT-025 - Import source and personal results remain separate
+### AT-023 — Protected user-import projection
 
-**Given** a user-selected CSV has been imported and a new local
-evaluation completes,
-**when** the application is restarted or upgraded,
-**then** the source CSV remains unchanged and the new articles, predictions,
-and evaluation remain in the user's personal database.
+**Given** a private source containing allowed fields and blocked provider
+columns, **when** import completes, **then** allowed records persist, blocked
+column names appear in a value-free warning, and blocked values appear nowhere.
 
-## AT-026 - Aggregation method is explicit
+### AT-024 — User-import conflict
 
-**Given** more than one aggregation method is offered,
-**when** a publisher evaluation is created,
-**then** the interface names the exact method and the stored result records its
-formula/version; an undefined generic "average" option is never executed.
+**Given** two user rows resolve to one canonical URL with conflicting content
+or predictions, **when** import runs, **then** the conflict is counted and
+rejected; the runtime does not apply the bundled first-occurrence policy. Its
+source line and `IMPORT_CONFLICT` code remain queryable after restart without
+persisting either conflicting body.
 
-## AT-027 - Publisher and article histories
+### AT-025 — Import source immutability
 
-**Given** imported and local evaluations exist,
-**when** the user opens the Publishers or Articles page,
-**then** the frontend lists and filters the combined history, identifies each
-record's origin, and links to its detail page.
+**Given** a source path, **when** import succeeds or fails, **then** its bytes and
+mtime are unchanged and its SHA-256 is recorded.
 
-## AT-028 - Evaluate selected historical articles
+### AT-026 — Archive safety
 
-**Given** a publisher detail page contains several stored articles,
-**when** the user selects a subset, chooses a model and aggregation method, and
-starts evaluation,
-**then** only that publisher's selected articles are used and the new result is
-stored and shown on the publisher page.
+**Given** a ZIP with multiple CSVs, path traversal, symlink, unsupported member,
+or decompressed-size limit violation, **when** import/upload runs, **then** it
+fails safely without writing outside upload storage or committing data.
 
-## AT-029 - Five-class probability display
+## D. API contract
 
-**Given** a prediction contains a valid five-class probability vector,
-**when** the user opens its article detail,
-**then** all five exact values appear as percentages in a table and matching bar
-chart alongside the predicted class.
+### AT-027 — OpenAPI completeness
 
-## AT-030 - Missing probabilities
+**Given** the running application, **when** `/api/openapi.json` is compared with
+the approved snapshot, **then** every documented route, schema, response, and
+error envelope matches and no undocumented mutation route exists.
 
-**Given** a historical prediction has only a hard predicted class,
-**when** the user opens it,
-**then** the frontend shows `Not available`, renders no fabricated probability
-chart, and disables mean-probability aggregation for any set containing it.
+### AT-028 — API/UI shared behavior
 
-## AT-031 - Multiple aggregation methods
+**Given** equivalent valid and invalid evaluation inputs, **when** submitted by
+API and frontend, **then** they create the same normalized job request or the
+same stable validation/error code.
 
-**Given** a same-publisher article set has all required model outputs,
-**when** the user opens aggregation options,
-**then** Majority vote and Ordinal class mean are available, Mean class
-probabilities is available only with complete vectors, and the selected method
-is recorded with the result.
+### AT-029 — Pagination stability
 
-## AT-032 - English software interface
+**Given** a multi-page article query, **when** new articles commit between page
+requests, **then** cursor traversal has no duplicate item, respects its stable
+sort boundary, and a cursor with changed filters returns `INVALID_CURSOR`.
 
-**Given** any supported terminal or browser workflow,
-**when** labels, instructions, validation errors, charts, or generated exports
-are presented,
-**then** all user-visible software text is in English.
+### AT-030 — Bounded page sizes
 
-## AT-033 - English-only article inference
+**Given** list requests with absent, allowed, or excessive limits, **when** they
+run, **then** default is 25, allowed values are 25/50/100, and others return
+`422`.
 
-**Given** a manually submitted article is detected as non-English,
-**when** evaluation is requested,
-**then** inference does not start and an English validation message explains
-that only English articles are supported.
+### AT-031 — Idempotency key
 
-## AT-034 - Non-English publisher candidates
+**Given** a mutation request and key, **when** the same body/key is repeated,
+**then** it returns the original job/resource; a different body with that key
+returns `IDEMPOTENCY_CONFLICT`.
 
-**Given** publisher discovery finds both English and non-English articles,
-**when** the requested article set is built,
-**then** non-English candidates are excluded and the frontend reports requested,
-discovered, excluded, and accepted counts.
+### AT-032 — Error privacy
 
-## AT-035 - Charts retain exact accessible values
+**Given** validation, network, model, and internal failures, **when** API errors
+and logs are inspected, **then** API keys, authorization headers, article bodies,
+protected values, unrestricted paths, and production stack traces are absent.
 
-**Given** any probability, distribution, aggregation, or comparison chart,
-**when** it is displayed,
-**then** the same exact values are available in a table and no information is
-communicated by color alone.
+### AT-033 — SSE job events
 
-## AT-036 - Minimal navigation remains complete
+**Given** a running job, **when** a client subscribes, disconnects, and resumes
+with `Last-Event-ID`, **then** it receives ordered snapshots/progress/terminal
+events without duplicating or cancelling the job.
 
-**Given** the user opens the frontend,
-**when** navigating Dashboard, Publishers, Articles, Evaluate, and Models,
-**then** every required browsing, model-setup, input, evaluation, and result
-workflow is reachable without additional top-level navigation items.
+### AT-034 — CSV export
 
-## AT-037 - Startup without a dataset
+**Given** filters returning more than one page, **when** export runs, **then** it
+streams the complete filtered set as valid CSV; article text is absent unless
+`include_text=true`, and protected fields are always absent.
 
-**Given** no CSV path is supplied and no prior personal database exists,
-**when** the application starts,
-**then** it opens an empty history, does not fail, and explains CSV import in
-both the terminal and frontend.
+## E. Local identity and offline behavior
 
-## AT-038 - Dataset size is not part of the schema
+### AT-035 — Offline URL hit
 
-**Given** a small sample and a much larger CSV share the supported columns,
-**when** either is imported,
-**then** both follow the same validation rules, import incrementally, and do not
-require the entire file or result set to be loaded into browser memory.
+**Given** a stored prediction for normalized URL and exact model ID, **when** a
+tracking-parameter variant is evaluated, **then** it returns the stored output,
+records origin `reused`, and makes zero DNS/HTTP calls.
 
-## AT-039 - Tracked sample is safe and structural
+### AT-036 — Stored-text offline inference
 
-**Given** the repository is scanned,
-**when** `dataset/sampleDataset.csv` is inspected,
-**then** it contains only synthetic article data and permitted model outputs,
-contains no protected label, score, or provider metadata, and documents every
-supported wide-format prediction field.
+**Given** a stored English article with valid text but no prediction for a
+compatible local model, **when** evaluated with outbound networking blocked,
+**then** inference succeeds from stored text and records `network_used=false`.
 
-## AT-040 - Recognized BERT fold checkpoint
+### AT-037 — Missing local content offline
 
-**Given** a trusted `bert_fold_N.pt` produced by the supplied notebook,
-**when** it is registered,
-**then** the tool reconstructs `bert-base-uncased` with five labels, uses
-256-token truncation and fixed padding, loads the tensor-only `state_dict`, and
-records `N` as part of model identity.
+**Given** an unknown article or insufficient stored text and strict offline
+mode, **when** evaluation runs, **then** the job fails `NETWORK_REQUIRED`, makes
+zero outbound calls, and browsing remains usable.
 
-## AT-041 - Fold choice is user-controlled
+### AT-038 — Offline frontend
 
-**Given** only one otherwise compatible released fold checkpoint is present,
-**when** startup model discovery runs,
-**then** that fold is registered without requiring fold 1 or all five folds and
-is never silently presented as an ensemble.
+**Given** all external network requests blocked, **when** every frontend route,
+chart, and API documentation page is opened, **then** assets load locally and no
+CDN, font, analytics, or documentation request leaves the origin.
 
-## AT-042 - Missing base or tokenizer dependency
+### AT-039 — Canonical redirect hit
 
-**Given** a recognized `.pt` or PEFT adapter directory exists but its required
-base configuration, base weights, or tokenizer is not cached and cannot be
-downloaded,
-**when** model validation runs,
-**then** registration remains unavailable and the terminal and frontend name
-the exact missing dependency and how to provide it.
+**Given** offline lookup misses but online redirect/canonical resolution reaches
+a stored URL, **when** evaluated, **then** the second lookup reuses stored output
+and does not download/compare article text after the hit.
 
-## AT-043 - Five-class softmax output
+### AT-040 — URL normalization boundaries
 
-**Given** a compatible built-in model produces five logits,
-**when** inference succeeds,
-**then** the stored predicted class is an integer in `0..4`, exactly five finite
-softmax probabilities are stored in index order, and they sum to `1` within the
-declared tolerance.
+**Given** fragments, default ports, `utm_*`, `fbclid`, `homepagePosition`, path
+case, trailing slashes, and semantic query parameters, **when** normalized,
+**then** the exact `urllib.parse` algorithm is reproducible, only documented
+tracking/default components change, duplicate query pairs survive, and semantic
+components remain identity-significant.
 
-## AT-044 - Article extraction has no cleaning stage
+### AT-041 — Publisher hostname identity
 
-**Given** `newspaper3k` successfully extracts English article text,
-**when** a new prediction is run,
-**then** `langdetect` returns `en` and the exact extracted text is passed to the
-model tokenizer without lowercasing, stemming, lemmatization, or other text
-cleaning by the application.
+**Given** `www.example.com`, `example.com`, and `news.example.com`, **when**
+normalized, **then** the first two share publisher identity and the third is a
+different publisher.
 
-## AT-045 - Released Mistral fold registration
+## F. Retrieval and language validation
 
-**Given** an extracted released Mistral `fold_N/` directory with its standard
-PEFT adapter configuration and weights plus saved tokenizer files,
-**when** registration is attempted on compatible hardware,
-**then** the tool validates `mistralai/Mistral-Small-24B-Base-2501`, five output
-classes, 4-bit NF4 with double quantization and `bfloat16`, LoRA `r=16` and
-alpha `32` targeting `q_proj`, `k_proj`, `v_proj`, and `o_proj`, a 1,024-token
-limit, dynamic padding to a multiple of 8, and records `N` as the fold.
+### AT-042 — Safe article retrieval
 
-## AT-046 - Invalid Mistral directory fails closed
+**Given** a public HTML article, **when** retrieval runs, **then** redirect,
+timeout, response-size, MIME, robots, rate, and user-agent policies are enforced
+and exact extracted text is passed unchanged to validation/tokenization.
 
-**Given** a selected Mistral directory is missing adapter weights or tokenizer
-files, declares another base model, or has an incompatible PEFT recipe,
-**when** registration is attempted,
-**then** the artifact remains unavailable, the exact mismatch is reported, and
-the application does not guess, execute remote code, or start loading the 24B
-base model.
+### AT-043 — SSRF defense
 
-## AT-047 - Official model download guidance
+**Given** direct or redirected URLs resolving to private, loopback, link-local,
+reserved, multicast, or unspecified addresses, **when** requested, **then** the
+job fails before connection and no request reaches that address.
 
-**Given** the application starts with or without registered models,
-**when** terminal status or the Models page is shown,
-**then** it exposes the exact URL
-`https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74`;
-the no-model state also explains how to download, extract when needed, place,
-and register a released artifact.
+### AT-044 — Extraction failures
 
-## AT-048 - Mistral hardware preflight
+**Given** unsupported MIME, body above 10 MiB, parser failure, or empty text,
+**when** evaluated, **then** the stable corresponding error is reported and no
+prediction commits.
 
-**Given** a valid Mistral fold but no compatible CUDA/quantization runtime or
-insufficient available resources,
-**when** the user selects it for inference,
-**then** preflight stops before model loading, reports the missing requirement
-without creating a prediction, and leaves historical browsing usable.
+### AT-045 — Short-text rule
 
-## AT-049 - Repository history contains no protected reference material
+**Given** extracted text below 200 characters or below 30 whitespace tokens,
+**when** validated, **then** it fails `TEXT_TOO_SHORT` before language detection
+or inference.
 
-**Given** a release archive or Git clone of this repository,
-**when** all reachable commits, tags, tracked paths, and retained Git objects
-are audited,
-**then** no private source CSV, original reference value, protected provider
-metadata, training notebook output, or model weight is recoverable; real rows
-may appear only in the generated public release and contain exactly its
-allowlisted article fields and model outputs.
+### AT-046 — Deterministic English validation
 
-## AT-050 - Bundled sharded release is complete
+**Given** a frozen valid English fixture, **when** detection repeats across
+native and container runs with seed zero, **then** result is `en`; non-English
+and detector exceptions return their exact codes and never reach inference.
 
-**Given** `dataset/predictions/manifest.json` and its listed CSV parts,
-**when** release verification runs,
-**then** every part matches its declared size and SHA-256, no part exceeds the
-configured limit, all headers match the public schema, article identifiers are
-contiguous, and the manifest reports 19,476 source rows, 19,429 released rows,
-42 duplicated source-URL groups, and 47 skipped later occurrences, with no
-protected column in any released part.
+### AT-047 — Publisher candidate filtering
 
-## Scientific reference tests still required
+**Given** publisher discovery containing duplicates, other hosts, non-HTML,
+short, non-English, and valid articles, **when** processed, **then** only valid
+same-host unique articles count and every rejection category is reported.
 
-The following tests cannot be completed until one released artifact per family
-and an approved frozen text fixture are available:
+## G. Evaluation workflows
 
-- reference predictions for a fixed article sample from every model family;
-- probability tolerance checks for every supported loader;
-- fold/checkpoint compatibility checks;
-- reproduction of publisher majority-vote results for selected domains;
-- resource checks for CPU, CUDA, precision, and adapter configurations.
+### AT-048 — Single article
+
+**Given** a valid article and compatible model, **when** single evaluation
+completes, **then** one article prediction with five probabilities commits and
+no publisher evaluation is created.
+
+### AT-049 — Explicit same-publisher list
+
+**Given** 2–50 distinct same-publisher URLs, **when** all succeed, **then** one
+evaluation commits with exactly the ordered predictions and selected method.
+
+### AT-050 — Duplicate list input
+
+**Given** submitted URLs that become duplicates after normalization, **when**
+validation runs, **then** `DUPLICATE_URL_INPUT` occurs before job creation.
+
+### AT-051 — Mixed publishers
+
+**Given** an explicit list whose canonical URLs contain two publisher
+hostnames, **when** processed, **then** the job fails `MIXED_PUBLISHERS`, no
+evaluation commits, and already committed individual predictions remain clearly
+reported as article outputs only.
+
+### AT-052 — Stored-only publisher request
+
+**Given** enough eligible stored articles, **when** a `stored_only` publisher
+request runs with the network blocked, **then** it uses deterministic stored
+ordering, makes zero network calls, and commits requested count predictions.
+
+### AT-053 — Stored-first publisher request
+
+**Given** fewer eligible stored articles than requested and network access,
+**when** `stored_first` runs, **then** stored candidates are used first and only
+the missing count is sought from normalized web candidates.
+
+### AT-054 — Web-only publisher request
+
+**Given** stored history and network access, **when** `web_only` runs, **then**
+stored articles are not selected as candidates unless independently rediscovered
+as web candidates; exact final URLs remain eligible for cache reuse.
+
+### AT-055 — Partial publisher success
+
+**Given** requested 10 and exactly 6 successful compatible predictions, **when**
+`allow_partial=true`, **then** evaluation succeeds with `partial=true`, requested
+10, used 6, warning/counters, and exact six contributing predictions.
+
+### AT-056 — Partial publisher rejection
+
+**Given** requested 10 and exactly 6 successes, **when**
+`allow_partial=false`, **then** the job fails `REQUESTED_COUNT_UNMET` and no
+publisher evaluation commits.
+
+### AT-057 — Insufficient publisher articles
+
+**Given** fewer than two successful predictions, **when** any publisher
+aggregation is requested, **then** it fails `INSUFFICIENT_ARTICLES` regardless
+of `allow_partial`.
+
+### AT-058 — Stored selection
+
+**Given** 2–50 selected articles on one publisher page, **when** evaluated,
+**then** no discovery occurs and only the selected article IDs can contribute.
+
+## H. Aggregation
+
+### AT-059 — Paper majority vote
+
+**Given** hard classes `[0, 1, 1, 3]`, **when** `majority_vote` version 1 runs,
+**then** result is `Class 1` and counts are stored.
+
+### AT-060 — Majority tie
+
+**Given** hard classes `[1, 3]`, **when** `majority_vote` runs, **then** the tied
+smallest class `1` is selected, matching `pandas.Series.mode()[0]`.
+
+### AT-061 — Ordinal mean and rounding
+
+**Given** hard classes `[0, 1, 4]`, **when** `ordinal_mean` runs, **then** raw
+mean `1.666666...` is stored, UI displays `1.667`, and result class is `2` using
+`floor(mean + 0.5)`.
+
+### AT-062 — Mean probabilities
+
+**Given** complete valid vectors, **when** `mean_probabilities` runs, **then**
+each stored component is its arithmetic mean and result is the smallest maximum
+component index.
+
+### AT-063 — Missing probabilities
+
+**Given** one included prediction without probabilities, **when** availability
+is requested, **then** hard-class methods are enabled,
+`mean_probabilities` is disabled with `PROBABILITIES_REQUIRED`, and no vector is
+fabricated.
+
+### AT-064 — Exact model compatibility
+
+**Given** predictions from different folds, artifact checksums, recipes, or
+tokenizer revisions, **when** aggregation is requested, **then** they cannot be
+combined into one evaluation.
+
+### AT-065 — Historical virtual model
+
+**Given** bundled predictions for a historical virtual family/fold, **when**
+aggregated, **then** aggregation succeeds; when a missing prediction is requested
+from that virtual model, inference fails because it is not runnable. Publisher
+`stored_first` and `web_only` requests with that model are rejected before any
+network access.
+
+## I. Models
+
+### AT-066 — Official BERT/RoBERTa registration
+
+**Given** an official `.pt` fold and available base/tokenizer, **when** validated,
+**then** strict tensor keys/shapes and frozen reference outputs pass before the
+model becomes `compatible`.
+
+### AT-067 — Official Llama registration
+
+**Given** the released fold and authorized cached base, **when** validated,
+**then** the exact 4-bit/LoRA/tokenizer recipe and reference fixture pass or the
+model remains non-compatible with a specific reason.
+
+### AT-068 — Official Mistral registration
+
+**Given** a released PEFT fold directory, **when** validated, **then** declared
+24B base identity, adapter config, tokenizer, class count, 1,024-token policy,
+and reference output pass before compatibility.
+
+### AT-069 — Missing model dependency
+
+**Given** a recognized artifact without base/tokenizer/runtime, **when** scanned,
+**then** it becomes `dependency_missing`, setup instructions identify the
+missing dependency, and no implicit inference download starts.
+
+### AT-070 — Insufficient resources
+
+**Given** a valid model without required device or measured memory, **when**
+preflight runs, **then** status/job is `resource_unavailable` or
+`MODEL_RESOURCE_INSUFFICIENT` before model loading and browsing remains usable.
+
+### AT-071 — Untrusted or ambiguous artifact
+
+**Given** an unrecognized checkpoint or mismatching manifest, **when**
+registered, **then** it is rejected without executing embedded code or guessing
+architecture/class order.
+
+### AT-072 — Model upload safety
+
+**Given** a streamed valid artifact and sufficient disk, **when** upload and
+validation complete, **then** checksum matches and it moves atomically into
+managed storage; traversal, link, oversize, and failed artifacts leave no
+registered model.
+
+## J. Frontend, security, and privacy
+
+### AT-073 — Minimal navigation
+
+**Given** the frontend, **when** keyboard navigation visits Dashboard, Evaluate,
+Articles, Publishers, Imports, Models, and Jobs, **then** every required
+capability is reachable, focus is visible, and no icon-only required action
+exists.
+
+### AT-074 — State presentation
+
+**Given** loading, empty, offline, no-model, partial, error, and active-job
+states, **when** each is rendered, **then** it has explicit English text and an
+appropriate corrective or next action.
+
+### AT-075 — Accessible charts
+
+**Given** every probability/distribution/aggregation chart, **when** inspected
+without color or canvas access, **then** an adjacent semantic table and text
+summary convey the exact same API values.
+
+### AT-076 — Loopback security
+
+**Given** default native and Compose configuration, **when** sockets and CORS
+are inspected, **then** host exposure is loopback-only, wildcard CORS is absent,
+and no authentication is requested locally.
+
+### AT-077 — Non-loopback safety
+
+**Given** a non-loopback host without an API key, **when** startup runs, **then**
+it fails unless it is the exact documented container flag combination. The flag
+is rejected natively. With a valid key and explicit origins, protected API
+calls require the Bearer key and wildcard origin remains rejected.
+
+### AT-078 — No telemetry or external assets
+
+**Given** normal UI/API/model/history use, **when** all network destinations are
+captured, **then** no analytics, telemetry, remote font, CDN, or hosted inference
+request occurs.
+
+### AT-079 — Scientific warnings
+
+**Given** article and publisher results, **when** detail pages/API resources are
+read, **then** they identify model output—not fact checking—probability
+calibration limits, exact model/fold, selected articles, and aggregation method.
+
+## K. Performance and release integrity
+
+### AT-080 — Bounded query latency
+
+**Given** 100,000 articles and 400,000 predictions with startup indexes already
+built on Ubuntu 24.04, four x86-64 CPU cores, 16 GiB RAM, and local SSD storage,
+**when** 20 sequential filtered first-page requests run after one warm-up,
+**then** p95 server time is at most 2 seconds and article bodies are not scanned.
+
+### AT-081 — Repository integrity
+
+**Given** every reachable branch, tag, commit, and Git object, **when** audited,
+**then** no private full source, model weight, training notebook, protected
+reference field/value, credential, or local data directory is present, and
+`LICENSE` plus `MODEL-OUTPUT-LICENSE.md` exist without claiming rights over
+third-party article text.
+
+### AT-082 — Native/Compose scientific equivalence
+
+**Given** identical frozen text, exact model artifact, recipe, and device class,
+**when** native and container inference run, **then** class matches and each
+probability is within the loader fixture tolerance.
+
+### AT-083 — Full offline smoke test
+
+**Given** strict offline mode, bundled history, and one fully cached compatible
+model, **when** a user browses history, aggregates stored predictions, and runs
+stored-text inference, **then** all succeed and captured outbound connection
+count is zero.

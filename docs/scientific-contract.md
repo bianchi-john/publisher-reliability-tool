@@ -1,9 +1,8 @@
 # Scientific and Data Contract
 
-**Status:** Updated from the supplied dataset summary and training notebooks.
-BERT, RoBERTa, Llama, and Mistral now have notebook-derived loading recipes;
-each recipe still requires a reference test against a downloaded release
-artifact before implementation is declared scientifically compatible.
+**Status:** Normative MVP scientific contract derived from the supplied dataset,
+paper, and training notebooks. A loader is selectable only after its automated
+reference fixture passes the reproducibility gate in Section 12.
 
 ## 1. Protected-data boundary
 
@@ -12,7 +11,7 @@ distribute, reproduce, or persist the protected reference data used to train
 and evaluate the models.
 
 The following are excluded from the Git repository, tracked sample, application
-database, logs, API responses, UI, and exports:
+CSV database, logs, API responses, UI, and exports:
 
 - original reference labels;
 - original numeric reference scores or ranges;
@@ -67,7 +66,7 @@ The current wide-format schema is:
 | `authors` | No | Locally supplied or extracted author display value |
 | `domain` | Yes | Normalized publisher domain and publisher identity |
 | `<family>_predicted_label` | Yes for each represented family | Predicted integer in `0..4` |
-| `<family>_fold_id` | Yes for each represented family | Fold integer, normally `1..5` |
+| `<family>_fold_id` | Yes for each represented family | Fold integer in `1..5` |
 | `<family>_prob_class_0` ... `<family>_prob_class_4` | No | Complete probability vector when released |
 
 The recognized family prefixes are `bert`, `roberta`, `llama`, and `mistral`.
@@ -75,16 +74,47 @@ A family may be absent from an input file. A represented family must at least
 provide its predicted-label and fold columns. Probability columns are accepted
 only as a complete five-column vector; partial vectors are invalid.
 
-The importer may convert this wide format into normalized database rows. It
-must preserve the original file, retain an import checksum, and report
+The importer applies the following conversion without implementation-specific
+guessing:
+
+- source `article_id` values are never application identifiers; they are used
+  only in an import diagnostic when present;
+- `url` is stripped of surrounding whitespace and normalized under the URL
+  contract below; that canonical URL becomes `article_id`;
+- `domain` is recomputed from the canonical URL. A non-empty source `domain`
+  that normalizes to a different publisher rejects the row;
+- `title` and `text` are preserved exactly after RFC 4180 CSV decoding,
+  including embedded newlines. The importer performs no trimming or cleaning;
+- an empty `authors` value becomes `[]`. A valid JSON array containing only
+  strings is preserved. Any other non-empty value becomes a one-element JSON
+  string array; commas are never interpreted as author separators;
+- for every represented model family, `predicted_label` must be an integer in
+  `0..4` and `fold_id` must be an integer in `1..5` on every row;
+- a probability vector must be either entirely empty or contain all five
+  finite probabilities and satisfy the probability contract below.
+
+Any row that violates these rules is rejected with its source row number and a
+stable error code. Valid rows from the same import continue to be processed.
+
+The importer converts this wide format into the normalized CSV ledgers defined
+in `csv-storage-contract.md`. It must leave a server-local source file
+unchanged, retain an import checksum, and report
 conflicting duplicate predictions instead of silently choosing one.
 
 The generated bundled release is a documented exception chosen before
 publication: exact duplicate URLs are resolved by retaining the first source
 row in original CSV order. Its manifest records 19,476 source rows, 19,429
 released rows, 42 duplicated URL groups, and 47 skipped later occurrences.
-This release rule does not authorize the runtime importer to resolve conflicts
-silently in arbitrary user datasets.
+
+Runtime canonicalization further maps those 19,429 released URL strings to
+19,411 article identities. There are 18 later normalized aliases. For this
+verified bundled release only, article metadata comes from the first released
+row in manifest part/row order, while later rows can contribute predictions for
+a different family/fold identity. Identical repeated `(article, family, fold)`
+outputs are deduplicated; a conflicting repeated output would fail seed import.
+The current result is exactly 77,708 unique predictions across 20 historical
+virtual family/fold models. This release rule does not authorize the runtime
+importer to resolve conflicts silently in arbitrary user datasets.
 
 The public release retains real URLs, domains, titles, article bodies, and
 authors. Those article fields originate from their respective publishers; the
@@ -110,9 +140,16 @@ creation, and padding are required model-input encoding, not an additional
 text-cleaning stage. URL canonicalization also does not modify the classifier
 text.
 
-Empty extraction, parser failure, `langdetect` failure, and short or ambiguous
-text must produce an inspectable validation result rather than inference on an
-unknown input. The exact short-text policy remains **OPEN**.
+Empty extraction and parser failure produce `EXTRACTION_FAILED` or `TEXT_EMPTY`.
+Before language detection, the application normalizes no content but measures
+the extracted string. Text is `TEXT_TOO_SHORT` when, after trimming surrounding
+whitespace only, it contains fewer than 200 Unicode characters or fewer than 30
+whitespace-delimited tokens. No inference runs on such text.
+
+Language detection uses `langdetect.DetectorFactory.seed = 0`. A detector
+exception is `LANGUAGE_DETECTION_FAILED`; any result other than exact code `en`
+is `NON_ENGLISH`. These application validation gates do not claim to reproduce
+an additional training-time preprocessing stage.
 
 ## 5. Released checkpoint recipes
 
@@ -130,8 +167,8 @@ directory.
 | --- | --- | --- | --- | --- |
 | BERT | `bert_fold_N.pt` | `bert-base-uncased`, sequence classification, five labels | `AutoTokenizer`; truncate and fixed-pad to 256 tokens | Notebook-derived |
 | RoBERTa | `roberta_fold_N.pt` | `roberta-large`, sequence classification, five labels | fast `AutoTokenizer`; truncate and fixed-pad to 256 tokens | Notebook-derived |
-| Llama | `llama_fold_N.pt` | `meta-llama/Meta-Llama-3-8B`, five-label sequence classification, 4-bit base plus PEFT LoRA | pad token set to EOS; truncate and dynamically pad to 256 tokens | Notebook-derived; actual checkpoint keys still require a release test |
-| Mistral | extracted Mistral `fold_N/` PEFT directory | `mistralai/Mistral-Small-24B-Base-2501`, five-label sequence classification, 4-bit base plus PEFT LoRA | saved tokenizer; pad token set to EOS; truncate to 1,024 tokens and dynamically pad to a multiple of 8 | Notebook-derived; released directory contents still require a reference test |
+| Llama | `llama_fold_N.pt` | `meta-llama/Meta-Llama-3-8B`, five-label sequence classification, 4-bit base plus PEFT LoRA | pad token set to EOS; truncate and dynamically pad to 256 tokens | Notebook-derived; selectable only after strict-key and reference-output tests pass |
+| Mistral | extracted Mistral `fold_N/` PEFT directory | `mistralai/Mistral-Small-24B-Base-2501`, five-label sequence classification, 4-bit base plus PEFT LoRA | saved tokenizer; pad token set to EOS; truncate to 1,024 tokens and dynamically pad to a multiple of 8 | Notebook-derived; selectable only after PEFT-config and reference-output tests pass |
 
 `N` is the fold and is part of model identity. Any available fold may be used
 independently; the MVP does not silently ensemble folds.
@@ -230,7 +267,7 @@ A fully compatible adapter for new inference returns:
 
 - one predicted integer in `0..4`;
 - five finite softmax values in class-index order;
-- values in `[0, 1]` whose sum is within a declared numeric tolerance of `1`.
+- values in `[0, 1]` whose sum differs from `1` by at most `1e-5`.
 
 The available historical table contains probability vectors for BERT and
 RoBERTa but not for Llama and Mistral. Missing historical vectors remain
@@ -258,8 +295,12 @@ from the final URL.
 
 If the canonical URL and selected model already have an output, that output is
 returned without downloading or comparing article text. If the URL exists but
-that model has no output, the application may fetch the article and run the
-selected model.
+that model has no output, stored text is usable only when it passes the minimum
+length gate and deterministic English check. Imported text with an empty
+`detected_language` is checked locally at this point; on successful prediction,
+the same transaction appends an article version with `detected_language=en`
+without changing its text. Fetching occurs only when stored text is absent or
+fails either gate and strict offline mode is false.
 
 ## 8. English-language scope
 
@@ -274,9 +315,10 @@ All newly evaluated articles must be detected as English by `langdetect` after
 
 ## 9. Publisher aggregation
 
-A publisher evaluation uses either an explicit same-domain article list or a
-user-selected number of articles discovered from one publisher homepage.
-Articles from different normalized domains cannot be combined.
+A publisher evaluation uses 2–50 compatible predictions from one exact model
+identity and one normalized publisher hostname. Input is either an explicit
+same-publisher list or a publisher request whose default requested count is 10.
+Articles from different normalized hostnames cannot be combined.
 
 The paper-compatible default is the mode of article-level predicted classes:
 
@@ -284,20 +326,26 @@ The paper-compatible default is the mode of article-level predicted classes:
 publisher_prediction(p) = mode(article_predictions for p)
 ```
 
-The MVP may expose three explicitly named methods:
+The MVP exposes exactly three methods:
 
-1. **Majority vote**: the paper-compatible default.
-2. **Ordinal class mean**: arithmetic mean of the ordered indices; the decimal
-   is shown, and conversion to one class requires a declared rounding rule.
-3. **Mean class probabilities**: element-wise mean of complete five-class
-   vectors, plus its `argmax` class.
+1. **`majority_vote`**, method version `1`: count hard predicted classes. The
+   result is the class with maximum count. If several classes tie, choose the
+   numerically smallest tied class. This matches the notebook expression
+   `group[column].mode()[0]` and is the paper-compatible default.
+2. **`ordinal_mean`**, method version `1`: compute
+   `raw_mean = sum(predicted_class) / n`. Store the full finite float, display it
+   to three decimal places, and compute the result class as
+   `floor(raw_mean + 0.5)`. Because inputs are `0..4`, the result remains `0..4`.
+3. **`mean_probabilities`**, method version `1`: require a complete valid vector
+   for every prediction, compute each output component as its arithmetic mean,
+   and choose the numerically smallest class whose mean component equals the
+   maximum. Store all five mean components and the result class.
 
-The methods are not interchangeable. Probability averaging is disabled when
-any included prediction lacks a vector.
-
-The minimum and default article counts, deterministic tie policy, ordinal
-rounding policy, and discovery ordering remain **OPEN**. Until defined, a tie
-or insufficient article set is reported as unresolved.
+The methods are not interchangeable. Probability averaging is disabled with
+`PROBABILITIES_REQUIRED` when any included prediction lacks a vector. Fewer
+than two compatible successful predictions is `INSUFFICIENT_ARTICLES`; no
+publisher result is created. Ordering does not change these commutative formulas
+but is preserved exactly for provenance.
 
 ## 10. Compatibility and provenance
 
@@ -313,6 +361,76 @@ or insufficient article set is reported as unresolved.
 - The class order remains `0 < 1 < 2 < 3 < 4`; no protected score mapping is
   stored or shown.
 
+### Exact and historical model identity
+
+`artifact_sha256` is deterministic. For a single-file artifact it is SHA-256
+of the exact file bytes. For a directory artifact, symlinks are rejected; the
+application recursively enumerates regular files, excludes only
+`publisher-reliability-model.json`, represents each as
+`{"path":<relative POSIX path>,"sha256":<file digest>,"size":<bytes>}`,
+sorts entries by the UTF-8 bytes of `path`, serializes the array as canonical
+JSON (sorted object keys, no insignificant whitespace), and hashes those UTF-8
+bytes. Empty directories and filesystem metadata are not represented. Uploaded
+archives are hashed after safe extraction using this directory rule, so archive
+compression and entry order do not change model identity.
+
+A runnable model ID is the SHA-256 of UTF-8 canonical JSON with sorted keys and
+no insignificant whitespace containing:
+
+```json
+{
+  "artifact_sha256": "...",
+  "base_model": "...",
+  "base_revision": "...",
+  "family": "bert",
+  "fold_id": 1,
+  "loader_recipe": "bert_state_dict",
+  "loader_recipe_version": "1",
+  "max_tokens": 256,
+  "padding_policy": "fixed_max_length",
+  "tokenizer_revision": "...",
+  "tokenizer_source": "bert-base-uncased"
+}
+```
+
+Every key is required. Any changed artifact, revision, tokenizer, length,
+padding, or recipe creates a new model ID.
+
+Remote Hugging Face identities resolve `base_revision` and
+`tokenizer_revision` to immutable repository commit hashes; mutable names such
+as `main` are never stored as exact revisions. A fully local base or tokenizer
+uses `local-sha256:<directory_digest>` with the directory algorithm above. If
+an immutable revision cannot be established, registration is
+`MODEL_INCOMPATIBLE` rather than creating a non-reproducible identity.
+
+The public historical CSV does not contain artifact checksums. Its importer
+therefore creates one `historical_virtual` model per family and fold. Its model
+ID is the SHA-256 of canonical JSON:
+
+```json
+{
+  "dataset_content_digest": "76d1434f47df497c62c0dc360b824f3edf797c6501e2bcde560ff2c3378867ea",
+  "family": "bert",
+  "fold_id": 1,
+  "identity_kind": "historical_virtual",
+  "loader_recipe_version": "1",
+  "release_id": "osf:r9atz:e4bda170a3e74ca3ae245475d4486d74"
+}
+```
+
+`family` and `fold_id` vary per imported output. A user-supplied historical
+import uses `release_id = "user_import:<source_sha256>"` and that import's
+`dataset_content_digest` is exactly the lowercase SHA-256 of the uploaded or
+server-local source bytes. For the bundled multipart release only, it is the
+manifest's verified `content_digest_sha256`. These rules prevent unrelated
+files from sharing a virtual model and avoid an undefined reserialization step.
+
+Such a model is `historical_only`: stored outputs can be browsed and aggregated
+but it cannot infer a missing prediction. Registering a local artifact creates
+a separate exact model ID; historical outputs are not silently claimed as
+outputs of that artifact. A missing exact prediction can still be computed
+offline from stored article text.
+
 ## 11. Required scientific warnings
 
 The UI makes these limitations accessible near results:
@@ -320,8 +438,7 @@ The UI makes these limitations accessible near results:
 - an article prediction is an estimate, not factual verification;
 - publisher majority voting does not model confidence or uncertainty;
 - softmax values are not necessarily calibrated confidence;
-- the paper defines the validation scope and should be consulted before
-  interpreting outputs;
+- the paper defines the validation scope governing interpretation of outputs;
 - the public tool does not calculate accuracy against protected labels;
 - a publisher result depends on the selected articles, checkpoint, and
   aggregation method.
@@ -336,7 +453,7 @@ Before a family adapter is called compatible, an automated fixture must verify:
    redistributable English text fixture;
 4. five probabilities matching a reference run within tolerance;
 5. correct fold identity and publisher aggregation;
-6. absence of protected fields in fixtures, database, logs, UI, and exports.
+6. absence of protected fields in fixtures, CSV database, logs, UI, and exports.
 
 Live webpages are not stable scientific fixtures. Reference tests must freeze
 their allowed input text instead of depending on a publisher page remaining
