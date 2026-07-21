@@ -43,16 +43,18 @@ indices; for the inspected dataset that mapping is the identity mapping.
 These values are model predictions. The tool must not present them as facts,
 fact checks, or protected ground-truth ratings.
 
-## 3. User-supplied dataset contract
+## 3. Dataset contract
 
-The application has no required bundled history. At startup or through the
-frontend, the user may select any CSV that conforms to the supported schema;
-there is no scientific requirement on its number of rows or file size. Import
-must be incremental so that a large local file does not need to fit in memory.
+The repository contains a public history as a manifest and ordered CSV parts.
+The application validates and imports that release incrementally on first use.
+At startup or through the frontend, the user may also select any CSV or
+manifest directory that conforms to the supported schema; there is no
+scientific requirement on its number of rows or total size.
 
 `dataset/sampleDataset.csv` is a small, tracked, synthetic structural example.
-`dataset/fullDataset.csv` and every other local dataset are ignored by Git.
-The tracked sample must contain no protected fields and no copied article body.
+The private `dataset/fullDataset.csv` remains ignored by Git. The generated
+`dataset/predictions/` release contains scraped article fields and model outputs
+but none of the protected reference-provider columns.
 
 The current wide-format schema is:
 
@@ -77,9 +79,16 @@ The importer may convert this wide format into normalized database rows. It
 must preserve the original file, retain an import checksum, and report
 conflicting duplicate predictions instead of silently choosing one.
 
-Real URLs and domains are valid local inputs. Whether real titles, article
-bodies, or authors may be redistributed is a separate copyright question; the
-tracked structural sample therefore uses synthetic content.
+The generated bundled release is a documented exception chosen before
+publication: exact duplicate URLs are resolved by retaining the first source
+row in original CSV order. Its manifest records 19,476 source rows, 19,429
+released rows, 42 duplicated URL groups, and 47 skipped later occurrences.
+This release rule does not authorize the runtime importer to resolve conflicts
+silently in arbitrary user datasets.
+
+The public release retains real URLs, domains, titles, article bodies, and
+authors. Those article fields originate from their respective publishers; the
+release does not claim ownership of them or change their copyright status.
 
 ## 4. Text acquisition and model input
 
@@ -122,36 +131,10 @@ directory.
 | BERT | `bert_fold_N.pt` | `bert-base-uncased`, sequence classification, five labels | `AutoTokenizer`; truncate and fixed-pad to 256 tokens | Notebook-derived |
 | RoBERTa | `roberta_fold_N.pt` | `roberta-large`, sequence classification, five labels | fast `AutoTokenizer`; truncate and fixed-pad to 256 tokens | Notebook-derived |
 | Llama | `llama_fold_N.pt` | `meta-llama/Meta-Llama-3-8B`, five-label sequence classification, 4-bit base plus PEFT LoRA | pad token set to EOS; truncate and dynamically pad to 256 tokens | Notebook-derived; actual checkpoint keys still require a release test |
-| Mistral | extracted Mistral `fold_N/` PEFT directory | `mistralai/Mistral-Small-24B-Base-2501`, five-label sequence classification, 4-bit base plus PEFT LoRA | saved tokenizer; pad token set to EOS; truncate to 1,024 tokens and dynamically pad to a multiple of 8 | Notebook-derived and release layout confirmed; tensor-level reference test pending |
+| Mistral | extracted Mistral `fold_N/` PEFT directory | `mistralai/Mistral-Small-24B-Base-2501`, five-label sequence classification, 4-bit base plus PEFT LoRA | saved tokenizer; pad token set to EOS; truncate to 1,024 tokens and dynamically pad to a multiple of 8 | Notebook-derived; released directory contents still require a reference test |
 
 `N` is the fold and is part of model identity. Any available fold may be used
 independently; the MVP does not silently ensemble folds.
-
-### Confirmed release layout
-
-The supplied release screenshots confirm two coexisting layouts under a Models
-directory:
-
-```text
-Models/Fold 1/
-├── bert_fold_1.pt
-├── llama_fold_1.pt
-└── roberta_fold_1.pt
-
-Models/fold_1/
-├── adapter_config.json
-├── adapter_model.safetensors
-├── README.md
-├── tokenizer_config.json
-└── tokenizer.json
-```
-
-The application discovers these recursively and does not require renaming.
-For `.pt` artifacts, family and fold come from the filename; the parent name
-`Fold 1` is merely organization. For Mistral, the four JSON/Safetensors
-artifacts are required, `README.md` is optional, and both PEFT contents and the
-fold directory are validated. A directory named `.ipynb_checkpoints` is ignored
-and never inspected as a model candidate.
 
 The inspected Llama recipe uses:
 

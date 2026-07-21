@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "source_records": 19476,
+  "records": 19429,
+  "unique_urls": 19429,
+  "duplicate_url_rows": 0,
+  "duplicate_policy": "first",
+  "duplicate_source_url_groups": 42,
+  "skipped_duplicate_rows": 47,
+  "columns": [
+    "article_id",
+    "url",
+    "title",
+    "text",
+    "authors",
+    "domain",
+    "bert_predicted_label",
+    "bert_fold_id",
+    "roberta_predicted_label",
+    "roberta_fold_id",
+    "llama_predicted_label",
+    "llama_fold_id",
+    "mistral_predicted_label",
+    "mistral_fold_id",
+    "bert_prob_class_0",
+    "bert_prob_class_1",
+    "bert_prob_class_2",
+    "bert_prob_class_3",
+    "bert_prob_class_4",
+    "roberta_prob_class_0",
+    "roberta_prob_class_1",
+    "roberta_prob_class_2",
+    "roberta_prob_class_3",
+    "roberta_prob_class_4"
+  ],
+  "excluded_newsguard_columns": [
+    "score",
+    "country",
+    "language",
+    "topics",
+    "paywall",
+    "opinion_advocacy",
+    "label"
+  ],
+  "max_part_bytes": 25165824,
+  "content_digest_sha256": "76d1434f47df497c62c0dc360b824f3edf797c6501e2bcde560ff2c3378867ea",
+  "parts": [
+    {
+      "file": "predictions-part-0001.csv",
+      "rows": 4771,
+      "bytes": 25164980,
+      "sha256": "3838fe79a123e9996b33852df35c85f9befe2d55532ab812ba8cf06f6e785bcf"
+    },
+    {
+      "file": "predictions-part-0002.csv",
+      "rows": 5102,
+      "bytes": 25163311,
+      "sha256": "22836aceef1393d10ccd45fe43dc6658fbe68365a35fbeaca07ab15218b9fba8"
+    },
+    {
+      "file": "predictions-part-0003.csv",
+      "rows": 5740,
+      "bytes": 25162924,
+      "sha256": "979a264edb88a1a9f37ff1742db9b10f58b7f08b8faf7e87e2f245d9f2328be0"
+    },
+    {
+      "file": "predictions-part-0004.csv",
+      "rows": 3816,
+      "bytes": 18943881,
+      "sha256": "890b44ca478ede92c73ec7925ec30bb52eb750a4835cd85bf71ef2eb2321eb98"
+    }
+  ]
+}

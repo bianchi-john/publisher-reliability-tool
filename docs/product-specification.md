@@ -43,9 +43,10 @@ command and use the browser interface.
 - Validate and register compatible local models.
 - Show the official OSF model-release link and manual setup instructions in the
   terminal and Models page.
-- Import a user-supplied schema-compatible CSV selected at startup or through
-  the frontend; use `dataset/sampleDataset.csv` as the tracked structural
-  example.
+- Import the bundled manifest-backed public prediction release on first use.
+- Import an additional user-supplied schema-compatible CSV selected at startup
+  or through the frontend; use `dataset/sampleDataset.csv` as the synthetic
+  structural example.
 - Start in history-only mode when no compatible model is available and explain
   model installation in both the terminal and browser.
 - Search and filter historical model outputs using only approved,
@@ -93,26 +94,27 @@ command and use the browser interface.
 
 ### WF-001 - Start the application
 
-1. The application locates the user's personal application database and any
-   CSV path supplied at startup.
-2. If a CSV is supplied, it validates its schema and imports its permitted
-   prediction and article fields.
-3. It recursively discovers models from default locations and any files or
-   directories supplied by the user, ignoring hidden directories such as
-   `.ipynb_checkpoints`.
+1. The application locates the user's personal application database, bundled
+   prediction manifest, and any dataset path supplied at startup.
+2. On first use it validates and incrementally imports every part named by the
+   bundled manifest. If an additional CSV or manifest directory is supplied,
+   it imports its permitted prediction and article fields as a separate source.
+3. It discovers models from default locations and any paths supplied by the
+   user.
 4. It validates every discovered model and prints a model-status summary.
 5. The server binds to `127.0.0.1` by default.
 6. The command prints the local browser URL and startup diagnostics.
 7. If no compatible model is available, the server still starts and the
    terminal prints actionable instructions for adding one.
-8. If no CSV is supplied, the server starts with the existing personal database
-   or an empty history and explains how to import a dataset.
+8. If neither the bundled release nor a user dataset is available, the server
+   starts with the existing personal database or an empty history and explains
+   how to import a dataset.
 
 Illustrative command only; the final command name and flags are **OPEN**:
 
 ```bash
 publisher-reliability serve \
-  --dataset /path/to/predictions.csv \
+  --dataset /path/to/predictions.csv-or-manifest-directory \
   --models-dir /path/to/models
 ```
 
@@ -171,9 +173,8 @@ publisher-reliability serve \
    checkpoint files or directories.
 2. A released filename such as `bert_fold_1.pt` selects the corresponding
    built-in `state_dict` recipe. A Mistral fold directory is recognized from
-   `adapter_config.json`, `adapter_model.safetensors`,
-   `tokenizer_config.json`, `tokenizer.json`, and the approved base-model
-   identity; its `README.md` is optional and never executed.
+   its standard PEFT configuration, adapter weights, saved tokenizer, and
+   approved base-model identity.
 3. The application records the fold as part of model identity and reconstructs
    the documented architecture, tokenizer, output head, quantization/adapter
    configuration, and input settings without executing model-supplied code.
@@ -216,13 +217,15 @@ Official release URL:
 
 ### WF-009 - Import a dataset
 
-1. The user supplies a local CSV path at startup or selects a CSV from the
-   frontend import page.
+1. The application selects the bundled manifest directory automatically, or
+   the user supplies a local CSV or manifest-directory path at startup or from
+   the frontend import page.
 2. The application validates required columns against the same rules exercised
    by `dataset/sampleDataset.csv`.
 3. It projects only allowed fields; blocked reference-provider columns are
    ignored with a value-free warning and are never persisted.
-4. It imports the file in chunks without assuming the row count or file size.
+4. It imports each file in chunks without assuming the row count or file size;
+   for a manifest it verifies part order, sizes, row counts, and checksums.
 5. The imported history becomes searchable together with previously saved
    personal results.
 
@@ -283,7 +286,7 @@ The article page shows:
 | FR-001 | DECIDED | A terminal command shall start and stop the local server cleanly. |
 | FR-002 | DECIDED | The server shall bind to localhost unless the user explicitly changes the network configuration. |
 | FR-003 | DECIDED | At startup the application shall discover, validate, and report zero, one, or multiple local models. |
-| FR-004 | DECIDED | The application shall import a user-supplied schema-compatible CSV; `dataset/sampleDataset.csv` shall be the tracked example and `dataset/fullDataset.csv` shall remain ignored. |
+| FR-004 | DECIDED | The application shall import the validated, manifest-backed public release by default and shall also accept a user-supplied schema-compatible CSV or manifest directory; the private `dataset/fullDataset.csv` shall remain ignored. |
 | FR-005 | DECIDED | Historical predictions shall be searchable through allowlisted identifiers and metadata; protected reference-provider fields shall never become searchable. |
 | FR-006 | DECIDED | The canonical article URL shall be the unique article identifier; the normalized publisher domain shall be the unique publisher identifier. |
 | FR-007 | DECIDED | If a prediction already exists for the same canonical URL and selected model, it shall be reused without refetching or comparing the article text. |
@@ -313,7 +316,7 @@ The article page shows:
 | FR-031 | DECIDED | All terminal output, frontend text, validation messages, setup guidance, and software-generated exports shall be in English. |
 | FR-032 | DECIDED | The MVP shall evaluate English-language articles only. |
 | FR-033 | DECIDED | A manually supplied non-English article shall be rejected before inference; non-English candidates discovered from a publisher shall be excluded and reported. |
-| FR-034 | DECIDED | The application shall start with an empty or existing personal history when no dataset is supplied and shall explain dataset import in the terminal and frontend. |
+| FR-034 | DECIDED | The application shall start with an empty or existing personal history when neither the bundled release nor a user dataset is available and shall explain dataset import in the terminal and frontend. |
 | FR-035 | DECIDED | Import shall not impose a fixed dataset size or row count and shall process large CSV files incrementally. |
 | FR-036 | DECIDED | Released checkpoints shall be recognized from a validated family-and-fold filename or standard artifact directory; the selected fold shall be used independently without requiring all folds. |
 | FR-037 | DECIDED | Every built-in reliability classifier shall expose exactly five ordered public output indices, `0` through `4`, without embedding protected reference labels, score ranges, or provider metadata. |
@@ -323,9 +326,6 @@ The article page shows:
 | FR-041 | DECIDED | A released Mistral fold shall be accepted as an extracted PEFT directory containing a valid adapter configuration and weights plus saved tokenizer files; it is not expected to be a single `.pt` file. |
 | FR-042 | DECIDED | Terminal startup output and the frontend Models page shall always expose the exact official OSF release link; the no-model state shall additionally show copyable placement and startup instructions. |
 | FR-043 | DECIDED | The built-in Mistral adapter shall enforce the documented 24B base-model identity, five outputs, 1,024-token input limit, dynamic padding, 4-bit NF4 configuration, and LoRA recipe before registration succeeds. |
-| FR-044 | DECIDED | Model discovery shall scan supplied directories recursively, ignore hidden directories including `.ipynb_checkpoints`, and accept direct file or fold-directory paths. |
-| FR-045 | DECIDED | BERT, RoBERTa, and Llama family/fold identity shall come from each `.pt` filename rather than its parent directory; Mistral identity shall come from validated PEFT contents plus a fold parsed from a case-insensitive `fold`, `fold_`, `fold-`, or `fold ` directory name. |
-| FR-046 | DECIDED | A Mistral release directory shall require `adapter_config.json`, `adapter_model.safetensors`, `tokenizer_config.json`, and `tokenizer.json`; `README.md` shall be optional data and shall never influence loading. |
 
 ## 7. URL identity and cache policy
 
@@ -396,8 +396,8 @@ Every publisher evaluation must additionally retain:
 
 1. Finalize the URL-normalization fallback used when a page is unreachable or
    does not declare a canonical URL.
-2. Run a tensor-level reference prediction with one downloaded artifact from
-   each family; the observed OSF Mistral directory layout is now documented.
+2. Validate one downloaded release artifact from each family, including the
+   precise files present in an OSF Mistral fold directory.
 3. Define the fallback manifest contract for unrecognized custom checkpoints.
 4. Define minimum, maximum, default, and selectable article counts for a
    publisher-URL evaluation.

@@ -9,8 +9,8 @@ the behavior of the tool before implementation begins.
 
 ## Product in one sentence
 
-A Linux command starts a local web application that can browse historical
-article predictions from a user-supplied CSV, load one or more locally stored
+A Linux command starts a local web application that can browse bundled or
+user-supplied historical article predictions, load one or more locally stored
 Transformer checkpoints, run a missing article prediction, and aggregate
 compatible article predictions into a publisher-level reliability estimate.
 
@@ -21,19 +21,18 @@ compatible article predictions into a publisher-level reliability estimate.
 - Model inference is local; article text is not sent to a remote inference API.
 - Models are supplied as local paths at startup or registered from the local
   browser interface.
-- A supplied Models directory is scanned recursively; hidden folders such as
-  `.ipynb_checkpoints` are ignored.
 - Released `bert_fold_N.pt`, `roberta_fold_N.pt`, and `llama_fold_N.pt`
   checkpoints use notebook-derived built-in loading recipes; any fold may be
   selected independently.
 - Released Mistral folds are PEFT directories built on
   `mistralai/Mistral-Small-24B-Base-2501`; they are not single `.pt` files.
-- The observed `Fold 1/` layout for the three `.pt` files and `fold_1/` layout
-  for Mistral are both accepted without renaming.
-- The user supplies a schema-compatible CSV at startup or through the frontend;
-  `dataset/sampleDataset.csv` is the tracked structural example.
-- Large or private datasets such as `dataset/fullDataset.csv` remain local and
-  are excluded from Git.
+- A validated, sharded public prediction release supplies the initial history;
+  the user may additionally import a schema-compatible CSV at startup or
+  through the frontend, and `dataset/sampleDataset.csv` remains the synthetic
+  structural example.
+- Private source datasets such as `dataset/fullDataset.csv` remain local and
+  are excluded from Git. A generated public release may be tracked only after
+  protected reference-provider fields have been removed and validation passes.
 - New predictions and publisher evaluations persist across restarts.
 - If no model is available, the server still starts in history-only mode and
   explains model setup in both the terminal and browser interface.
@@ -76,13 +75,19 @@ The documents use three markers:
 - A diagnostic summary of the experimental DataFrame, consulted only to
   identify the model-output fields that may be released.
 - `dataset/sampleDataset.csv`, which defines the example import structure.
+- `dataset/predictions/manifest.json` and its CSV parts, which contain the
+  validated public article fields and model outputs. Repeated exact source URLs
+  are resolved deterministically by retaining their first CSV occurrence, with
+  all skipped counts recorded in the manifest.
 - The BERT/RoBERTa/Llama and Mistral training notebooks, used to derive built-in
   loading recipes for the released fold checkpoints.
 - The model release referenced by the paper:
   <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
-The tracked sample contains synthetic values only. The full dataset and model
-weights are local inputs and must not be committed.
+The tracked sample contains synthetic values only. The private source dataset
+and model weights are local inputs and must not be committed. The generated
+public dataset contains scraped article fields and model outputs, but excludes
+the original label, score, and all other NewsGuard-supplied metadata.
 
 If a private input CSV contains blocked reference-provider columns, the importer
 projects only the permitted fields and never persists the blocked values.

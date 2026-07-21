@@ -15,4 +15,7 @@ models/*
 dataset/*
 !dataset/sampleDataset.csv
 !dataset/README.md
+!dataset/predictions/
+!dataset/predictions/*.csv
+!dataset/predictions/manifest.json
 data/

@@ -10,8 +10,8 @@ until released checkpoints have passed the compatibility tests.
 - Local model inference.
 - English-only software interface and English-only article inference.
 - One user and one machine in the MVP.
-- An optional user-selected CSV supplies historical predictions; the tracked
-  sample documents its structure but is not a required seed database.
+- A bundled manifest and ordered CSV parts supply the initial public history;
+  an optional user-selected CSV or manifest directory may supply more.
 - New results stored in each user's transactional personal local database.
 - Model files remain outside the database.
 - Large-model failures must not corrupt stored history.
@@ -22,7 +22,8 @@ until released checkpoints have passed the compatibility tests.
 flowchart TD
     CLI["Linux CLI"] --> APP["Local web application"]
     UI["Browser UI"] --> APP
-    CSV["User CSV"] --> APP
+    RELEASE["Bundled manifest + CSV parts"] --> APP
+    CSV["User CSV or manifest"] --> APP
     APP --> DB["Local database"]
     APP --> RUNTIME["Model runtime"]
     RUNTIME --> FILES["Local model directories"]
@@ -39,9 +40,9 @@ distributed queue is not required for the MVP.
 | --- | --- |
 | CLI/configuration | Parse paths and options, validate configuration, start the server |
 | Web/UI | Present minimal navigation, searchable histories, article selection, model status, exact tables, and charts |
-| Import service | Validate and incrementally project allowed fields from a user-selected CSV without modifying it |
+| Import service | Validate manifests and incrementally project allowed fields from bundled or user-selected CSV parts without modifying them |
 | URL/article service | Resolve canonical article URLs and normalized publisher domains |
-| Model registry | Recursively discover checkpoints, ignore hidden paths, recognize file/directory layouts, and expose compatibility status |
+| Model registry | Discover checkpoints, recognize family/fold filenames, and expose compatibility status |
 | Model loader registry | Reconstruct notebook-defined base/tokenizer recipes and safely load supported `state_dict` files or PEFT adapter directories |
 | Inference service | Encode extracted text, run local prediction, apply softmax, and record run metadata |
 | Aggregation service | Build publisher evaluations from compatible article predictions |
@@ -57,8 +58,10 @@ fragile.
 
 The initial storage design is therefore:
 
-- **user-selected CSV:** optional, immutable import source whose size and row
-  count are not fixed;
+- **bundled public release:** immutable manifest plus ordered, checksummed CSV
+  parts imported on first use;
+- **user-selected CSV or manifest directory:** optional, immutable import
+  source whose size and row count are not fixed;
 - **tracked sample CSV:** small synthetic schema example, not automatically
   imported as product history;
 - **SQLite:** proposed personal local database containing allowed imported
@@ -91,9 +94,9 @@ erase the user's personal records.
 
 ### Protected-data boundary
 
-The user's private full experimental CSV may be selected locally, but the
-importer must project only an explicit allowlist containing model outputs and
-the minimum approved identifiers required to associate them with articles.
+The bundled release has already been projected through the public allowlist.
+The user's private full experimental CSV may also be selected locally, but the
+importer must apply the same explicit allowlist before persistence.
 
 It must omit, before persistence:
 
@@ -138,10 +141,8 @@ prediction.
 
 ## 6. Startup and model availability
 
-Startup model discovery recursively checks default model locations plus any
-command-line file or directory paths. It does not descend into hidden
-directories such as `.ipynb_checkpoints`. Each candidate is classified as
-compatible, invalid, or unavailable.
+Startup model discovery checks default model locations plus any command-line
+paths. Each candidate is classified as compatible, invalid, or unavailable.
 
 No-model startup is a supported state:
 
@@ -161,15 +162,11 @@ The Models page always exposes the official release URL:
 <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
 Recognized official filenames such as `bert_fold_1.pt` select a built-in
-family recipe regardless of whether their parent is named `Fold 1`, another
-fold label, or an arbitrary directory. Mistral is recognized as an extracted
-PEFT fold directory containing `adapter_config.json`,
-`adapter_model.safetensors`, `tokenizer_config.json`, and `tokenizer.json`, plus
-the approved 24B base identity declared by its configuration. `README.md` is
-optional and is not interpreted as configuration. The fold number is recorded,
-but no particular fold and no complete set of five folds is required. All four
-family recipes are derived from the supplied notebooks and remain subject to
-release-artifact compatibility tests.
+family recipe. Mistral is recognized as an extracted PEFT fold directory by its
+adapter configuration, adapter weights, tokenizer files, and approved 24B base
+identity. The fold number is recorded, but no particular fold and no complete
+set of five folds is required. All four family recipes are derived from the
+supplied notebooks and remain subject to release-artifact compatibility tests.
 
 ## 7. Model registration and security
 
@@ -188,8 +185,6 @@ The MVP should therefore:
 - keep `trust_remote_code` disabled by default;
 - never download or execute model-supplied code implicitly;
 - validate paths and prevent path traversal outside approved model roots;
-- ignore hidden discovery directories and avoid following directory symlinks
-  outside the selected model root;
 - show exactly which base model, adapter, and revision will be loaded;
 - require explicit confirmation for any configuration that can execute custom
   code.
@@ -245,7 +240,6 @@ large local model mounts, so it should not be selected without a hardware test.
 | A `.pt` checkpoint lacks tokenizer/configuration files | Use versioned built-in recipes and preflight the required local cache or approved download |
 | Released checkpoint keys differ from notebook assumptions | Strict key/shape compatibility test before model registration |
 | A released Mistral directory is incomplete or differs from `save_pretrained()` output | Validate its standard PEFT files/configuration and fail closed before loading the 24B base |
-| Notebook checkpoint folders are mistaken for models | Ignore hidden directories such as `.ipynb_checkpoints` during recursive discovery |
 | Mistral 24B cannot run on ordinary hardware | Preflight RAM/VRAM checks and document supported precision/quantization |
 | Historical rows are reused under the wrong model | Unique canonical-URL and model-identity prediction constraint |
 | Prediction-file import consumes excessive memory | Stream/chunk import and index in SQLite |

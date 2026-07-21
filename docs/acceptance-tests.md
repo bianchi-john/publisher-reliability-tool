@@ -163,9 +163,8 @@ conflict, the importer reports the conflict instead of choosing silently.
 compatible `.pt` checkpoints, Mistral PEFT directories, invalid artifacts, and
 missing paths,
 **when** the application starts,
-**then** discovery is recursive, `.ipynb_checkpoints` and other hidden
-directories are ignored, the terminal lists each candidate's status, and the
-frontend model page shows the same usable-model inventory.
+**then** the terminal lists each candidate's status and the frontend model page
+shows the same usable-model inventory.
 
 ## AT-022 - Several articles from one publisher
 
@@ -339,9 +338,8 @@ cleaning by the application.
 
 ## AT-045 - Released Mistral fold registration
 
-**Given** an extracted released Mistral `fold_N/` directory containing
-`adapter_config.json`, `adapter_model.safetensors`, `tokenizer_config.json`, and
-`tokenizer.json`, with or without `README.md`,
+**Given** an extracted released Mistral `fold_N/` directory with its standard
+PEFT adapter configuration and weights plus saved tokenizer files,
 **when** registration is attempted on compatible hardware,
 **then** the tool validates `mistralai/Mistral-Small-24B-Base-2501`, five output
 classes, 4-bit NF4 with double quantization and `bfloat16`, LoRA `r=16` and
@@ -350,8 +348,8 @@ limit, dynamic padding to a multiple of 8, and records `N` as the fold.
 
 ## AT-046 - Invalid Mistral directory fails closed
 
-**Given** a selected Mistral directory is missing any required file, declares
-another base model, or has an incompatible PEFT recipe,
+**Given** a selected Mistral directory is missing adapter weights or tokenizer
+files, declares another base model, or has an incompatible PEFT recipe,
 **when** registration is attempted,
 **then** the artifact remains unavailable, the exact mismatch is reported, and
 the application does not guess, execute remote code, or start loading the 24B
@@ -374,33 +372,25 @@ insufficient available resources,
 **then** preflight stops before model loading, reports the missing requirement
 without creating a prediction, and leaves historical browsing usable.
 
-## AT-049 - Repository history contains no protected dataset material
+## AT-049 - Repository history contains no protected reference material
 
 **Given** a release archive or Git clone of this repository,
 **when** all reachable commits, tags, tracked paths, and retained Git objects
 are audited,
-**then** no full/private dataset, real source row, original reference value,
-protected provider metadata, training notebook output, or model weight is
-recoverable; only the synthetic structural sample and permitted model-output
-example fields are present.
+**then** no private source CSV, original reference value, protected provider
+metadata, training notebook output, or model weight is recoverable; real rows
+may appear only in the generated public release and contain exactly its
+allowlisted article fields and model outputs.
 
-## AT-050 - Observed mixed release layout
+## AT-050 - Bundled sharded release is complete
 
-**Given** a selected Models directory contains
-`Fold 1/bert_fold_1.pt`, `Fold 1/llama_fold_1.pt`,
-`Fold 1/roberta_fold_1.pt`, an ignored `Fold 1/.ipynb_checkpoints/`, and a
-complete Mistral `fold_1/` directory,
-**when** recursive discovery completes,
-**then** exactly four family-specific fold-1 candidates are reported and the
-hidden notebook-checkpoint directory produces no candidate or warning.
-
-## AT-051 - Parent names do not collide
-
-**Given** `Fold 1/` and `fold_1/` coexist,
-**when** artifacts are identified,
-**then** the `.pt` filenames determine BERT, Llama, and RoBERTa identities,
-validated PEFT contents determine Mistral identity, and the four models remain
-distinct despite representing the same fold number.
+**Given** `dataset/predictions/manifest.json` and its listed CSV parts,
+**when** release verification runs,
+**then** every part matches its declared size and SHA-256, no part exceeds the
+configured limit, all headers match the public schema, article identifiers are
+contiguous, and the manifest reports 19,476 source rows, 19,429 released rows,
+42 duplicated source-URL groups, and 47 skipped later occurrences, with no
+protected column in any released part.
 
 ## Scientific reference tests still required
 
