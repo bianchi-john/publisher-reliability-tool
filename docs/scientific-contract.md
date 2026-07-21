@@ -10,8 +10,8 @@ The tool may distribute and display model-produced outputs. It must not
 distribute, reproduce, or persist the protected reference data used to train
 and evaluate the models.
 
-The following are excluded from the Git repository, tracked sample, application
-CSV database, logs, API responses, UI, and exports:
+The following values and data fields are excluded from the Git repository,
+tracked sample, application CSV database, logs, API responses, UI, and exports:
 
 - original reference labels;
 - original numeric reference scores or ranges;
@@ -20,12 +20,23 @@ CSV database, logs, API responses, UI, and exports:
 
 A private CSV containing those columns may be selected on the user's own
 machine. Import is an allowlisted projection: blocked columns are ignored
-before persistence, and the warning may name their columns but must never print
-their values. The source CSV remains unchanged.
+before persistence. For auditability, `imports.csv` and a warning may retain
+only their column names, never their values or row associations. The source CSV
+remains unchanged.
 
 The public tool presents predicted output indices as `Class 0` through
 `Class 4`. It does not include protected class names, score intervals, or a
 mapping back to the reference provider.
+
+### 1.1 Licensing boundary
+
+Project-owned software and documentation are distributed under Apache-2.0 in
+`../LICENSE`. Project-owned model-produced class outputs, fold identifiers,
+probabilities, and database arrangement are dedicated under CC0-1.0 in
+`../MODEL-OUTPUT-LICENSE.md`. CC0 does not apply to URLs, publisher names,
+trademarks, source pages, model weights, base models, or third-party material.
+Keeping an empty compatibility column does not place its discarded source value
+under either license.
 
 ## 2. Task definition
 
@@ -52,8 +63,8 @@ scientific requirement on its number of rows or total size.
 
 `dataset/sampleDataset.csv` is a small, tracked, synthetic structural example.
 The private `dataset/fullDataset.csv` remains ignored by Git. The generated
-`dataset/predictions/` release contains scraped article fields and model outputs
-but none of the protected reference-provider columns.
+`dataset/predictions/` release contains article/publisher identifiers and model
+outputs, but no editorial content or protected reference-provider columns.
 
 The current wide-format schema is:
 
@@ -61,9 +72,9 @@ The current wide-format schema is:
 | --- | --- | --- |
 | `article_id` | No | Source-local identifier; never the application identity |
 | `url` | Yes | Canonical article URL and application article identity |
-| `title` | No | Locally supplied or extracted title |
-| `text` | No | Locally supplied or extracted article body |
-| `authors` | No | Locally supplied or extracted author display value |
+| `title` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
+| `text` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
+| `authors` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
 | `domain` | Yes | Normalized publisher domain and publisher identity |
 | `<family>_predicted_label` | Yes for each represented family | Predicted integer in `0..4` |
 | `<family>_fold_id` | Yes for each represented family | Fold integer in `1..5` |
@@ -83,11 +94,9 @@ guessing:
   contract below; that canonical URL becomes `article_id`;
 - `domain` is recomputed from the canonical URL. A non-empty source `domain`
   that normalizes to a different publisher rejects the row;
-- `title` and `text` are preserved exactly after RFC 4180 CSV decoding,
-  including embedded newlines. The importer performs no trimming or cleaning;
-- an empty `authors` value becomes `[]`. A valid JSON array containing only
-  strings is preserved. Any other non-empty value becomes a one-element JSON
-  string array; commas are never interpreted as author separators;
+- source `title`, `text`, and `authors` values are discarded before any
+  transaction row, warning, log, or job result is created. Their projected
+  compatibility fields are always empty;
 - for every represented model family, `predicted_label` must be an integer in
   `0..4` and `fold_id` must be an integer in `1..5` on every row;
 - a probability vector must be either entirely empty or contain all five
@@ -100,6 +109,8 @@ The importer converts this wide format into the normalized CSV ledgers defined
 in `csv-storage-contract.md`. It must leave a server-local source file
 unchanged, retain an import checksum, and report
 conflicting duplicate predictions instead of silently choosing one.
+Conflicts are scoped to repeated article/model outputs within that source;
+later imports with different source identities create separate immutable runs.
 
 The generated bundled release is a documented exception chosen before
 publication: exact duplicate URLs are resolved by retaining the first source
@@ -112,33 +123,46 @@ verified bundled release only, article metadata comes from the first released
 row in manifest part/row order, while later rows can contribute predictions for
 a different family/fold identity. Identical repeated `(article, family, fold)`
 outputs are deduplicated; a conflicting repeated output would fail seed import.
-The current result is exactly 77,708 unique predictions across 20 historical
+The current result is exactly 77,708 unique prediction runs across 20 historical
 virtual family/fold models. This release rule does not authorize the runtime
 importer to resolve conflicts silently in arbitrary user datasets.
 
-The public release retains real URLs, domains, titles, article bodies, and
-authors. Those article fields originate from their respective publishers; the
-release does not claim ownership of them or change their copyright status.
+The public release retains real URLs and normalized publisher domains but
+contains empty `title`, `text`, and `authors` fields. It therefore redistributes
+no extracted editorial content.
 
 ## 4. Text acquisition and model input
 
 The experimental text pipeline did not apply text cleaning, stemming,
 lemmatization, case normalization, or any other linguistic preprocessing.
 
-For a new URL, the application reproduces this boundary:
+For any requested online acquisition (missing-run retrieval, recomputation, or
+content-only enrichment), the application reproduces this boundary:
 
 1. discover article URLs from a publisher homepage with `newspaper3k`, or
    accept an article URL directly;
-2. download and parse each page with `newspaper3k`;
+2. download each page through the controlled HTTP client and parse the supplied
+   HTML with `newspaper3k` (the library may not issue an unchecked request);
 3. use the parser's extracted article text as the classifier text input;
 4. run `langdetect` on that extracted text and accept it only when the detected
    code is `en`;
-5. pass the unchanged extracted text to the selected model tokenizer.
+5. when inference is required, pass the unchanged extracted text to the
+   selected model tokenizer; content-only enrichment stops after validation;
+6. retain authors and raw HTML only in memory. Retain extracted title/body after
+   validation only when that request explicitly uses `save_local`; otherwise
+   discard them before committing the result.
 
 Tokenizer operations such as subword tokenization, truncation, attention-mask
 creation, and padding are required model-input encoding, not an additional
 text-cleaning stage. URL canonicalization also does not modify the classifier
 text.
+
+Without `save_local`, editorial content must never be written to CSV, job
+payloads, API responses, frontend state, logs, exception messages, caches,
+temporary files, or telemetry. With `save_local`, only title and unchanged
+extracted body may be written to the local article CSV and returned by the
+dedicated content endpoint; authors, raw HTML, snippets, and content in normal
+responses remain prohibited. Parsing always uses in-memory HTML/text APIs.
 
 Empty extraction and parser failure produce `EXTRACTION_FAILED` or `TEXT_EMPTY`.
 Before language detection, the application normalizes no content but measures
@@ -284,7 +308,7 @@ The MVP adopts this identity policy:
 ```text
 article identity    = canonical article URL
 publisher identity  = normalized publisher domain
-prediction identity = canonical article URL + model identity
+prediction run      = immutable run ID + article identity + model identity
 ```
 
 No content hash or article-version comparison is used. For a submitted URL,
@@ -293,14 +317,11 @@ checks local history, and only on a miss follows redirects and reads a declared
 canonical URL. It then checks history again and derives the publisher domain
 from the final URL.
 
-If the canonical URL and selected model already have an output, that output is
-returned without downloading or comparing article text. If the URL exists but
-that model has no output, stored text is usable only when it passes the minimum
-length gate and deterministic English check. Imported text with an empty
-`detected_language` is checked locally at this point; on successful prediction,
-the same transaction appends an article version with `detected_language=en`
-without changing its text. Fetching occurs only when stored text is absent or
-fails either gate and strict offline mode is false.
+Under `reuse`, the latest compatible run is returned without downloading the
+article. If no run exists, validated user-saved body may be passed unchanged to
+the tokenizer; otherwise the page is retrieved. Under `recompute`, the page is
+always retrieved and a new immutable run is created. No content hash or text
+comparison influences run identity or reuse.
 
 ## 8. English-language scope
 
@@ -315,7 +336,7 @@ All newly evaluated articles must be detected as English by `langdetect` after
 
 ## 9. Publisher aggregation
 
-A publisher evaluation uses 2–50 compatible predictions from one exact model
+A publisher evaluation uses 2–50 compatible prediction runs from one exact model
 identity and one normalized publisher hostname. Input is either an explicit
 same-publisher list or a publisher request whose default requested count is 10.
 Articles from different normalized hostnames cannot be combined.
@@ -337,31 +358,49 @@ The MVP exposes exactly three methods:
    to three decimal places, and compute the result class as
    `floor(raw_mean + 0.5)`. Because inputs are `0..4`, the result remains `0..4`.
 3. **`mean_probabilities`**, method version `1`: require a complete valid vector
-   for every prediction, compute each output component as its arithmetic mean,
+   for every run, compute each output component as its arithmetic mean,
    and choose the numerically smallest class whose mean component equals the
    maximum. Store all five mean components and the result class.
 
 The methods are not interchangeable. Probability averaging is disabled with
-`PROBABILITIES_REQUIRED` when any included prediction lacks a vector. Fewer
-than two compatible successful predictions is `INSUFFICIENT_ARTICLES`; no
+`PROBABILITIES_REQUIRED` when any included run lacks a vector. Fewer
+than two compatible successful runs is `INSUFFICIENT_ARTICLES`; no
 publisher result is created. Ordering does not change these commutative formulas
 but is preserved exactly for provenance.
 
 ## 10. Compatibility and provenance
 
-- Predictions from different artifacts or folds are not mixed unless an
+- Runs from different artifacts or folds are not mixed unless an
   explicit ensemble is later defined.
 - A changed base revision, tokenizer, input length, padding policy, class order,
   or adapter configuration changes model identity.
 - Each imported output retains its family and fold.
-- Each new output retains the checkpoint checksum, recipe version, extraction
-  and tokenizer settings, software versions, device, timing, and status.
-- Imported, reused, and newly computed results retain distinct provenance.
+- Each new run retains the exact model identity (including checkpoint,
+  tokenizer, and recipe settings), application/library versions, input-source
+  category, device, and timing. The application version fixes the versioned
+  extraction/language contract used for that run.
+- Imported, reused, and recomputed runs retain distinct provenance. Reuse never
+  creates a run; every actual inference does.
 - Probability aggregation requires complete vectors for every included item.
 - The class order remains `0 < 1 < 2 < 3 < 4`; no protected score mapping is
   stored or shown.
 
 ### Exact and historical model identity
+
+Prediction-run identity is separate from model identity. Imported runs use
+UUIDv5 in the application namespace over
+`prediction-run:<article_id>:<model_id>:import:<source_import_id>`; every local
+inference uses a new UUIDv4. A run is immutable and records input source
+`saved_local` or `ephemeral_web`, action `missing_run_inference` or `recompute`,
+and whether the input title/body was retained. Repeated inference with identical
+weights and URL is still a distinct run. Evaluations reference run IDs, never a
+mutable article/model shortcut.
+
+For a local run, `software_versions_json` is a canonical JSON object containing
+at least `application`, `python`, `torch`, `transformers`, `tokenizers`,
+`peft`, `newspaper3k`, and `langdetect`; an unused optional runtime library is
+the JSON value `null`, not an omitted key. Imported runs use `{}` because those
+versions are unavailable and must not be guessed.
 
 `artifact_sha256` is deterministic. For a single-file artifact it is SHA-256
 of the exact file bytes. For a directory artifact, symlinks are rejected; the
@@ -409,7 +448,7 @@ ID is the SHA-256 of canonical JSON:
 
 ```json
 {
-  "dataset_content_digest": "76d1434f47df497c62c0dc360b824f3edf797c6501e2bcde560ff2c3378867ea",
+  "dataset_content_digest": "731c5661d6b6f8cfa75076dc8ef22af49d92ed11250a6b684b0b6af0de390b71",
   "family": "bert",
   "fold_id": 1,
   "identity_kind": "historical_virtual",
@@ -421,15 +460,16 @@ ID is the SHA-256 of canonical JSON:
 `family` and `fold_id` vary per imported output. A user-supplied historical
 import uses `release_id = "user_import:<source_sha256>"` and that import's
 `dataset_content_digest` is exactly the lowercase SHA-256 of the uploaded or
-server-local source bytes. For the bundled multipart release only, it is the
+server-local source bytes. For the bundled manifest release only, it is the
 manifest's verified `content_digest_sha256`. These rules prevent unrelated
 files from sharing a virtual model and avoid an undefined reserialization step.
 
-Such a model is `historical_only`: stored outputs can be browsed and aggregated
+Such a model is `historical_only`: stored runs can be browsed and aggregated
 but it cannot infer a missing prediction. Registering a local artifact creates
 a separate exact model ID; historical outputs are not silently claimed as
-outputs of that artifact. A missing exact prediction can still be computed
-offline from stored article text.
+outputs of that artifact. A runnable artifact can infer a missing run from
+user-saved validated body or fresh online retrieval; a historical-only model
+cannot infer from either.
 
 ## 11. Required scientific warnings
 
@@ -441,7 +481,9 @@ The UI makes these limitations accessible near results:
 - the paper defines the validation scope governing interpretation of outputs;
 - the public tool does not calculate accuracy against protected labels;
 - a publisher result depends on the selected articles, checkpoint, and
-  aggregation method.
+  aggregation method;
+- locally saving publisher content is optional user-controlled retention and
+  does not grant redistribution rights.
 
 ## 12. Reproducibility gate
 
@@ -453,7 +495,8 @@ Before a family adapter is called compatible, an automated fixture must verify:
    redistributable English text fixture;
 4. five probabilities matching a reference run within tolerance;
 5. correct fold identity and publisher aggregation;
-6. absence of protected fields in fixtures, CSV database, logs, UI, and exports.
+6. absence of protected values, unconditional editorial retention, authors/raw
+   HTML, and content leakage through normal responses/logs/exports.
 
 Live webpages are not stable scientific fixtures. Reference tests must freeze
 their allowed input text instead of depending on a publisher page remaining

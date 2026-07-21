@@ -15,6 +15,7 @@ from pathlib import Path
 try:
     from .prepare_public_dataset import (
         PUBLIC_COLUMNS,
+        REDACTED_EDITORIAL_COLUMNS,
         normalized_domain,
         open_source,
         serialize_csv_row,
@@ -24,6 +25,7 @@ try:
 except ImportError:
     from prepare_public_dataset import (
         PUBLIC_COLUMNS,
+        REDACTED_EDITORIAL_COLUMNS,
         normalized_domain,
         open_source,
         serialize_csv_row,
@@ -58,6 +60,8 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("columns") != PUBLIC_COLUMNS:
         raise ValueError("manifest columns do not match the public schema")
+    if manifest.get("redacted_editorial_columns") != REDACTED_EDITORIAL_COLUMNS:
+        raise ValueError("manifest editorial-redaction declaration is invalid")
 
     max_part_bytes = int(manifest["max_part_bytes"])
     part_names: list[str] = []
@@ -97,6 +101,11 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
                 raise ValueError(f"non-contiguous article_id at release row {row_number}")
             if row["domain"] != normalized_domain(row["url"]):
                 raise ValueError(f"domain mismatch at release row {row_number}")
+            for column in REDACTED_EDITORIAL_COLUMNS:
+                if row[column] != "":
+                    raise ValueError(
+                        f"editorial field {column} is not empty at release row {row_number}"
+                    )
             validate_model_values(row, row_number)
             digest.update(serialize_csv_row(row))
             url_counts[row["url"]] += 1
@@ -148,6 +157,8 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
                         expected = normalized_domain(source_row["url"])
                     elif column == "url":
                         expected = source_row[column].strip()
+                    elif column in REDACTED_EDITORIAL_COLUMNS:
+                        expected = ""
                     else:
                         expected = source_row[column]
                     if release_row[column] != expected:

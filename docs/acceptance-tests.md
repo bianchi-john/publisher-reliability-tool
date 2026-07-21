@@ -113,7 +113,7 @@ current API resource and scientific value matches the pre-compaction snapshot.
 
 ### AT-018 — Restart persistence
 
-**Given** locally inferred predictions and evaluations, **when** the application
+**Given** locally inferred prediction runs and evaluations, **when** the application
 is stopped and restarted, **then** every committed record remains searchable and
 the seed import is not duplicated.
 
@@ -122,16 +122,20 @@ the seed import is not duplicated.
 ### AT-019 — Bundled release verification
 
 **Given** `dataset/predictions/manifest.json`, **when** verification runs,
-**then** four listed parts match sizes and SHA-256, no part exceeds 24 MiB, and
-the result reports 19,476 source rows, 19,429 released unique URLs, 42 duplicate
-source groups, and 47 skipped later occurrences.
+**then** its one listed part matches size and SHA-256, is below 24 MiB, all
+`title`, `text`, and `authors` fields are empty, and the result reports 19,476
+source rows, 19,429 released unique URLs, 42 duplicate source groups, and 47
+skipped later occurrences.
 
 ### AT-020 — Protected source data absent
 
-**Given** every bundled part, local ledger, API response, UI payload, export,
-log, and reachable Git object, **when** the protected-data audit runs, **then**
-bundled and runtime CSV headers contain no protected source columns and no
-original label, score, range, or reference-provider metadata value is present.
+**Given** every bundled part, imported projection, local ledger, API response,
+UI payload, export, log, and reachable Git object, **when** the protected-data
+audit runs, **then** bundled and runtime CSV headers contain no protected source
+columns and no original label, score, range, or reference-provider metadata
+value is present. Bundled and imported editorial compatibility fields are
+empty; runtime title/body can be non-empty only after an auditable explicit
+`save_local` request. Authors and raw HTML are always absent.
 Blocked column names may appear only in documentation, manifest exclusion
 metadata, and value-free warnings.
 
@@ -139,7 +143,7 @@ metadata, and value-free warnings.
 
 **Given** the bundled release was imported, **when** startup repeats, **then**
 the first import yields exactly 19,411 canonical articles, 77,708 unique
-predictions, and 20 historical virtual models; the same checksum/schema then
+prediction runs, and 20 historical virtual models; the same checksum/schema then
 resolves to the existing import and those counts do not change.
 
 ### AT-022 — Streaming large import
@@ -151,16 +155,18 @@ shows job progress, and the browser never loads the complete file.
 ### AT-023 — Protected user-import projection
 
 **Given** a private source containing allowed fields and blocked provider
-columns, **when** import completes, **then** allowed records persist, blocked
-column names appear in a value-free warning, and blocked values appear nowhere.
+columns plus editorial content, **when** import completes, **then** URLs and
+model outputs persist, editorial fields are empty, blocked column names appear
+in a value-free warning, and blocked/editorial values appear nowhere.
 
 ### AT-024 — User-import conflict
 
-**Given** two user rows resolve to one canonical URL with conflicting content
-or predictions, **when** import runs, **then** the conflict is counted and
+**Given** two rows in one user source resolve to one canonical URL with
+conflicting outputs for the same model identity, **when** import runs, **then**
+the conflict is counted and
 rejected; the runtime does not apply the bundled first-occurrence policy. Its
 source line and `IMPORT_CONFLICT` code remain queryable after restart without
-persisting either conflicting body.
+persisting either editorial source value.
 
 ### AT-025 — Import source immutability
 
@@ -208,7 +214,7 @@ returns `IDEMPOTENCY_CONFLICT`.
 ### AT-032 — Error privacy
 
 **Given** validation, network, model, and internal failures, **when** API errors
-and logs are inspected, **then** API keys, authorization headers, article bodies,
+and logs are inspected, **then** API keys, authorization headers, editorial content,
 protected values, unrestricted paths, and production stack traces are absent.
 
 ### AT-033 — SSE job events
@@ -220,28 +226,31 @@ events without duplicating or cancelling the job.
 ### AT-034 — CSV export
 
 **Given** filters returning more than one page, **when** export runs, **then** it
-streams the complete filtered set as valid CSV; article text is absent unless
-`include_text=true`, and protected fields are always absent.
+streams the complete filtered set as valid CSV; editorial and protected fields
+contain no source values, and `include_text` is rejected as an unknown option.
 
 ## E. Local identity and offline behavior
 
 ### AT-035 — Offline URL hit
 
-**Given** a stored prediction for normalized URL and exact model ID, **when** a
-tracking-parameter variant is evaluated, **then** it returns the stored output,
-records origin `reused`, and makes zero DNS/HTTP calls.
+**Given** a stored run for normalized URL and exact model ID, **when** a
+tracking-parameter variant is evaluated with `reuse + discard`, **then** it
+returns that exact run, records a `reused` job subresult, creates no run, and
+makes zero DNS/HTTP calls.
 
-### AT-036 — Stored-text offline inference
+### AT-036 — Offline inference from saved local content
 
-**Given** a stored English article with valid text but no prediction for a
-compatible local model, **when** evaluated with outbound networking blocked,
-**then** inference succeeds from stored text and records `network_used=false`.
+**Given** a known URL with a validated locally saved body but no run for the
+selected compatible model, **when** evaluated in strict offline mode with
+`reuse + discard`, **then** it creates one run with input source `saved_local`,
+makes zero DNS/HTTP calls, and leaves the saved content unchanged.
 
 ### AT-037 — Missing local content offline
 
-**Given** an unknown article or insufficient stored text and strict offline
-mode, **when** evaluation runs, **then** the job fails `NETWORK_REQUIRED`, makes
-zero outbound calls, and browsing remains usable.
+**Given** an unknown article, or a known article with neither a reusable run nor
+saved body, and strict offline mode, **when** `reuse` evaluation runs, **then**
+the job fails `NETWORK_REQUIRED`, makes zero outbound calls, and browsing
+remains usable.
 
 ### AT-038 — Offline frontend
 
@@ -252,8 +261,9 @@ CDN, font, analytics, or documentation request leaves the origin.
 ### AT-039 — Canonical redirect hit
 
 **Given** offline lookup misses but online redirect/canonical resolution reaches
-a stored URL, **when** evaluated, **then** the second lookup reuses stored output
-and does not download/compare article text after the hit.
+a stored URL, **when** evaluated with `reuse + discard`, **then** the second
+lookup reuses the exact stored run and discards already received page bytes
+without extraction or inference.
 
 ### AT-040 — URL normalization boundaries
 
@@ -281,7 +291,9 @@ and exact extracted text is passed unchanged to validation/tokenization.
 
 **Given** direct or redirected URLs resolving to private, loopback, link-local,
 reserved, multicast, or unspecified addresses, **when** requested, **then** the
-job fails before connection and no request reaches that address.
+job fails before connection and no request reaches that address. A DNS-rebinding
+fixture and an ambient proxy environment cannot change the validated connected
+peer or bypass the block.
 
 ### AT-044 — Extraction failures
 
@@ -312,13 +324,17 @@ same-host unique articles count and every rejection category is reported.
 ### AT-048 — Single article
 
 **Given** a valid article and compatible model, **when** single evaluation
-completes, **then** one article prediction with five probabilities commits and
-no publisher evaluation is created.
+with the default `reuse + discard` completes, **then** one immutable article
+run with five probabilities commits and no publisher evaluation is created.
+API payloads, frontend state, logs, caches, temporary directories, and every
+CSV editorial field contain no extracted title, body, author, or raw HTML value
+after completion.
 
 ### AT-049 — Explicit same-publisher list
 
-**Given** 2–50 distinct same-publisher URLs, **when** all succeed, **then** one
-evaluation commits with exactly the ordered predictions and selected method.
+**Given** 2–50 distinct same-publisher URLs, **when** all requested prediction
+and retention subresults succeed, **then** one evaluation commits with exactly
+the ordered prediction-run IDs and selected method.
 
 ### AT-050 — Duplicate list input
 
@@ -335,14 +351,17 @@ reported as article outputs only.
 ### AT-052 — Stored-only publisher request
 
 **Given** enough eligible stored articles, **when** a `stored_only` publisher
-request runs with the network blocked, **then** it uses deterministic stored
-ordering, makes zero network calls, and commits requested count predictions.
+ordering, accepts only `reuse + discard`, makes zero network calls, and commits
+an evaluation using the requested number of existing runs. Any other control
+combination is rejected before job creation.
 
 ### AT-053 — Stored-first publisher request
 
 **Given** fewer eligible stored articles than requested and network access,
-**when** `stored_first` runs, **then** stored candidates are used first and only
-the missing count is sought from normalized web candidates.
+**when** `stored_first` runs, **then** stored predictions are reused first,
+saved local bodies that lack the output are inferred next, known stored URLs
+still lacking it are retrieved next, and homepage discovery seeks only the
+still-missing count.
 
 ### AT-054 — Web-only publisher request
 
@@ -370,8 +389,10 @@ of `allow_partial`.
 
 ### AT-058 — Stored selection
 
-**Given** 2–50 selected articles on one publisher page, **when** evaluated,
-**then** no discovery occurs and only the selected article IDs can contribute.
+**Given** 2–50 selected articles on one publisher page, **when** evaluated with
+explicit prediction/retention controls, **then** no discovery occurs and only
+the selected article IDs and their exact selected/created run IDs can
+contribute.
 
 ## H. Aggregation
 
@@ -415,8 +436,11 @@ combined into one evaluation.
 **Given** bundled predictions for a historical virtual family/fold, **when**
 aggregated, **then** aggregation succeeds; when a missing prediction is requested
 from that virtual model, inference fails because it is not runnable. Publisher
-`stored_first` and `web_only` requests with that model are rejected before any
-network access.
+`stored_first`, `web_only`, and `recompute` requests with that model are
+rejected before inference/network discovery. An explicit article with an
+existing historical run may use `save_local` as content-only retrieval without
+creating or relabelling a run; a URL still lacking the historical run after
+canonical resolution saves no content and fails `MODEL_NOT_RUNNABLE`.
 
 ## I. Models
 
@@ -516,15 +540,16 @@ calibration limits, exact model/fold, selected articles, and aggregation method.
 **Given** 100,000 articles and 400,000 predictions with startup indexes already
 built on Ubuntu 24.04, four x86-64 CPU cores, 16 GiB RAM, and local SSD storage,
 **when** 20 sequential filtered first-page requests run after one warm-up,
-**then** p95 server time is at most 2 seconds and article bodies are not scanned.
+**then** p95 server time is at most 2 seconds; no title/body value is copied into
+a search/index structure, regardless of opt-in content in `articles.csv`.
 
 ### AT-081 — Repository integrity
 
 **Given** every reachable branch, tag, commit, and Git object, **when** audited,
 **then** no private full source, model weight, training notebook, protected
 reference field/value, credential, or local data directory is present, and
-`LICENSE` plus `MODEL-OUTPUT-LICENSE.md` exist without claiming rights over
-third-party article text.
+`LICENSE` is Apache-2.0 and `MODEL-OUTPUT-LICENSE.md` applies CC0-1.0 only to
+project-owned generated outputs/database arrangement.
 
 ### AT-082 — Native/Compose scientific equivalence
 
@@ -536,5 +561,41 @@ probability is within the loader fixture tolerance.
 
 **Given** strict offline mode, bundled history, and one fully cached compatible
 model, **when** a user browses history, aggregates stored predictions, and runs
-stored-text inference, **then** all succeed and captured outbound connection
-count is zero.
+an exact stored-run lookup plus missing-run inference from a previously saved
+body, **then** all succeed and captured outbound connection count is zero; a
+missing run without saved content returns `NETWORK_REQUIRED`, and recomputation
+is unavailable.
+
+### AT-084 — Evaluation preflight
+
+**Given** existing runs, saved and unsaved known articles, an unknown URL, and
+each model state, **when** preflight is called for all three input modes and
+control combinations, **then** it performs no DNS/HTTP call or mutation and
+returns the exact planned operation, reusable run, content state, network
+reason, local publisher counts, and blocking code defined by the API contract.
+The frontend renders those facts before confirmation and job submission repeats
+validation against current state.
+
+### AT-085 — Immutable recomputation and exact evaluation references
+
+**Given** an existing article/model run, **when** two successful `recompute`
+requests use different idempotency keys, **then** each freshly retrieves the
+page and creates a distinct UUIDv4 run without updating/deleting the earlier
+run. Repeating either request with its original key returns its original job and
+run. An evaluation continues to resolve exactly the run IDs committed with it
+after newer runs exist and after restart.
+
+### AT-086 — Opt-in content lifecycle
+
+**Given** an unsaved article, **when** `reuse + save_local` is requested and a
+run already exists, **then** the page is fetched/validated, only title/body are
+saved, no inference/new run occurs, and dedicated content read succeeds while
+normal resources/exports remain content-free and the frontend renders it as
+inert text. **When** purge is confirmed,
+**then** every managed live and backup CSV version is physically blanked,
+authors/raw HTML never appear, runs/evaluations remain unchanged, external-copy
+limits are disclosed, and an interrupted purge finishes idempotently before
+next readiness. A later `discard` request never purges or replaces previously
+saved content. If content-only retrieval resolves to another canonical article,
+it returns `CANONICAL_IDENTITY_CHANGED`, saves nothing under the old identity,
+and leaves the reused run intact.

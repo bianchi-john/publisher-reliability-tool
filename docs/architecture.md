@@ -60,6 +60,7 @@ executor.
 | `models.loaders` | Versioned BERT, RoBERTa, Llama, and Mistral adapters |
 | `inference` | Tokenization, execution, softmax validation, provenance |
 | `aggregation` | Versioned aggregation formulas and availability checks |
+| `content` | Explicit local-content save/read/purge policy and recovery |
 | `jobs` | Queue, progress, cancellation, recovery, concurrency limits |
 | `frontend` | Compiled React assets only; source lives in a separate frontend tree |
 
@@ -74,9 +75,16 @@ The authoritative mutable database is the CSV store described in
 transaction ledger. In-memory indexes accelerate reads but are disposable and
 are rebuilt from committed CSV rows at startup.
 
+The only exception to physical append-only history is a confirmed local-content
+purge, which irreversibly blanks editorial fields under sections 16 and the CSV
+purge contract without changing scientific records.
+
 The repository seed release is immutable input. On first startup it is verified
-and projected into the local CSV store. The source parts are never edited. New
-articles and predictions are written only to the configured data directory.
+and projected into the local CSV store. The source parts are never edited and
+contain empty editorial compatibility fields. New article identifiers and
+prediction runs are written only to the configured data directory. Extracted
+title/body are written there only after explicit `content_retention=save_local`;
+authors and raw HTML are never persisted.
 
 The application shall not use SQLite as a cache, index, queue, or fallback. A
 process-local Python index is allowed because CSV remains authoritative and a
@@ -88,7 +96,8 @@ Only one application process may own a data directory. Startup acquires an
 exclusive POSIX `flock` on `<data-dir>/.writer.lock` and retains it until clean
 shutdown. Failure to acquire it is `STORAGE_LOCKED`.
 
-Every logical mutation uses this sequence:
+Every ordinary logical mutation uses this sequence; content purge instead uses
+the privacy-monotonic rewrite protocol in section 16:
 
 1. Acquire the process write mutex.
 2. Append a `BEGIN` record with a UUID transaction identifier to
@@ -114,16 +123,18 @@ Startup streams committed latest record versions into indexes for:
 - article by canonical URL and article ID;
 - publisher by normalized hostname and publisher ID;
 - model by model ID and artifact path;
-- prediction by `(article_id, model_id)`;
+- all prediction runs and the latest reusable run by `(article_id, model_id)`;
+- saved-content presence and article-row offset, without indexing title/body;
 - evaluations by publisher, model, method, and time;
 - jobs and imports by ID and status;
-- case-folded title, URL, hostname, and display-name search fields.
+- case-folded URL and hostname search fields.
 
-Article bodies are not retained in a duplicate search index. Detail reads seek
-the applicable CSV row using a byte-offset index. The index retains lightweight
+Saved title/body are never copied into a search index, cache, job, or normal API
+projection. Their dedicated read seeks the current article CSV row using a
+byte-offset index. Other detail reads use the same mechanism. The index retains lightweight
 `(record_id,record_version,commit_sequence,offset)` history needed to resolve a
-pagination snapshot, but not historical article bodies. Pagination sorts by an
-indexed stable tuple and uses the commit watermark defined by the API contract.
+pagination snapshot. Pagination sorts by an indexed stable tuple and uses the
+commit watermark defined by the API contract.
 
 After a transaction commits, its new versions update indexes synchronously
 before the HTTP response reports success. Failed index update is fatal: the
@@ -139,10 +150,12 @@ executor has separate bounded lanes:
 - GPU inference lane: exactly 1 concurrent task;
 - CSV commit lane: exactly 1 writer through the storage mutex.
 
-Job phase identifiers are `validating`, `local_lookup`, `discovering`,
-`fetching`, `extracting`, `language_check`, `loading_model`, `inferencing`,
-`aggregating`, and `committing`. Phase and integer progress are persisted at
-meaningful boundaries, not for every token or HTTP byte.
+The exhaustive phase identifiers and ordering rules are defined in Product
+Specification section 12. The executor maps retrieval work to `retrieving`,
+model execution to `inferring`, and privacy erasure to `purging_content`
+followed by `verifying` and `committing`; it shall not emit architecture-only aliases.
+Phase and integer progress are persisted at meaningful boundaries, not for
+every token or HTTP byte.
 
 On startup, `queued` jobs return to the queue. A job left `running` is appended
 as `failed` with `PROCESS_INTERRUPTED`; it is never silently resumed after a
@@ -184,8 +197,10 @@ This normalized candidate is checked locally before any network operation.
 
 ### 8.2 Online canonical resolution
 
-Only after a local miss and when offline mode is false, retrieval follows at
-most five safe redirects. Relative canonical links are resolved against the
+Only when the requested control requires current page access and offline mode
+is false, retrieval follows at most five safe redirects. A reusable run or
+saved validated body can therefore avoid retrieval under the exact product
+rules. Relative canonical links are resolved against the
 final response URL. The canonical URL is the first document-order
 `<link rel="canonical">` whose normalized publisher identity equals that of
 the final response; invalid or cross-publisher canonical links are ignored with
@@ -207,6 +222,10 @@ The retrieval client:
 - accepts only `http` and `https`;
 - resolves DNS and rejects loopback, link-local, multicast, unspecified,
   private, and reserved destination addresses before every request and redirect;
+- connects only to an address from that validated resolution result, preserves
+  the original hostname for HTTP Host/TLS SNI, and verifies the connected peer
+  address remains in the approved set, preventing DNS-rebinding between check
+  and connection;
 - uses the fixed user agent `PublisherReliabilityTool/<version> (+project URL)`;
 - respects `robots.txt`; denial is `ROBOTS_DENIED`;
 - limits redirects to 5;
@@ -217,6 +236,8 @@ The retrieval client:
 - accepts HTML/XHTML responses only;
 - stops after 10 MiB decompressed response body per page;
 - never sends cookies, credentials, browser session state, or referrer data;
+- uses `httpx` with `trust_env=false`, so ambient proxy/credential environment
+  variables cannot bypass destination checks;
 - does not bypass access controls or execute page JavaScript.
 
 Robots policy is evaluated for the fixed user agent before each homepage or
@@ -237,6 +258,29 @@ component fetches robots files, homepages, and article HTML through the safe
 parsing/building APIs. Redirect and DNS validation therefore cannot be bypassed
 by the extraction library.
 
+Response bytes, parsed HTML, titles, author values, and extracted bodies start
+in bounded job memory and are never placed in a shared cache or temporary
+spool. With `content_retention=discard`, every editorial value is released
+before terminal job persistence. With explicit `save_local`, only the extracted
+title and validated body may be committed to `articles.csv`; authors and raw
+HTML are released in all cases. Prediction-run and job rows never embed any of
+these values. The saved body can later be read only through the dedicated
+content endpoint or used as inference input under `reuse`; `recompute` ignores
+it and retrieves afresh.
+
+When retrieval exists only to add content to an already selected reusable run,
+the resolved canonical article ID must equal that run's article ID. Otherwise
+the worker commits no content and reports `CANONICAL_IDENTITY_CHANGED`; it does
+not attach current page text to an older identity. Missing-run inference and
+recomputation instead attach their new run/content to the normally resolved
+canonical identity.
+
+Content saving and inference are separate durable subresults. A candidate is a
+request success only when it has a selected/created run and, if requested, a
+saved validated body. Failure of one does not roll back an already committed
+other subresult, and the job reports both states without copying content into
+its result.
+
 ## 10. Model lifecycle
 
 Artifacts are discovered from configured roots, excluding hidden directories,
@@ -252,7 +296,8 @@ states are:
 - `unsupported`: no explicit supported recipe or custom manifest.
 
 Only `compatible` models can start inference. `historical_only` models remain
-selectable only for aggregating stored predictions. Loading is lazy and cached
+selectable for browsing, reusing/aggregating stored runs, and content-only
+enrichment after a run is resolved; they never start inference. Loading is lazy and cached
 by model ID. The cache contains at most one large quantized model at a time and
 evicts an idle model before another is loaded. Eviction never deletes artifact
 files.
@@ -323,7 +368,7 @@ simultaneously because the writer lock prevents it.
 ## 14. Observability and privacy
 
 Structured JSON logs include timestamp, level, request ID, job ID, phase, error
-code, duration, and safe identifiers. They exclude article bodies, protected
+code, duration, and safe identifiers. They exclude all editorial content, protected
 values, API keys, authorization headers, cookies, full upload paths, and model
 tensor contents. URLs are logged only at `debug`; normal logs use article ID and
 hostname.
@@ -337,7 +382,7 @@ the loopback endpoint `/api/v1/status`; no telemetry leaves the machine.
 | --- | --- |
 | Missing model | History remains usable; evaluation is blocked with setup guidance |
 | Missing base/tokenizer | Model is `dependency_missing`; no implicit download during inference |
-| Network unavailable | Local operations continue; network-dependent job returns `NETWORK_REQUIRED` or `NETWORK_TIMEOUT` |
+| Network unavailable | Browsing, run reuse, aggregation, and inference from a saved validated body continue; a retrieval/recompute/discovery operation returns `NETWORK_REQUIRED` or `NETWORK_TIMEOUT` |
 | Too few publisher articles | No aggregate unless partial is allowed and at least two succeed |
 | Mixed publishers | No publisher evaluation transaction commits |
 | Missing probabilities | Hard-class methods remain available; probability mean is disabled |
@@ -346,16 +391,39 @@ the loopback endpoint `/api/v1/status`; no telemetry leaves the machine.
 | Process interruption | Running jobs become failed on restart; committed data remains visible |
 | Insufficient RAM/VRAM | Preflight fails the job before model load and preserves browsing |
 | Frontend build missing | Production readiness fails and the server does not bind |
+| Content purge interrupted | Before readiness, recovery idempotently finishes blanking every application-managed live/backup copy; predictions and evaluations remain intact |
 
-## 16. Architecture invariants
+## 16. Local-content purge recovery
+
+Content purge is the one documented exception to ordinary append-only entity
+history. It is privacy-monotonic: once confirmed, recovery never restores an
+older title/body merely to regain transaction symmetry.
+
+With the writer lock held, the worker enumerates the live `articles.csv` and
+every application-created CSV backup, writes a verified redacted sibling for
+each, fsyncs it and its directory, and atomically replaces that file. The
+operation is idempotent. If the process stops after only some replacements,
+startup detects the interrupted `content_purge` job, completes the same
+redaction across the remaining managed files before readiness, then records a
+recovery warning. The old job is still terminally marked `failed` with
+`PROCESS_INTERRUPTED`; the deterministic startup recovery is a separate
+storage-recovery action, not a resumed job. No unredacted staging copy is left
+behind. External user-created copies are outside the managed set and the UI
+warns about them before confirmation.
+
+## 17. Architecture invariants
 
 1. CSV is the only authoritative mutable persistence.
 2. One data directory has at most one writer process.
 3. Uncommitted transaction rows are never visible.
 4. UI and API share service and validation logic.
-5. A stored compatible prediction prevents article network access.
-6. A publisher evaluation references exact prediction records from one model.
+5. `reuse` plus an existing compatible run prevents inference; it also prevents
+   article network access unless unsaved content was explicitly requested.
+6. A publisher evaluation references exact immutable prediction runs from one
+   model.
 7. No protected reference field passes the import boundary.
 8. Offline mode creates no outbound application connection.
 9. Container and native modes produce byte-compatible CSV state.
 10. Every externally observable behavior is covered by an acceptance test.
+11. Authors and raw HTML never persist; title/body persist only after explicit
+    `save_local` and can be physically purged from every managed CSV copy.

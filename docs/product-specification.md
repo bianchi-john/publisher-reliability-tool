@@ -43,19 +43,24 @@ The MVP shall:
   ZIP containers;
 - maintain all authoritative mutable state as local CSV ledgers;
 - browse, search, filter, paginate, inspect, and export local articles,
-  publishers, predictions, evaluations, models, imports, and jobs;
+  publishers, prediction runs, evaluations, models, imports, and jobs;
 - discover and validate supported local model artifacts;
 - register a model from a server-local path or a streamed browser/API upload;
 - show the official OSF download link and exact placement instructions;
-- run local model inference on usable stored text without network access;
-- fetch and extract a missing article only when local data cannot satisfy the
-  request;
+- run model inference locally from explicitly saved local text for a missing
+  reusable run, or from ephemeral article retrieval for a missing run or
+  explicit recomputation;
+- create a new immutable prediction run when recomputation is explicit;
+- optionally save only extracted title/body to the ignored local CSV data
+  directory after explicit per-request consent;
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   homepage with a requested count of 2–50 articles;
 - expose `majority_vote`, `ordinal_mean`, and `mean_probabilities` under their
   exact availability and tie rules;
-- store every successful new prediction and publisher evaluation across
+- store every successful new prediction run and publisher evaluation across
   restarts;
+- retain URL/publisher identity; discard title/body by default; never retain
+  authors or raw HTML;
 - show five-class model probabilities when present and `Not available` when
   absent;
 - show accessible charts backed by the same exact values rendered in tables;
@@ -71,6 +76,8 @@ The MVP shall not:
 - use SQLite, PostgreSQL, browser storage, or another database as authoritative
   persistence;
 - modify an imported source CSV;
+- persist extracted title/body without explicit `save_local` consent;
+- persist author values, raw HTML, or generated snippets under any option;
 - publish original reference-provider labels, scores, ranges, or metadata;
 - translate or evaluate non-English articles;
 - bypass paywalls, authentication, robots exclusions, or publisher access
@@ -116,7 +123,7 @@ that reads or mutates database ledgers acquires the same exclusive writer lock
 and fails `STORAGE_LOCKED`
 rather than running beside the server. `models scan` with no path scans the
 configured/default model roots. Successful commands print an English summary
-and machine-stable IDs/counts; they never print article bodies or protected
+and machine-stable IDs/counts; they never print editorial content or protected
 values.
 
 Example:
@@ -143,9 +150,10 @@ Startup performs these steps in order:
    values.
 2. Refuse multiple workers or another live writer for the same data directory.
 3. Create missing CSV ledger files with exact versioned headers.
-4. Recover or ignore uncommitted transactions and verify committed CSV rows.
-5. Verify the bundled dataset manifest and import it if its content digest has
-   not already been committed.
+4. Recover or ignore uncommitted transactions, complete any privacy-monotonic
+   interrupted content purge, and verify committed CSV rows.
+5. Verify the bundled dataset manifest and import it if its exact source
+   identity plus import schema version has not already been committed.
 6. Scan configured model directories and record each artifact as compatible,
    unavailable dependency, unsupported, or invalid.
 7. Start the background job executor.
@@ -165,18 +173,20 @@ second writer is a startup failure.
 All list, detail, chart, filter, pagination, aggregation of already compatible
 predictions, and CSV export operations complete without network access.
 
-### 7.2 Stored-text inference
+### 7.2 Ephemeral inference boundary
 
-If the selected article is stored with text that passes the text contract and
-the selected model is locally runnable, a missing prediction is computed from
-that stored text without accessing the network.
+The public seed contains no editorial content. User-saved title/body can support
+later local inference, but only after an earlier request explicitly used
+`content_retention=save_local`. Authors and raw HTML are always ephemeral.
 
 ### 7.3 Network-assisted inference
 
-Network access occurs only after both offline URL lookup and stored-text reuse
-fail, or when a publisher request explicitly requires web discovery. Each job
-records every attempted URL, final canonical URL, HTTP/extraction outcome, and
-whether the network was used.
+Network access occurs when no reusable run or saved body can satisfy the
+request, when `prediction_action=recompute`, when content is explicitly saved
+but not yet present, or when publisher discovery is required. Each job records
+attempted/final URLs, outcome, and network use. Unless `save_local` was explicit,
+extracted title/body are discarded before the terminal state commits. Authors
+and raw HTML are always discarded.
 
 ### 7.4 Strict offline mode
 
@@ -186,54 +196,97 @@ from creating outbound connections. A network-dependent job fails with
 
 ## 8. Evaluation workflows
 
+Every request carries two independent controls:
+
+- `prediction_action`: `reuse` (default) or `recompute`;
+- `content_retention`: `discard` (default) or `save_local`.
+
+`reuse` selects the latest reusable exact-model run by
+`inference_completed_at` descending then `prediction_run_id` ascending, using
+the CSV contract's imported-run fallback. If none exists, it infers from validated
+user-saved text when available, otherwise retrieves the page. `recompute`
+always retrieves the current page and creates a new immutable run, even when a
+run or saved body exists. `save_local` stores only the extracted title and body;
+it never changes run selection. When combined with reuse of an existing run, it
+fetches only if local content is absent and does not run inference.
+
+`discard` governs the current extraction only; it never deletes title/body
+saved by an earlier request. Only the confirmed purge workflow deletes saved
+content. `save_local` replaces older saved title/body with the newly validated
+extraction when they differ; an identical extraction creates no redundant
+article version.
+
+Every recomputation or missing-run inference creates a new
+`prediction_run_id`; no run is overwritten. Existing publisher evaluations keep
+references to the exact runs originally aggregated.
+
 Evaluation selectors list `compatible` runnable models and `historical_only`
 virtual models separately. A historical-only model can reuse and aggregate its
-stored predictions but cannot create a missing prediction. If any required
-article lacks that historical output, the job fails `MODEL_NOT_RUNNABLE` and
+stored runs and can add title/body to an article whose run is found, but cannot
+create a missing run or recompute. If any required article lacks that
+historical output after canonical resolution, the job fails
+`MODEL_NOT_RUNNABLE` before extraction/content saving for that article and
 suggests registering a local artifact; it never attributes the historical
 prediction to a different local checksum.
 
 A publisher request using a `historical_only` model accepts only
 `discovery_mode=stored_only`; the UI disables `stored_first` and `web_only`, and
-the API rejects either with `MODEL_NOT_RUNNABLE` before job creation. Explicit
-article lists remain allowed because every URL can be checked for an existing
-historical output without assuming discovery.
+the API rejects either with `MODEL_NOT_RUNNABLE` before job creation. Because
+`stored_only` itself requires `reuse + discard`, content enrichment for
+historical runs is done through single article, explicit article list, or stored
+selection instead. Those modes remain allowed because every URL can be checked
+for an existing historical output without assuming discovery.
 
 ### WF-001 — Evaluate one article
 
-1. The user submits one HTTP(S) article URL and selects one compatible model.
-2. The application performs offline URL normalization and checks for a stored
-   prediction with the exact model identity.
-3. On a prediction hit, the stored prediction is returned with origin `reused`;
-   no page request or text comparison occurs.
-4. If the article exists with usable stored text but lacks that model output,
-   deterministic length/language validation and inference run locally from the
-   stored text. Previously unvalidated imported text is marked `en` only in the
-   same successful commit; its bytes are unchanged.
-5. Otherwise the application requires network access, resolves the page,
-   extracts text, verifies English and minimum text length, and runs inference.
-6. The article and prediction are committed to CSV before the job becomes
-   `succeeded`.
-7. The response shows the predicted class, all five probabilities, model
-   identity, text origin, network-use flag, and warnings.
+1. The user submits one HTTP(S) article URL, one model, `prediction_action`, and
+   `content_retention`.
+2. The application performs offline URL normalization and checks for the
+   article, latest compatible run, and optional saved local content.
+3. `reuse + discard` returns an existing run with zero network access. If no run
+   exists, it infers from saved validated body or retrieves the page.
+4. `reuse + save_local` returns the existing run and, only when content is not
+   already saved, retrieves/validates the page and commits title/body without
+   inference. That content-only retrieval is pinned to the run's article: if
+   redirect/canonical resolution produces another article identity, saving
+   fails `CANONICAL_IDENTITY_CHANGED` and the reused run remains intact. With
+   no run it performs normal missing-run inference and saves the same
+   extraction under its resolved identity.
+5. `recompute` requires a runnable model, retrieves and validates the current
+   page, and creates a new run. `save_local` additionally commits the current
+   title/body; `discard` does not retain the fresh extraction and leaves any
+   earlier saved content unchanged.
+6. Content saving and run selection/creation are independent, durable
+   subresults. An article satisfies the request only when a run is available
+   and, for `save_local`, its validated content is saved. If either requested
+   subresult fails, that article fails, but an already committed counterpart is
+   retained and reported; for example, saved content survives a later inference
+   failure and a pre-existing reused run remains valid after a save failure.
+7. The response shows the selected/created run ID, class, five probabilities,
+   model identity, content-saved state, network-use flag, and warnings.
+
+Authors and raw HTML never cross the in-memory boundary. Title/body cross it
+only under explicit `save_local`; they are available through the dedicated
+local-content UI/API and excluded from normal article/job responses and exports.
 
 No publisher aggregation is created for a single-article request.
 
 ### WF-002 — Evaluate explicit articles
 
-1. The user submits 2–50 distinct HTTP(S) URLs, one model, and one aggregation
-   method.
+1. The user submits 2–50 distinct HTTP(S) URLs, one model, one aggregation
+   method, `prediction_action`, and `content_retention`; the controls apply to
+   every URL.
 2. If offline-normalized submitted hostnames do not resolve to one publisher,
    the request is rejected before job creation with `MIXED_PUBLISHERS`.
 3. Each URL follows WF-001 lookup and acquisition rules.
 4. After canonical resolution, every accepted URL must have the same normalized
    publisher hostname. If any differs, the complete job fails with
    `MIXED_PUBLISHERS`; no publisher evaluation is committed.
-5. Per-article prediction successes already completed before a later failure
-   remain valid article predictions and are explicitly reported; they are not
+5. Per-article run successes already completed before a later failure remain
+   valid article outputs and are explicitly reported; they are not
    presented as a completed publisher evaluation.
 6. When all requested articles succeed, the selected aggregation is computed
-   and committed with the exact ordered article and prediction identifiers.
+   and committed with exact ordered article and prediction-run identifiers.
 
 Duplicate submitted URLs after normalization are rejected with
 `DUPLICATE_URL_INPUT` before any job starts.
@@ -241,22 +294,27 @@ Duplicate submitted URLs after normalization are rejected with
 ### WF-003 — Evaluate one publisher
 
 1. The user submits one HTTP(S) publisher homepage URL, requested count `2..50`
-   (default `10`), one model, one aggregation method, discovery mode, and
-   `allow_partial`.
+   (default `10`), one model, one aggregation method, discovery mode,
+   `allow_partial`, `prediction_action`, and `content_retention`.
 2. The submitted publisher seed may contain a path or semantic query; discovery
    starts from that exact offline-normalized URL, while publisher identity is
    still only its normalized hostname. A successfully fetched seed becomes the
    stored `homepage_url`.
 3. The normalized publisher hostname is resolved.
 4. `stored_only` selects only eligible stored articles and never accesses the
-   network. `stored_first` selects stored articles first and discovers only the
-   missing count. `web_only` ignores stored articles for candidate selection
-   and performs web discovery.
-5. Stored candidates are ordered by `first_seen_at` descending and canonical
-   URL ascending. Web candidates are normalized, deduplicated, restricted to
-   the publisher hostname, and ordered by canonical URL ascending.
-6. Each candidate is processed until the requested number succeeds or no
-   candidates remain. Rejected, failed, reused, and inferred counts are shown.
+   network; it accepts only `reuse + discard`. `stored_first` first reuses
+   suitable stored runs, then retrieves known same-publisher URLs lacking a
+   suitable run, and only
+   then discovers new URLs for the remaining count. `web_only` ignores all
+   stored URLs for candidate selection and performs web discovery.
+5. Both reusable and retrieval-required stored URL groups are ordered by
+   `first_seen_at` descending and canonical URL ascending. Discovered candidates
+   are normalized, deduplicated, restricted to the publisher hostname, and
+   ordered by canonical URL ascending.
+6. Each candidate is processed until the requested number satisfies both the
+   prediction and requested retention controls or no
+   candidates remain. Rejected, failed, reused, recomputed, inferred,
+   content-saved, and used counts are shown.
 7. If fewer than two articles succeed, the job fails with
    `INSUFFICIENT_ARTICLES` and no publisher evaluation is committed.
 8. If 2..requested-count articles succeed and `allow_partial=false`, the job
@@ -264,25 +322,23 @@ Duplicate submitted URLs after normalization are rejected with
    `partial=true`, an explicit warning, and both requested and used counts.
 9. Aggregation is committed using only successful compatible predictions.
 
-The UI defaults to `stored_first` and `allow_partial=true`. The API requires
-both values explicitly so automated clients never inherit a hidden default.
+The UI defaults to count `10`, `stored_first`, and `allow_partial=true`. The API
+requires all three values explicitly so automated clients never inherit a
+hidden discovery/partial/count default.
 
-A stored article is eligible for a runnable model when it already has that
-exact prediction or its stored text passes the text and language contract. It
-is eligible for a `historical_only` model only when that historical prediction
-already exists. In both cases the available/resulting output must satisfy the
-selected aggregation method; a stored prediction missing probabilities is
-ineligible for `mean_probabilities` and is not rerun or converted. Articles
-without either usable text or a suitable selected prediction are skipped in
-`stored_only`; `stored_first` attempts web acquisition for additional
-candidates only after exhausting eligible stored candidates.
+A stored article is reusable only when its latest exact selected-model run
+satisfies the aggregation method. A run missing probabilities is ineligible for
+`mean_probabilities` and is not converted. `stored_only` skips every other
+article. With `reuse`, `stored_first` exhausts reusable runs, then infers from
+saved local bodies, then retrieves known URLs, then discovers. With `recompute`,
+it ignores prior runs/saved bodies and freshly retrieves each chosen URL.
 
 ### WF-004 — Re-evaluate stored publisher articles
 
 From a publisher detail page, the user selects 2–50 stored articles, a model,
-and an aggregation method. The application follows WF-002 and never discovers
-additional articles. The UI disables selection of articles whose publisher
-identity differs from the current page.
+an aggregation method, and the two controls. The application follows WF-002 and
+never discovers additional articles. The UI disables selection of articles
+whose publisher identity differs from the current page.
 
 ### WF-005 — Import a dataset
 
@@ -290,9 +346,11 @@ identity differs from the current page.
    `manifest.json` and listed CSV parts, or a `.zip` containing either exactly
    one CSV or one top-level manifest plus exactly its listed CSV parts.
 2. The backend streams and validates the source; the browser never loads the
-   entire file into memory.
+   entire file into memory, and an uploaded dataset is never spooled to disk.
 3. Only allowlisted fields are projected. Protected columns are named in a
-   warning but their values are neither logged nor persisted.
+   warning but their values are neither logged nor persisted. Source `title`,
+   `text`, and `authors` values are discarded unconditionally; their
+   compatibility columns remain empty.
 4. Exact source checksum, row counts, accepted rows, rejected rows, duplicate
    conflicts, and warnings are committed to `imports.csv`.
    Each rejected data row also creates a safe, value-minimized entry in
@@ -305,8 +363,13 @@ An import with both accepted and rejected rows finishes
 summary and safe rejection records. A structurally unreadable import or one
 with zero acceptable rows is `failed` and commits no article or prediction.
 
-Conflicting duplicate URLs in user imports are rejected and reported. The
-first-occurrence policy applies only to the already generated bundled release.
+Within one import, duplicate canonical URLs can merge non-conflicting outputs
+from distinct model identities. A different output for the same article/model
+identity in that source is rejected and reported. Editorial source differences
+are discarded before comparison and cannot create a conflict. A later import
+with a different source identity creates separate imported runs. The
+first-occurrence metadata policy applies only to the already generated bundled
+release.
 Import rejection details remain available after restart through the UI and API.
 
 ### WF-006 — Register a model
@@ -316,6 +379,15 @@ Uploads are streamed into the configured data directory and validated before
 registration. Directory artifacts are uploaded as `.zip` or `.tar.gz`. A model
 does not become selectable until family, fold, artifact checksum, loader recipe,
 base/tokenizer dependencies, class count, and runtime compatibility pass.
+
+### WF-007 — Clear saved local content
+
+From article detail, the user confirms the canonical URL and starts a
+`content_purge` job. The job blanks title/body in every physical version of that
+article in live CSV and application-managed backups, verifies the rewritten
+files, then reports success. Prediction runs and evaluations remain unchanged.
+The UI warns that copies made outside the configured data directory cannot be
+found or altered by the application.
 
 ## 9. Aggregation controls
 
@@ -361,18 +433,23 @@ The frontend uses seven top-level destinations:
 
 ### 10.2 Articles page
 
-Filters: free-text URL/title search, publisher hostname, model identity,
-predicted class, origin, and updated date. Columns: title, canonical URL,
-publisher, available model count, most recent prediction, origin, and updated
-time. Default ordering is updated time descending then canonical URL ascending.
+Filters: canonical-URL search, publisher hostname, model identity, predicted
+class, origin, and updated date. Columns: canonical URL, publisher, available
+model count, most recent prediction, origin, and updated time. Default ordering
+is updated time descending then canonical URL ascending.
 
-Article detail shows stored metadata and text provenance, every model-specific
-prediction, five exact probability values and bar chart when available,
-checkpoint/fold identity, job provenance, and scientific warning.
+Article detail shows URL/publisher and acquisition provenance, every
+model-specific immutable run, five exact probability values and bar chart when
+available, checkpoint/fold identity, job provenance, content-saved state, and
+scientific warning. Saved title/body are hidden behind `View local content` and
+served from a dedicated endpoint; author/raw HTML never appear. `Clear local
+content` requires confirmation and starts a physical purge job.
+The local-content view renders title/body strictly as text with normal React
+escaping; it never injects saved content as HTML or executes detected links.
 
 ### 10.3 Publishers page
 
-Filters: hostname, display name, available article count, evaluated model, and
+Filters: hostname, available article count, evaluated model, and
 evaluation date. Publisher detail shows stored articles with selection controls,
 previous evaluations, requested/used counts, aggregation method and version,
 class distribution, exact contributing predictions, and accessible charts.
@@ -385,11 +462,34 @@ disabled until client validation passes; the server repeats every validation.
 
 - **Single article:** one URL and one model; no aggregation control is shown.
 - **Article list:** a textarea with exactly one URL per non-empty line, live
-  distinct-count `2..50`, one model, and one aggregation selector.
+  distinct-count `2..50`, one model, and one aggregation selector defaulting to
+  `majority_vote`.
 - **Publisher:** one publisher seed URL, numeric requested count `2..50`
-  defaulting to `10`, one model, one aggregation selector, discovery-mode radio
-  group defaulting to `stored_first`, and `Allow fewer articles` enabled by
-  default.
+  defaulting to `10`, one model, one aggregation selector defaulting to
+  `majority_vote`, discovery-mode radio group defaulting to `stored_first`, and
+  `Allow fewer articles` enabled by default.
+
+No model is silently selected; the user chooses one explicit runnable or
+historical identity before submit.
+
+Every tab shows a `Prediction` choice (`Reuse existing when available`, default;
+`Recompute from current page`) and an unchecked `Save extracted title and body
+locally` checkbox. The checkbox explains that content stays in ignored local
+CSV, can be viewed through this instance, is excluded from normal exports, and
+may be subject to publisher rights.
+
+Before submission the UI calls evaluation preflight. For each known article it
+shows whether a compatible run and saved content exist. When a compatible run
+exists, a confirmation dialog offers exactly: reuse it; recompute; optionally
+save title/body. These map directly to the two controls and never create a
+third implicit behavior. An unknown/missing-run article displays the expected
+network requirement instead of an existing-result prompt.
+
+For a historical-only selection, `Recompute` is disabled with model setup
+guidance. `Save extracted title and body locally` remains available for an
+explicit article that has a reusable historical run; it is disabled in the
+historical publisher form because that form is constrained to
+`stored_only + reuse + discard`.
 
 The model selector separates runnable and historical-only entries and displays
 family, fold, shortened model ID, and status. Aggregation choices show their
@@ -423,15 +523,25 @@ Job states are `queued`, `running`, `succeeded`, `failed`, and `cancelled`.
 Progress is an integer `0..100`. The exhaustive phase identifiers are
 `queued`, `validating`, `scanning`, `resolving_local`, `discovering`,
 `retrieving`, `extracting`, `language_check`, `loading_model`, `inferring`,
-`aggregating`, `importing`, `verifying`, `compacting`, `committing`,
+`aggregating`, `importing`, `compacting`, `purging_content`, `verifying`, `committing`,
 `cancelling`, `completed`, `failed`, and `cancelled`. Jobs use only applicable
-phases in that order; skipped phases are not emitted. Queued jobs have progress
-`0`, successful completed jobs have `100`, and progress never decreases within
-one job. Failed/cancelled jobs retain their last percentage. A completed
+phases. Article jobs follow local resolution, optional retrieval/extraction/
+language validation, optional model loading/inference, and commit. List and
+publisher jobs repeat that candidate sequence; publisher discovery may occur
+between candidate attempts. Once `aggregating` starts, no candidate phase may
+reappear. Import jobs use `importing -> verifying -> committing`; model jobs use
+`scanning` or validation/loading as applicable; compaction uses
+`compacting -> verifying -> committing`; content purge uses
+`purging_content -> verifying -> committing`. A cancellation request switches
+to `cancelling` at the next safe boundary. Terminal phases are `completed` for
+`succeeded`, `failed` for `failed`, and `cancelled` for `cancelled`. Queued jobs
+have progress `0`, successful completed jobs have `100`,
+and progress never decreases within one job even when a candidate phase
+reappears. Failed/cancelled jobs retain their last percentage. A completed
 publisher evaluation is visible only after its transaction commits.
-Cancellation is cooperative: completed article predictions remain valid, but
-no publisher evaluation is created unless aggregation committed before
-cancellation.
+Cancellation is cooperative: committed article runs and explicit content saves
+remain valid, but no publisher evaluation is created unless aggregation
+committed before cancellation.
 
 Allowed status transitions are `queued -> running`, `queued -> cancelled`, and
 `running -> succeeded|failed|cancelled`; terminal status never changes. A
@@ -446,7 +556,8 @@ serialized.
 
 The UI and API use these codes where applicable:
 
-`INVALID_URL`, `UNSUPPORTED_SCHEME`, `DUPLICATE_URL_INPUT`,
+`INVALID_URL`, `UNSUPPORTED_SCHEME`, `CANONICAL_IDENTITY_CHANGED`,
+`DUPLICATE_URL_INPUT`,
 `MIXED_PUBLISHERS`, `NETWORK_REQUIRED`, `NETWORK_TIMEOUT`, `ROBOTS_DENIED`,
 `HTTP_ERROR`, `CONTENT_TOO_LARGE`, `EXTRACTION_FAILED`, `TEXT_EMPTY`,
 `TEXT_TOO_SHORT`, `LANGUAGE_DETECTION_FAILED`, `NON_ENGLISH`,
@@ -461,9 +572,9 @@ API contract separately defines the exhaustive HTTP transport/resource code
 set; implementations shall not invent another stable code without a versioned
 contract change.
 
-Errors never include protected source values, article bodies, access tokens,
+Errors never include protected source values, editorial content, access tokens,
 API keys, or full stack traces. Debug traces remain in local logs only when
-debug logging is explicitly enabled.
+debug logging is explicitly enabled and are still content/secret-redacted.
 
 ## 14. Functional requirements
 
@@ -476,15 +587,15 @@ debug logging is explicitly enabled.
 | FR-005 | The bundled manifest release shall be verified and imported idempotently. |
 | FR-006 | Protected reference-provider fields shall never cross the import projection boundary. |
 | FR-007 | Browsing, filtering, export, and aggregation of stored compatible predictions shall work offline. |
-| FR-008 | A compatible cached prediction shall be reused without a network request or text comparison. |
-| FR-009 | Stored usable text shall support a new model-specific prediction offline. |
-| FR-010 | A missing local article shall require an explicit network-capable job. |
+| FR-008 | `reuse` shall select the latest compatible immutable run without network when one exists. |
+| FR-009 | Title/body retention shall require explicit `save_local`; default discard, authors/raw HTML shall never persist, and confirmed purge shall physically blank managed copies. |
+| FR-010 | Missing-run inference may use user-saved validated text; otherwise it requires network, while `recompute` always requires fresh retrieval. |
 | FR-011 | The three evaluation input modes and their limits shall be identical in UI and API. |
 | FR-012 | Mixed-publisher explicit lists shall never create a publisher evaluation. |
-| FR-013 | Publisher discovery shall expose requested, considered, rejected, failed, reused, inferred, and used counts. |
-| FR-014 | Every publisher result shall record exact ordered article and prediction identities. |
+| FR-013 | Publisher discovery shall expose requested, considered, rejected, failed, reused, recomputed, inferred, content-saved, and used counts. |
+| FR-014 | Every publisher result shall record exact ordered article and immutable prediction-run identities. |
 | FR-015 | Aggregation methods shall follow the scientific formulas and availability rules exactly. |
-| FR-016 | New successful predictions shall contain one class and five finite probabilities summing to one within tolerance. |
+| FR-016 | Every new successful run shall contain one class and five finite probabilities summing to one within tolerance. |
 | FR-017 | Missing historical probabilities shall remain missing and display as `Not available`. |
 | FR-018 | Runnable model fold and artifact checksum shall be part of exact model identity; historical virtual identities shall follow the release-digest rule. |
 | FR-019 | Unsupported or ambiguous models shall fail closed without executing artifact code. |
@@ -503,12 +614,12 @@ debug logging is explicitly enabled.
 | ID | Requirement |
 | --- | --- |
 | NFR-001 | With 100,000 articles and 400,000 predictions on reference hardware, a filtered first page shall return within 2 seconds after indexes load. |
-| NFR-002 | Startup shall stream seed import and never require loading article bodies for all rows simultaneously. |
+| NFR-002 | Startup shall stream seed import, verify tracked editorial fields are empty, and keep opt-in runtime content only under the ignored data directory. |
 | NFR-003 | Frontend interaction shall remain responsive while jobs run. |
 | NFR-004 | Graceful shutdown shall stop accepting jobs, wait up to 30 seconds for a safe boundary, flush CSV files, and mark unfinished jobs interrupted. |
 | NFR-005 | Every persisted timestamp shall be UTC RFC 3339 and every identifier format shall follow the CSV contract. |
 | NFR-006 | The image and frontend shall contain no model weights, base models, remote fonts, analytics, or CDN dependency. |
-| NFR-007 | Logs shall rotate locally and redact secrets and article bodies by default. |
+| NFR-007 | Logs shall rotate locally and exclude secrets and editorial content at every level. |
 | NFR-008 | API and frontend shall use one shared validation/service implementation. |
 | NFR-009 | All user-visible text, API error messages, and generated exports shall be English. |
 | NFR-010 | The repository shall provide reproducible dependency lock files and deterministic dataset verification. |

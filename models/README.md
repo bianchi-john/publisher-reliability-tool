@@ -122,7 +122,9 @@ registration `invalid`.
 ## Registration states
 
 - `compatible`: inference is selectable.
-- `historical_only`: imported virtual model; aggregation/browsing only.
+- `historical_only`: imported virtual model; stored-run reuse, aggregation,
+  browsing, and content-only enrichment of an article with that run, but no
+  inference.
 - `dependency_missing`: artifact recognized; base/tokenizer/runtime absent.
 - `resource_unavailable`: dependencies exist; required device/resources do not.
 - `invalid`: expected artifact fails validation.

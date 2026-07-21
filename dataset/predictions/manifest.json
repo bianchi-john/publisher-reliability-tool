@@ -33,6 +33,11 @@
     "roberta_prob_class_3",
     "roberta_prob_class_4"
   ],
+  "redacted_editorial_columns": [
+    "title",
+    "text",
+    "authors"
+  ],
   "excluded_newsguard_columns": [
     "score",
     "country",
@@ -43,31 +48,13 @@
     "label"
   ],
   "max_part_bytes": 25165824,
-  "content_digest_sha256": "76d1434f47df497c62c0dc360b824f3edf797c6501e2bcde560ff2c3378867ea",
+  "content_digest_sha256": "731c5661d6b6f8cfa75076dc8ef22af49d92ed11250a6b684b0b6af0de390b71",
   "parts": [
     {
       "file": "predictions-part-0001.csv",
-      "rows": 4771,
-      "bytes": 25164980,
-      "sha256": "3838fe79a123e9996b33852df35c85f9befe2d55532ab812ba8cf06f6e785bcf"
-    },
-    {
-      "file": "predictions-part-0002.csv",
-      "rows": 5102,
-      "bytes": 25163311,
-      "sha256": "22836aceef1393d10ccd45fe43dc6658fbe68365a35fbeaca07ab15218b9fba8"
-    },
-    {
-      "file": "predictions-part-0003.csv",
-      "rows": 5740,
-      "bytes": 25162924,
-      "sha256": "979a264edb88a1a9f37ff1742db9b10f58b7f08b8faf7e87e2f245d9f2328be0"
-    },
-    {
-      "file": "predictions-part-0004.csv",
-      "rows": 3816,
-      "bytes": 18943881,
-      "sha256": "890b44ca478ede92c73ec7925ec30bb52eb750a4835cd85bf71ef2eb2321eb98"
+      "rows": 19429,
+      "bytes": 7089160,
+      "sha256": "db7400d9e507cc3ac1a6b3f14011f1cd0f1fe4a7713e3008b7cf3e9f03ae89ea"
     }
   ]
 }

@@ -20,6 +20,14 @@
   Reusing a key with a different body returns `409 IDEMPOTENCY_CONFLICT`.
 - Requests larger than 1 MiB are rejected except documented streaming uploads.
 - Responses set `Cache-Control: no-store` unless serving fingerprinted assets.
+- Every `q` filter applies Unicode NFC normalization followed by Python
+  `str.casefold()` to query and documented target, then substring matching.
+  Filters combine with AND; repeated values of one filter combine with OR.
+- Normal resources, jobs, lists, exports, and errors never return a title,
+  article body, author value, raw HTML, or snippet. The sole exception is the
+  dedicated local-content read endpoint in section 6, which returns only a
+  title/body that this user explicitly chose to save. Authors and raw HTML are
+  never returned or persisted under any option.
 
 OpenAPI is served at `/api/openapi.json`; local interactive documentation is at
 `/api/docs`.
@@ -71,7 +79,8 @@ section 13.
 | `FORBIDDEN` | 403 | Authenticated request cannot use the path, origin, or action |
 | `ARTICLE_NOT_FOUND` | 404 | Article ID is absent |
 | `PUBLISHER_NOT_FOUND` | 404 | Publisher ID is absent |
-| `PREDICTION_NOT_FOUND` | 404 | Prediction ID is absent |
+| `PREDICTION_RUN_NOT_FOUND` | 404 | Prediction-run ID is absent |
+| `ARTICLE_CONTENT_NOT_FOUND` | 404 | Article exists but has no saved local content |
 | `EVALUATION_NOT_FOUND` | 404 | Evaluation ID is absent |
 | `MODEL_NOT_FOUND` | 404 | Model ID is absent |
 | `JOB_NOT_FOUND` | 404 | Job ID is absent |
@@ -136,52 +145,115 @@ operations are permitted. It contains no full filesystem paths.
 
 Filters:
 
-- `q`: case-insensitive substring over canonical URL and title;
+- `q`: case-insensitive substring over canonical URL;
 - `publisher`: exact normalized hostname;
-- `model_id`: exact model ID with a current prediction;
+- `model_id`: exact model ID with at least one prediction run;
 - `predicted_class`: integer `0..4` paired with `model_id`;
 - `origin`: `bundled_import`, `user_import`, or `local_inference`;
 - `updated_from`, `updated_to`: inclusive RFC 3339 bounds;
-- `sort`: `updated_desc` (default), `title_asc`, or `url_asc`.
+- `sort`: `updated_desc` (default) or `url_asc`.
 
-Each summary returns article ID, canonical URL, publisher summary, title,
-authors, text availability, available prediction count, most recent prediction
-summary, first/last seen timestamps, and network-use flag. Article body is not
-included. Its `updated_at` is the later of the current article version's
-`recorded_at` and every current prediction version's `recorded_at`; this value
+Each summary returns article ID, canonical URL, publisher summary, available
+model count, prediction-run count, most recent run summary, `content_saved`
+boolean, first/last seen timestamps, and network-use flag. It never embeds a
+title, author, body, or snippet. Its `updated_at` is the later of the current
+article version's `recorded_at` and every prediction run's `recorded_at`; this value
 drives `updated_*` filters and `updated_desc` sorting.
+
+`available_model_count` counts distinct model IDs and `prediction_run_count`
+counts all immutable runs. “Most recent” uses effective completion time
+descending (`inference_completed_at`, or `recorded_at` for an imported run),
+then `prediction_run_id` ascending. `predicted_class` filtering applies to the
+latest reusable run for the required `model_id`; `origin` matches when at least
+one run has that origin.
 
 ### `GET /api/v1/articles/{article_id}`
 
-Returns complete current article metadata, article text, and all current
-predictions ordered by family, fold, and model ID. Each prediction contains
-class, nullable five-probability vector, origin, model summary, job/import ID,
-and timestamps.
+Returns URL/publisher and acquisition metadata plus bounded run summaries
+grouped by model. Each summary contains prediction-run ID, class, nullable
+five-probability vector, origin, action, input source, retention choice, model
+summary, job/import ID, and timestamps. The default embedded history is the 20
+newest runs; `prediction_run_count` and the paginated endpoint expose the rest.
+It returns `content_saved` and `content_saved_at` but never embeds the content.
 
 Returns `404 ARTICLE_NOT_FOUND` when absent.
 
-### `GET /api/v1/articles/{article_id}/predictions`
+### `GET /api/v1/articles/{article_id}/prediction-runs`
 
-Paginated prediction list. Supports `model_id` and `family` filters.
+Paginated immutable run list. Supports `model_id`, `family`, `origin`, and
+`action` filters; default order is effective completion time descending under
+the imported-run fallback above, then `prediction_run_id` ascending.
+
+### `GET /api/v1/prediction-runs/{prediction_run_id}`
+
+Returns one immutable run, its safe article/model summaries, and complete
+provenance fields. It returns `404 PREDICTION_RUN_NOT_FOUND` when absent and
+never embeds saved or ephemeral article content.
+
+### `GET /api/v1/articles/{article_id}/content`
+
+Returns only locally saved content:
+
+```json
+{
+  "article_id": "uuid",
+  "canonical_url": "https://publisher.example/article",
+  "title": "Locally saved title or an empty string",
+  "text": "Locally saved validated article body",
+  "content_saved_at": "2026-07-21T14:05:12.123456Z",
+  "rights_notice": "Saved source content remains subject to third-party rights."
+}
+```
+
+This endpoint is never included by another resource or bulk operation and
+always sets `Cache-Control: no-store`. It returns `ARTICLE_CONTENT_NOT_FOUND`
+when the article exists without saved content.
+
+### `POST /api/v1/articles/{article_id}/content-purge-jobs`
+
+Starts the physical purge defined by the CSV contract. Body:
+
+```json
+{
+  "confirm_canonical_url": "https://publisher.example/article"
+}
+```
+
+The confirmation value must exactly equal the stored canonical URL. The call
+requires `Idempotency-Key` and returns `202` with a `content_purge` job. A
+successful job removes title/body from all application-managed CSV versions
+and backups without deleting runs or evaluations. It cannot affect external
+copies. A mismatched confirmation is `422`; an article with no saved content is
+`404 ARTICLE_CONTENT_NOT_FOUND` and creates no job. Repeating the original
+successful request/key still returns its original job after content is gone.
 
 ### `GET /api/v1/articles/export`
 
-Streams `text/csv`. Accepts the list filters plus `include_text=false` by
-default. Maximum unpaginated result is the complete filtered collection. The
+Streams `text/csv` and accepts the list filters. `include_text` is not a valid
+parameter. Maximum unpaginated result is the complete filtered collection. The
 response includes `X-Exported-At` in the storage contract's UTC timestamp
-format and a safe `Content-Disposition` filename.
+format and a safe `Content-Disposition` filename. Header order is exact:
+
+```text
+article_id,canonical_url,publisher_id,normalized_hostname,available_model_count,prediction_run_count,latest_prediction_run_id,latest_model_id,latest_predicted_class,latest_prob_class_0,latest_prob_class_1,latest_prob_class_2,latest_prob_class_3,latest_prob_class_4,latest_origin,content_saved,first_seen_at,last_seen_at,updated_at
+```
+
+The five probability fields are all empty when the latest run has no vector.
+`content_saved` is metadata only; content itself is never exported.
 
 ## 7. Publishers
 
 ### `GET /api/v1/publishers`
 
-Filters: `q` over hostname/display name, `model_id`, `evaluated_from`,
-`evaluated_to`, and sort `updated_desc` or `hostname_asc`.
+Filters: `q` over normalized hostname, `article_count_min`,
+`article_count_max`, `model_id`, `evaluated_from`, `evaluated_to`, and sort
+`updated_desc` or `hostname_asc`. Count bounds are non-negative integers and
+minimum cannot exceed maximum.
 
-Each summary returns publisher ID, normalized hostname, homepage URL, display
-name, stored article count, prediction count, evaluation count, and last
+Each summary returns publisher ID, normalized hostname, homepage URL, stored
+article count, prediction-run count, evaluation count, and last
 evaluation timestamp. Its `updated_at` is the maximum current `recorded_at`
-across the publisher, its articles, their predictions, and its evaluations;
+across the publisher, its articles, their prediction runs, and its evaluations;
 this value drives `updated_desc`.
 
 ### `GET /api/v1/publishers/{publisher_id}`
@@ -201,14 +273,20 @@ Filters by `model_id` and `method`; default order is creation time descending.
 
 ### `GET /api/v1/evaluations/{evaluation_id}`
 
-Returns evaluation fields, exact ordered contributing article/prediction
-summaries, class counts, nullable mean probabilities, warnings, requested/used
-counts, partial flag, input/discovery mode, and scientific warnings.
+Returns evaluation fields, exact ordered contributing
+article/prediction-run summaries, class counts, nullable mean probabilities,
+warnings, requested/used counts, partial flag, input/discovery mode, and
+scientific warnings. Historical evaluations never retarget to a newer run.
 
 ### `GET /api/v1/publishers/export`
 
-Streams filtered publisher summaries as CSV; article text is never embedded.
-It uses the same export headers as the article export.
+Streams filtered publisher summaries as CSV; editorial content is never
+embedded. It uses the same `X-Exported-At` and `Content-Disposition` response
+headers as article export. CSV header order is exact:
+
+```text
+publisher_id,normalized_hostname,homepage_url,stored_article_count,prediction_run_count,evaluation_count,last_evaluation_at,updated_at
+```
 
 ## 8. Models
 
@@ -282,7 +360,32 @@ Revalidates artifact, dependencies, and resources. Returns `202` with a job.
 Model deletion is outside the MVP. Users remove unmanaged artifacts manually;
 missing artifacts become invalid on the next scan without deleting provenance.
 
-## 9. Evaluation jobs
+## 9. Evaluation preflight and jobs
+
+### `POST /api/v1/evaluation-preflight`
+
+Accepts exactly one of the evaluation request bodies below and performs a
+read-only, offline preflight. It normalizes URLs, inspects local articles,
+saved-content state, model state, and reusable runs, but performs no DNS, HTTP,
+extraction, inference, mutation, or job creation.
+
+The response contains `eligible`, a nullable `blocking_error_code`, normalized
+input summary, and one check per explicit article with:
+
+- `article_id` or `null`;
+- `reusable_prediction_run_id` or `null`;
+- `content_saved`;
+- `planned_operation`: `reuse_run`, `infer_saved_content`,
+  `resolve_then_reuse_or_infer`, `resolve_then_reuse_or_fail`,
+  `fetch_content_only`, or `recompute`;
+- `network_required` and stable `network_reasons`.
+
+For a publisher input it additionally returns local candidate counts by
+reusable run, saved body, and known URL plus whether homepage discovery can be
+required. It cannot enumerate undiscovered articles and does not promise that
+retrieval or inference will succeed. The evaluation-job endpoint repeats all
+validation against current state, so a preflight response is advisory and is
+never an authorization token.
 
 ### `POST /api/v1/evaluation-jobs`
 
@@ -300,11 +403,28 @@ Creates one job from a discriminated request. Returns `202`:
 ```
 
 `model_id` can identify a runnable `compatible` model or a
-`historical_only` virtual model. The latter succeeds only when every required
-prediction already exists; otherwise the terminal job code is
-`MODEL_NOT_RUNNABLE`.
+`historical_only` virtual model. The latter rejects
+`prediction_action=recompute`. A publisher input additionally requires
+`stored_only + reuse + discard`. Single-article, explicit-list, and stored-
+selection inputs may use `save_local` with a reusable historical run; this
+performs content retrieval only, never inference. If an explicit URL lacks the
+run after online canonical resolution, the accepted job terminates
+`MODEL_NOT_RUNNABLE` before extracting/saving content for that URL.
 
-#### Single article body
+Every request includes two independent controls:
+
+- `prediction_action`: `reuse` or `recompute`; omitted means `reuse`;
+- `content_retention`: `discard` or `save_local`; omitted means `discard`.
+
+`reuse` selects the latest reusable run under the CSV ordering rule. If none
+exists, a runnable model infers from saved validated text when available or
+retrieves the page. `recompute` always retrieves the current page and creates a
+new immutable run. `save_local` stores only validated title/body; it does not
+change run selection. `discard` applies only to content acquired for this
+request and never erases content already saved; erasure requires the dedicated
+purge job. Defaults are deliberately network- and retention-minimal.
+
+#### Single article request
 
 ```json
 {
@@ -312,13 +432,15 @@ prediction already exists; otherwise the terminal job code is
     "type": "article",
     "url": "https://publisher.example/article"
   },
-  "model_id": "64-hex-model-id"
+  "model_id": "64-hex-model-id",
+  "prediction_action": "reuse",
+  "content_retention": "discard"
 }
 ```
 
 No aggregation field is accepted.
 
-#### Explicit article list body
+#### Explicit article-list request
 
 ```json
 {
@@ -330,14 +452,17 @@ No aggregation field is accepted.
     ]
   },
   "model_id": "64-hex-model-id",
-  "aggregation_method": "majority_vote"
+  "aggregation_method": "majority_vote",
+  "prediction_action": "reuse",
+  "content_retention": "discard"
 }
 ```
 
 `urls` contains 2–50 distinct pre-normalization strings and must remain distinct
-after normalization.
+after normalization. `aggregation_method` is required; the API never inserts
+the frontend's majority-vote default.
 
-#### Publisher body
+#### Publisher request
 
 ```json
 {
@@ -349,18 +474,29 @@ after normalization.
     "allow_partial": true
   },
   "model_id": "64-hex-model-id",
-  "aggregation_method": "majority_vote"
+  "aggregation_method": "majority_vote",
+  "prediction_action": "reuse",
+  "content_retention": "discard"
 }
 ```
 
-`requested_article_count` is `2..50`. API clients must send
-`discovery_mode` and `allow_partial`; omission is `422`.
+`requested_article_count` is `2..50`. API clients must send it together with
+`aggregation_method`, `discovery_mode`, and `allow_partial`; omission is `422`.
+`stored_only` additionally requires `prediction_action=reuse` and
+`content_retention=discard`, because it guarantees zero network activity and
+does not create or enrich article records.
 
 ### `POST /api/v1/evaluation-jobs/from-stored-selection`
 
-Body contains `article_ids` (2–50), `model_id`, and `aggregation_method`.
-All articles must resolve to one current publisher. This avoids translating
-frontend selections back into URLs.
+Body contains `article_ids` (2–50), `model_id`, `aggregation_method`,
+`prediction_action`, and `content_retention`; the latter two use the same safe
+defaults. The first three fields are required. All articles must resolve to one current publisher. This avoids
+translating frontend selections back into URLs.
+
+For every job type, repeating the same body and `Idempotency-Key` returns the
+same job and therefore the same created run IDs. A new key with
+`prediction_action=recompute` authorizes a new fetch and a new immutable run;
+it never overwrites the earlier run.
 
 ## 10. Jobs
 
@@ -373,6 +509,11 @@ Filters: `status`, `job_type`, `created_from`, `created_to`; newest first.
 Returns ID, type, state, phase, progress, safe normalized request, counters,
 result links, warnings, error envelope, cancellation state, retry relationship,
 and timestamps.
+
+Evaluation results include ordered `selected_prediction_run_ids` and
+per-article safe subresults (`reused`, `inferred`, `recomputed`,
+`content_saved`, `failed`). They never contain title/body. A content-purge job
+returns the article ID and counts of rewritten managed files/rows.
 
 ### `GET /api/v1/jobs/{job_id}/events`
 
@@ -424,16 +565,17 @@ rules as model upload apply, with at most 1,024 entries and total extracted
 bytes no greater than the dataset upload limit. A ZIP contains either exactly
 one CSV or one top-level `manifest.json` plus exactly its listed CSV parts; no
 other entries or nested archives are accepted. For `.csv.gz`, decompression is
-streamed and stops when uncompressed bytes exceed the same dataset limit. The
-uploaded source is deleted
-after the import job reaches any terminal state; its checksum and projected
-records remain. Returns `202`.
+streamed and stops when uncompressed bytes exceed the same dataset limit.
+Dataset uploads are parsed and hashed directly from the request stream; unlike
+model uploads, their original bytes are never written under `<data-dir>` or a
+system temporary directory. Only projected URL/domain/model-output rows and the
+source checksum commit. Returns `202`.
 
 ### `GET /api/v1/imports/{import_id}/rejections`
 
 Returns safe rejection records in ascending `(source_row,rejection_id)` order
 using the standard cursor pagination contract. It never returns raw rejected
-rows, article bodies, author values, or protected-provider values.
+rows, editorial values, or protected-provider values.
 
 ## 12. Aggregation metadata
 

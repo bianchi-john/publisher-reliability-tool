@@ -4,6 +4,7 @@
 The input may be a CSV, a gzip-compressed CSV, or a ZIP archive containing
 exactly one CSV file. Output is written only after the entire input passes
 validation, so a truncated source cannot produce an apparently valid release.
+Editorial title, text, and author values are always replaced with empty fields.
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ PUBLIC_COLUMNS = [
     "roberta_prob_class_3",
     "roberta_prob_class_4",
 ]
+
+# These compatibility columns remain in the public schema, but their source
+# values are deliberately never redistributed.
+REDACTED_EDITORIAL_COLUMNS = ["title", "text", "authors"]
 
 EXCLUDED_NEWSGUARD_COLUMNS = [
     "score",
@@ -279,6 +284,8 @@ def prepare_release(
                 public_row["article_id"] = total_rows
                 public_row["url"] = url
                 public_row["domain"] = normalized_domain(url)
+                for column in REDACTED_EDITORIAL_COLUMNS:
+                    public_row[column] = ""
 
                 row_bytes = serialize_csv_row(public_row)
                 if len(header_bytes) + len(row_bytes) > max_bytes:
@@ -315,6 +322,7 @@ def prepare_release(
             "duplicate_source_url_groups": len(duplicate_urls),
             "skipped_duplicate_rows": skipped_duplicate_rows,
             "columns": PUBLIC_COLUMNS,
+            "redacted_editorial_columns": REDACTED_EDITORIAL_COLUMNS,
             "excluded_newsguard_columns": EXCLUDED_NEWSGUARD_COLUMNS,
             "max_part_bytes": max_bytes,
             "content_digest_sha256": source_digest.hexdigest(),

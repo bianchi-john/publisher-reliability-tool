@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.prepare_public_dataset import (
     EXCLUDED_NEWSGUARD_COLUMNS,
     PUBLIC_COLUMNS,
+    REDACTED_EDITORIAL_COLUMNS,
     prepare_release,
 )
 from scripts.verify_public_dataset import verify_release
@@ -66,6 +67,9 @@ class PreparePublicDatasetTest(unittest.TestCase):
             self.assertEqual(manifest["duplicate_url_rows"], 0)
             self.assertEqual(manifest["duplicate_source_url_groups"], 1)
             self.assertEqual(manifest["skipped_duplicate_rows"], 1)
+            self.assertEqual(
+                manifest["redacted_editorial_columns"], REDACTED_EDITORIAL_COLUMNS
+            )
             self.assertEqual(len(manifest["parts"]), 1)
 
             part = output / manifest["parts"][0]["file"]
@@ -75,8 +79,8 @@ class PreparePublicDatasetTest(unittest.TestCase):
             self.assertEqual(list(rows[0]), PUBLIC_COLUMNS)
             self.assertEqual([row["article_id"] for row in rows], ["0"])
             self.assertEqual(rows[0]["domain"], "example.com")
-            self.assertEqual(rows[0]["title"], "Synthetic title")
-            self.assertEqual(rows[0]["text"], "Synthetic English article body.")
+            for column in REDACTED_EDITORIAL_COLUMNS:
+                self.assertEqual(rows[0][column], "")
             for excluded in EXCLUDED_NEWSGUARD_COLUMNS:
                 self.assertNotIn(excluded, rows[0])
 

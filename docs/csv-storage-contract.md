@@ -14,6 +14,10 @@ The store supports one writer process, concurrent HTTP readers in that process,
 crash recovery, idempotent import, record versioning, and multi-file logical
 transactions.
 
+Entity history is append-only except for the explicit privacy purge in section
+12, which physically blanks opted-in title/body while preserving every
+scientific identifier and output.
+
 ## 2. Directory layout
 
 ```text
@@ -25,7 +29,7 @@ transactions.
 │   ├── publishers.csv
 │   ├── articles.csv
 │   ├── models.csv
-│   ├── predictions.csv
+│   ├── prediction_runs.csv
 │   ├── evaluations.csv
 │   ├── evaluation_articles.csv
 │   ├── jobs.csv
@@ -39,6 +43,7 @@ transactions.
 
 Only files under `state/` are the database. Lock, backup, log, managed-model,
 and upload files are operational support files and are not queryable records.
+`uploads/` is used only for model artifacts; dataset uploads are never spooled.
 
 ## 3. Physical CSV rules
 
@@ -63,27 +68,31 @@ and upload files are operational support files and are not queryable records.
   `[0,1]` and sum to `1` within `1e-5`.
 - Record order: append order. Logical ordering is determined by query rules,
   never by assuming physical adjacency.
-- Maximum UTF-8 field sizes: URL 8,192 bytes, title 1 MiB, text 16 MiB,
-  `authors_json` 1 MiB, and every other scalar or JSON field 1 MiB. An
+- Maximum UTF-8 field sizes: URL 8,192 bytes, opt-in title 1 MiB, opt-in text
+  16 MiB, and every other scalar or JSON field 1 MiB. Author fields must be
+  empty. An
   oversized imported row is rejected with `CONTENT_TOO_LARGE`; an oversized
   committed database field is corruption.
 
 CSV parsing uses Python's `csv` module with `newline=""`; line-oriented shell
-tools are not used to parse article bodies containing embedded newlines.
+tools are not used because imported source fields may contain quoted newlines
+before editorial projection discards them.
 `csv.field_size_limit(16777216)` is set before parsing, followed by the exact
 UTF-8 byte checks above.
 
 ## 4. Identifier rules
 
-- Transaction, job, evaluation, and import IDs: lowercase canonical UUIDv4.
+- Transaction, job, evaluation, import, and locally inferred prediction-run IDs:
+  lowercase canonical UUIDv4.
 - Application UUID namespace:
   `6f63a5f4-97aa-4bb8-a73f-2a30fc9fcf31`.
 - Publisher ID: UUIDv5 of `publisher:<normalized_hostname>` in that namespace.
 - Article ID: UUIDv5 of `article:<canonical_url>` in that namespace.
 - Model ID: lowercase 64-character SHA-256 of the canonical model-identity JSON
   defined by the scientific contract.
-- Prediction ID: lowercase SHA-256 of
-  `prediction:<article_id>:<model_id>`.
+- Imported prediction-run ID: UUIDv5 of
+  `prediction-run:<article_id>:<model_id>:import:<source_import_id>` in the
+  application namespace.
 - Evaluation-article row ID: lowercase SHA-256 of
   `evaluation-article:<evaluation_id>:<position>`.
 - Record version: positive integer starting at `1` and increasing by exactly
@@ -99,6 +108,10 @@ record_version,record_operation,transaction_id,recorded_at
 ```
 
 - `record_operation` is `UPSERT` or `DELETE`.
+- An `UPSERT` row is a complete entity snapshot, never a sparse patch; omitted
+  optional values are genuinely null and are not inherited from older rows.
+  Consequently, a non-purge article update carries forward already saved
+  title/body unchanged unless explicit `save_local` replaces them.
 - A `DELETE` row retains the record identity fields, leaves other entity fields
   empty where permitted, and makes the record absent from current state.
 - `transaction_id` must resolve to a committed transaction.
@@ -152,26 +165,33 @@ Constraints:
 - `publisher_id` and `normalized_hostname` are unique in current state.
 - `homepage_url` is `https://<normalized_hostname>/` unless a successfully
   resolved homepage URL is stored.
-- `display_name` is optional scraped/local metadata and not identity.
+- `display_name` is a present but nullable compatibility field and is always empty; the UI
+  displays `normalized_hostname`.
 
 ### 6.4 `articles.csv`
 
 ```text
-article_id,canonical_url,publisher_id,title,text,authors_json,detected_language,text_origin,network_used,first_seen_at,last_seen_at,record_version,record_operation,transaction_id,recorded_at
+article_id,canonical_url,publisher_id,title,text,authors,content_status,content_saved_at,detected_language,text_origin,network_used,first_seen_at,last_seen_at,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - `article_id` and `canonical_url` are unique in current state.
 - `publisher_id` resolves to a current publisher.
-- `authors_json` is a JSON array of strings.
-- `detected_language` is empty for unvalidated imported text or `en` for text
-  accepted for new inference. Other codes are not stored as accepted articles.
-- `text_origin`: `bundled_import`, `user_import`, `web_extraction`, or
-  `synthetic`.
-- `network_used` describes acquisition of this stored version.
-- Updating scraped metadata creates a new version; normal prediction reuse does
-  not update or refetch an article.
+- `authors` is an always-empty compatibility scalar. `title` and `text` are empty unless a request
+  explicitly committed `content_retention=save_local`; a saved record requires
+  a non-empty validated body while title may be empty.
+- `content_status` is `none` or `saved_local`; `content_saved_at` is required
+  only for `saved_local`.
+- `detected_language` is empty for imported history or `en` when ephemeral text
+  passed validation for local inference. Other codes are not stored.
+- `text_origin` is a compatibility/provenance field despite its legacy name:
+  `not_persisted_import`, `ephemeral_web_extraction`, or
+  `saved_web_extraction`.
+- `network_used` describes whether the URL was acquired online for this record.
+- Saving changed title/body creates an article version; byte-identical already
+  saved values do not. `discard` never clears an earlier saved value. Normal
+  `reuse + discard` does not update or refetch an article.
 
 ### 6.5 `models.csv`
 
@@ -192,26 +212,36 @@ Constraints:
 - API responses redact `artifact_path`; the complete path remains local CSV
   state because the loader needs it.
 
-### 6.6 `predictions.csv`
+### 6.6 `prediction_runs.csv`
 
 ```text
-prediction_id,article_id,model_id,predicted_class,prob_class_0,prob_class_1,prob_class_2,prob_class_3,prob_class_4,origin,source_import_id,job_id,inference_started_at,inference_completed_at,duration_ms,device,software_versions_json,record_version,record_operation,transaction_id,recorded_at
+prediction_run_id,article_id,model_id,predicted_class,prob_class_0,prob_class_1,prob_class_2,prob_class_3,prob_class_4,origin,action,input_source,content_retention,source_import_id,job_id,inference_started_at,inference_completed_at,duration_ms,device,software_versions_json,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
-- Current `(article_id,model_id)` is unique and maps to `prediction_id`.
+- `prediction_run_id` is unique. Multiple runs for `(article_id,model_id)` are
+  allowed and retained.
 - `predicted_class` is integer `0..4`.
 - `origin`: `bundled_import`, `user_import`, or `local_inference`.
+- `action`: `import`, `missing_run_inference`, or `recompute`.
+- `input_source`: `unavailable` for imports, `saved_local`, or `ephemeral_web`.
+- `content_retention`: `discard` or `save_local`; imports use `discard`.
 - Imported missing probability vectors use five empty fields.
 - New local inference requires all five probabilities.
-- `source_import_id` is required for imported predictions and empty otherwise.
+- `source_import_id` is required for imported runs and empty otherwise.
 - `job_id` is required for local inference and empty for startup seed import.
-- `device` examples: `cpu`, `cuda:0`; empty for imported predictions.
+- `device` examples: `cpu`, `cuda:0`; empty for imported runs.
+- `software_versions_json` is `{}` for imports. For local inference it contains
+  every required, non-guessed key defined by the scientific contract.
+- Every run has `record_version=1` and `record_operation=UPSERT`; runs are never
+  updated or deleted.
 
-An existing prediction is immutable scientific output. Re-running the same
-article/model combination returns it. A different checkpoint or recipe creates
-a different model ID and therefore a different prediction ID.
+The reusable run for an article/model is the latest by `inference_completed_at`
+descending then `prediction_run_id` ascending; imported runs use `recorded_at`
+as completion time for this ordering. `reuse` creates no row. Every actual local
+inference creates a new UUIDv4 run. A different checkpoint/recipe creates a
+different model ID as well as separate runs.
 
 ### 6.7 `evaluations.csv`
 
@@ -230,19 +260,19 @@ Constraints:
 - `result_class` is `0..4`.
 - `ordinal_mean` is populated only for `ordinal_mean`.
 - Probability fields are populated only for `mean_probabilities`.
-- `warnings_json` is a JSON array of stable warning objects without article
-  bodies or protected values.
+- `warnings_json` is a JSON array of stable warning objects without editorial
+  content or protected values.
 
 ### 6.8 `evaluation_articles.csv`
 
 ```text
-evaluation_article_id,evaluation_id,position,article_id,prediction_id,record_version,record_operation,transaction_id,recorded_at
+evaluation_article_id,evaluation_id,position,article_id,prediction_run_id,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - `position` starts at `1`, is contiguous, and preserves aggregation order.
-- Each prediction resolves to the same article and model as its evaluation.
+- Each run resolves to the same article and model as its evaluation.
 - A committed evaluation has exactly `used_count` current rows.
 
 ### 6.9 `jobs.csv`
@@ -255,12 +285,12 @@ Constraints:
 
 - `job_type`: `article_evaluation`, `article_list_evaluation`,
   `publisher_evaluation`, `dataset_import`, `model_scan`, `model_register`,
-  `model_upload`, `storage_verify`, or `storage_compact`.
+  `model_upload`, `content_purge`, `storage_verify`, or `storage_compact`.
 - `status`: `queued`, `running`, `succeeded`, `failed`, or `cancelled`.
 - `progress`: integer `0..100`.
-- `request_json` contains normalized request parameters, not API keys or article
-  bodies.
-- `result_json` contains safe IDs and counters, not duplicated article bodies.
+- `request_json` contains normalized request parameters, not API keys or
+  editorial content.
+- `result_json` contains safe IDs and counters, not editorial content.
 - `error_message` is English and safe for display.
 
 Job status changes append versions; existing physical rows are never edited.
@@ -284,7 +314,7 @@ Constraints:
 - `succeeded_with_rejections` requires at least one accepted and one rejected
   row; accepted records commit and every rejection is recorded separately.
 - `failed` is used when the container/schema cannot be processed or no row is
-  acceptable; it contributes no articles or predictions.
+  acceptable; it contributes no articles or prediction runs.
 - Current `(source_sha256,schema_version)` with status `succeeded` or
   `succeeded_with_rejections` is unique.
 - `protected_columns_json` lists column names only.
@@ -304,18 +334,28 @@ Constraints:
 - `safe_identifier` is the canonical article URL when URL normalization
   succeeded, otherwise empty;
 - `error_code` is a stable import code and `message` is safe English text;
-- rejected titles, bodies, authors, protected-provider values, and raw malformed
-  input are never copied into this ledger;
+- rejected editorial fields, protected-provider values, and raw malformed input
+  are never copied into this ledger;
 - records are paginated by `(source_row,rejection_id)` in the API.
 
 ## 7. Transaction rules
 
-One use case that changes several ledgers uses one transaction ID. Examples:
+One atomic subresult that changes several ledgers uses one transaction ID.
+Long jobs may deliberately commit several subresults at safe boundaries:
 
-- New inference: publisher/article version if new, prediction, job success.
-- Publisher evaluation: evaluation, all evaluation-article rows, job success.
-- Seed/user import: import, publishers, articles, predictions, and any import
-  rejections.
+- Explicit content save: publisher/article identity if new plus the saved
+  article version. It commits immediately after validation, before inference,
+  so a later inference failure cannot erase the requested local content.
+- New inference: publisher/article identity if still new, prediction run, and
+  the applicable article subresult. A single-article job success may commit in
+  the same transaction; a later multi-article job remains running.
+- Publisher evaluation: evaluation, all evaluation-article rows, and job
+  success.
+- Seed/user import: import, publishers, articles, prediction runs, and any
+  import rejections.
+
+A terminal failed/cancelled job update is its own transaction and reports every
+already committed safe subresult. It never rolls back a content save or run.
 
 The implementation appends entity rows before the `COMMITTED` marker. Readers
 load transaction states first and ignore entity rows from every uncommitted or
@@ -352,13 +392,18 @@ prevents readiness. The application never guesses a repair.
 
 - Seed/user import identity is source SHA-256 plus import schema version.
 - Reimporting a successful identical source returns the existing import.
-- Article identity is canonical URL; model identity is exact model ID.
-- An identical article/prediction pair is reused.
-- Conflicting duplicate rows in arbitrary user imports are rejected and counted
-  as `IMPORT_CONFLICT`; no first-row choice is made.
+- Article identity is canonical URL; model identity is exact model ID; run
+  identity is never reduced to that pair.
+- `reuse` selects the documented latest run and writes no run row.
+- Within one source import, duplicate canonical rows merge outputs for distinct
+  model identities. Two different outputs for the same
+  `(article_id,model_id)` in that source are rejected and counted as
+  `IMPORT_CONFLICT`; discarded editorial fields never participate in equality
+  or conflict checks. A later import with a different source identity creates a
+  distinct immutable imported run and does not overwrite an earlier run.
 - The bundled release has 19,429 exact released URL rows. Its separately
   documented canonicalization exception imports 19,411 articles, 77,708 unique
-  predictions, and 20 historical virtual family/fold models.
+  prediction runs, and 20 historical virtual family/fold models.
 
 ## 10. Compaction
 
@@ -385,11 +430,29 @@ history is corruption.
 
 Exports are derived views, not database files. They use UTF-8 CSV with the same
 physical rules, stream to the client, and contain only documented public fields.
-Article text is excluded from bulk exports by default and included only when the
-request explicitly sets `include_text=true`. Protected reference fields are
-impossible to request because they are absent from storage schemas.
+Editorial content cannot be exported because its compatibility fields are
+excluded from every bulk export even when populated locally. Protected
+reference fields are impossible to request because they are absent from storage
+schemas.
 
-## 12. Backup and portability
+## 12. Local-content purge
+
+`content_purge` is the sole privacy exception to append-only preservation. With
+the writer mutex held, it rewrites every physical `articles.csv` row for the
+confirmed `article_id`, replacing `title`, `text`, `content_status`, and
+`content_saved_at` with their empty/`none` forms while preserving identifiers,
+versions, transaction links, timestamps, and all non-content fields. It applies
+the same transformation to application-created CSV backups under `<data-dir>`.
+Each file is written to a redacted sibling, verified, fsynced, and atomically
+renamed; no unredacted staging copy is created.
+
+The rewrite is idempotent and privacy-monotonic. If interrupted after only some
+files were replaced, startup completes the redaction of all remaining managed
+files before readiness instead of restoring content. It then records a safe
+recovery warning for the interrupted job. Prediction runs and evaluations are
+never changed. External copies are outside application control.
+
+## 13. Backup and portability
 
 A consistent manual backup requires stopping the server and copying the entire
 data directory. Copying individual ledgers while the server runs is not a

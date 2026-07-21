@@ -177,7 +177,10 @@ Offline readiness requires:
 
 - bundled frontend assets;
 - initialized or importable CSV history;
-- local artifact, tokenizer, and base-model cache for any requested inference;
+- a reusable prediction run for each requested article, or both a compatible
+  local model and a previously user-saved validated body for every missing run;
+- `prediction_action=reuse`; recomputation always requires fresh retrieval and
+  is therefore unavailable offline;
 - no remote font, script, chart, documentation, analytics, or API dependency.
 
 The OSF link remains visible as text while offline but is not requested.
@@ -241,6 +244,12 @@ tar --create --gzip --file publisher-reliability-data-backup.tar.gz ./data
 Restore into an empty data directory, verify, then start. Model artifacts and
 Hugging Face cache are backed up separately; losing them does not lose historical
 predictions but can make inference unavailable.
+
+If the user opted to save article title/body, the backup contains that
+third-party content in `state/articles.csv`. It must be protected and handled
+according to applicable rights. The in-app purge can rewrite only live state
+and backups still located in the application's managed `data/backups`
+directory; it cannot locate or alter this external archive.
 
 ## 11. CI deployment matrix
 

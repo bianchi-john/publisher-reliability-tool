@@ -12,9 +12,9 @@ Docker Compose, and exposes the same functionality through:
 - interactive API documentation at `http://127.0.0.1:8000/api/docs`.
 
 All model inference and persistent state remain local. Internet access is used
-only when an explicit request requires an article that is not usable from the
-local CSV data, when publisher discovery needs additional articles, or when the
-user explicitly downloads a missing model dependency.
+only when a request cannot reuse a stored run or user-saved local body, when an
+explicit recomputation needs a fresh page, when publisher discovery needs URLs,
+or when the user explicitly downloads a missing model dependency.
 
 ## Locked MVP decisions
 
@@ -35,11 +35,15 @@ user explicitly downloads a missing model dependency.
 - **Language:** software text and API messages are English; newly inferred
   articles must be detected as English.
 - **Identity:** an article is identified by its canonical URL, a publisher by
-  its normalized hostname, and a prediction by article plus exact model
-  identity.
-- **Reuse:** a compatible stored prediction is returned without refetching or
-  comparing article text. Stored article text can be used for a missing model
-  prediction without a network connection.
+  its normalized hostname, a model by its exact artifact/recipe identity, and
+  each immutable prediction run by its own run ID plus article/model IDs.
+- **Reuse and reruns:** an existing model/article run is reused by default.
+  Explicit recomputation creates a new immutable run and never overwrites prior
+  outputs or evaluations.
+- **Content retention:** scraped title/body are discarded by default. A user can
+  explicitly save them only in the local CSV data directory; authors and raw
+  HTML are never saved. The public repository dataset always keeps editorial
+  fields empty.
 - **Aggregation:** `majority_vote` is the paper-compatible default. The MVP
   also implements `ordinal_mean` and `mean_probabilities` under the exact rules
   in `docs/scientific-contract.md`.
@@ -53,19 +57,23 @@ user explicitly downloads a missing model dependency.
 
 ## Offline and online behavior
 
-The following work without internet access after software dependencies, CSV
-state, and selected model dependencies are present locally:
+The following work without internet access after software dependencies and CSV
+state are present locally; model artifacts are unnecessary when all requested
+predictions already exist:
 
 - browse, search, filter, paginate, and export local article and publisher
   history;
 - inspect stored predictions, probabilities, jobs, and evaluations;
 - aggregate existing compatible predictions;
-- infer with a local model from article text already stored in CSV;
 - use the frontend, API documentation, and charts.
 
 Network access is required only for:
 
-- fetching an article whose usable text is absent locally;
+- evaluating an article that lacks a compatible stored run and has no
+  user-saved local text;
+- explicitly recomputing a prediction from a fresh page retrieval;
+- explicitly adding local title/body to a known article that has no saved
+  content;
 - resolving redirects or a page-declared canonical URL after the offline URL
   lookup misses;
 - discovering additional articles from a publisher homepage;
@@ -74,6 +82,13 @@ Network access is required only for:
 Starting with `--offline` or `PRT_OFFLINE=true` disables every outbound HTTP
 request. An operation that cannot complete locally fails with the stable error
 code `NETWORK_REQUIRED`; browsing and other local operations remain available.
+
+Evaluation requests use `prediction_action=reuse` and
+`content_retention=discard` by default. `reuse` returns the latest compatible
+run when one exists, otherwise it infers from explicitly saved local text or
+retrieves the page. `recompute` always retrieves the current page and creates a
+new immutable run. `save_local` stores only the newspaper-extracted title and
+body in local CSV after validation.
 
 ## User input modes
 
@@ -101,6 +116,8 @@ before the application attempts web discovery for the missing count.
 | `docs/traceability.md` | Mapping from every functional/non-functional requirement to acceptance coverage |
 | `dataset/README.md` | Public dataset generation, verification, licensing notice, and runtime import behavior |
 | `models/README.md` | Official artifact layouts and local registration behavior |
+| `LICENSE` | Apache-2.0 terms for project-owned software and documentation |
+| `MODEL-OUTPUT-LICENSE.md` | CC0-1.0 dedication limited to project-owned generated outputs/database arrangement |
 
 If two documents appear to conflict, the more specific contract governs:
 
@@ -116,7 +133,10 @@ the implementation is merged.
 
 ## Public and protected data boundary
 
-The repository contains model-produced outputs and scraped article fields. It
+The repository contains model-produced outputs, article URLs, and publisher
+domains. In the tracked public dataset, compatibility columns for `title`,
+`text`, and `authors` are present but must be empty. User-saved local content
+lives only under the ignored runtime data directory. The repository
 must never contain original reference-provider labels, scores, score ranges, or
 provider-supplied metadata. The public classes are displayed only as `Class 0`
 through `Class 4`; the tool contains no mapping back to protected names or score
@@ -124,14 +144,13 @@ ranges.
 
 The private source dataset and model weights are ignored by Git. The generated
 public release retains the first source occurrence of each exact URL and records
-the deduplication counts in its manifest. Article titles, bodies, and author
-strings remain attributable to their respective publishers; inclusion does not
-change their copyright status.
+the deduplication counts in its manifest. It contains no article titles, bodies,
+or author strings.
 
-Before an application release, the project owner must add `LICENSE` for the
-software and `MODEL-OUTPUT-LICENSE.md` for generated predictions. Those terms
-must not claim to relicense third-party article text. Absence of either file is
-a release blocker, not permission inferred from public access.
+The software is licensed under Apache-2.0 in `LICENSE`. Model-produced labels,
+fold identifiers, probabilities, and the project-owned database arrangement are
+dedicated under CC0-1.0 in `MODEL-OUTPUT-LICENSE.md`. Neither license applies to
+third-party URLs, publisher names, trademarks, model weights, or source pages.
 
 ## Official model release
 
@@ -150,4 +169,5 @@ The MVP is complete only when every acceptance test passes in native Linux and
 Docker Compose, the OpenAPI document matches `docs/api-contract.md`, all local
 state is inspectable as CSV, browsing works with outbound networking disabled,
 and no protected reference field is present in Git history, runtime state,
-logs, API responses, UI state, or exports.
+logs, API responses, UI state, or exports. Blocked source column names may
+persist only in the explicitly documented value-free import audit metadata.
