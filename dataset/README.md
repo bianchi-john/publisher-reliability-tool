@@ -1,10 +1,12 @@
 # Dataset input and public release
 
-`sampleDataset.csv` is a synthetic schema example, not research data. Its URLs,
-predictions, and probabilities are illustrative placeholders; editorial
-compatibility fields are empty.
+`sampleDataset.csv` is synthetic. The public paper-associated prediction
+release is `predictions/manifest.json` plus its listed CSV parts. Private source
+data is never tracked.
 
-The public research release is generated from the private source CSV with:
+Generate the public release from a private `.csv`, `.csv.gz`, or single-CSV ZIP
+using the repository preparation script (ZIP is a build-time input only, not a
+runtime import format):
 
 ```bash
 python3 scripts/prepare_public_dataset.py \
@@ -13,67 +15,36 @@ python3 scripts/prepare_public_dataset.py \
   --duplicate-policy first
 ```
 
-The command accepts `.csv`, `.csv.gz`, or a ZIP containing exactly one CSV. It
-retains `url`, derives `domain`, and retains model predictions, fold identifiers,
-and available class probabilities. Columns `title`, `text`, and `authors`
-remain for compatibility but the generator always writes them as empty strings.
-It excludes all NewsGuard reference fields:
-`score`, `country`, `language`, `topics`, `paywall`, `opinion_advocacy`, and the
-original `label`.
+The generator retains URL, recomputed domain, model class, fold, and available
+probabilities. It writes empty `title`, `text`, and `authors` compatibility
+fields and excludes protected provider columns/values. The first exact URL in
+source order wins; the manifest records source, duplicate, skipped, part-size,
+part-SHA-256, and `prt-dataset-content-v1` counts/digests.
 
-Parts are limited to 24 MiB by default. `manifest.json` records their row counts,
-sizes, and SHA-256 checksums. The builder validates every source row before it
-makes the output directory visible, preventing a truncated CSV from becoming a
-release.
-
-The paper source contains repeated exact URLs with conflicting scraped content
-and predictions. The public release uses the explicit `first` policy: source
-order is authoritative, the first row for each URL is retained, later rows are
-skipped, and the manifest records both source and skipped-row counts.
-
-The application then applies its stricter offline URL normalization during seed
-import. In the current release, 18 later URL strings normalize to an earlier
-article identity. For this bundled release only, first-occurrence article
-URL/domain identity is retained and non-conflicting predictions from different folds are
-merged. Seed state therefore contains 19,411 articles, 77,708 unique
-article/model prediction runs, and 20 historical family/fold models; a same-model
-prediction conflict would make seed verification fail.
-
-Verify a generated release, including a field-by-field comparison with its
-private source, before committing it:
+Verify before commit:
 
 ```bash
-python3 scripts/verify_public_dataset.py \
-  dataset/predictions \
-  --source /path/to/fullDataset.csv.gz
+python3 scripts/verify_public_dataset.py dataset/predictions
 ```
 
-The release contains no article titles, bodies, or author strings. Generated
-model outputs are dedicated under CC0-1.0 by
-`../MODEL-OUTPUT-LICENSE.md`; that dedication does not cover URLs, publisher
-names, trademarks, model weights, or source pages.
+With the private source available, add `--source PATH` for field-by-field
+projection verification.
 
-At first startup the application verifies this manifest and streams the release
-into the authoritative CSV ledgers under the configured data directory. Import
-is idempotent by the manifest's `prt-dataset-content-v1` digest and schema
-version; that same digest is the historical-model identity input. Part byte
-checksums remain transport-integrity checks.
+The current release has 19,476 source rows, 19,429 released exact URLs, 42
+duplicate groups, and 47 skipped later rows. Runtime canonicalization derives
+19,411 articles, 77,708 runs, and 20 historical family/fold identities.
 
-At runtime the user can also select a CSV, `.csv.gz`, single-CSV ZIP, manifest
-directory, or ZIP containing one manifest and exactly its listed parts. A
-server-local source is CLI-only and remains unchanged. Browser/API uploads use
-a private bounded acquired spool and the documented 2 GiB compressed/extracted
-limits; terminal/restart cleanup removes it. The importer projects URLs,
-publisher domains, and model outputs into the local CSV store. Source title,
-text, and author values are discarded. Protected reference columns are
-reported by name only and their values never persist.
+Runtime user import intentionally supports only CSV and CSV.GZ. The browser/API
+spools one local upload; CLI accepts one path. Default supported limits are
+512 MiB and 300,000 logical rows. ZIP, generic manifests, arbitrary directories,
+and multi-gigabyte inputs are outside the demo. The official bundled manifest
+directory remains a startup/verification input.
 
-Arbitrary user imports do not use the release generator's first-occurrence
-policy. Within one import, duplicate canonical URLs can merge different model
-identities, but a different output for the same article/model identity is
-rejected and counted. A later source with a different import identity creates a
-separate immutable imported run. Discarded editorial fields never participate
-in conflict checks.
+User schema needs `url` and at least one family label/fold pair. Source ID,
+domain, title, text, and authors are optional compatibility fields. Editorial
+and protected values are discarded before staging. CSV and CSV.GZ with the same
+projected record sequence share an import digest and are not duplicated.
 
-`fullDataset.csv` and all datasets other than the tracked sample and generated
-release directory are ignored by Git.
+Generated outputs/database arrangement are covered only by the limited CC0
+dedication in `../MODEL-OUTPUT-LICENSE.md`; URLs, publishers, source pages,
+trademarks, models, and weights are not.
