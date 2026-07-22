@@ -60,13 +60,15 @@ services:
       context: .
       target: runtime
     image: publisher-reliability-tool:${PRT_VERSION:-dev}
-    restart: unless-stopped
+    restart: "no"
     init: true
+    user: "10001:10001"
     ports:
       - "127.0.0.1:${PRT_PORT:-8000}:8000"
     environment:
       PRT_HOST: "0.0.0.0"
       PRT_PORT: "8000"
+      PRT_PUBLIC_ORIGIN: "http://127.0.0.1:${PRT_PORT:-8000}"
       PRT_CONTAINER_LOOPBACK_ONLY: "true"
       PRT_DATA_DIR: "/data"
       PRT_MODELS_DIR: "/models:/data/managed-models"
@@ -89,12 +91,14 @@ services:
 
 The actual `compose.yaml` shall contain no `privileged`, host network, Docker
 socket mount, wildcard host port, or writable source-code mount.
-The runtime image contains the zero-byte, root-owned, non-writable marker
+No automatic restart policy is part of the MVP: permanent configuration,
+storage, or port failures remain visible instead of looping. The runtime image contains the zero-byte, root-owned, non-writable marker
 `/opt/publisher-reliability/.container-image`; native packages do not create it.
 
-Start and stop:
+Prepare writable directories once, then start/stop:
 
 ```bash
+sudo install -d -m 0750 -o 10001 -g 10001 ./data ./cache/huggingface
 docker compose up --build
 docker compose down
 ```
@@ -135,21 +139,22 @@ There is no implicit configuration file in the MVP.
 
 | Environment variable | Default | Validation |
 | --- | --- | --- |
-| `PRT_HOST` | `127.0.0.1` | Valid bind address; non-loopback requires a key except the documented container mode |
+| `PRT_HOST` | `127.0.0.1` | `127.0.0.1` or `::1`; image-internal `0.0.0.0` only with the container flag |
 | `PRT_PORT` | `8000` | `1..65535` |
+| `PRT_PUBLIC_ORIGIN` | derived loopback URL | Exact HTTP loopback origin; required when container host port differs |
 | `PRT_CONTAINER_LOOPBACK_ONLY` | `false` | `true` only in the official loopback-published container contract |
 | `PRT_DATA_DIR` | `./data` | Writable directory, no second writer |
 | `PRT_MODELS_DIR` | `./models` | OS path list separated by `:` |
-| `PRT_IMPORT_ROOTS` | data directory | OS path list; API path imports cannot escape it |
 | `PRT_SEED_DATASET` | `./dataset/predictions` | Valid CSV or manifest directory; missing allowed |
 | `PRT_OFFLINE` | `false` | Strict lowercase boolean |
-| `PRT_API_KEY` | unset | Minimum 32 bytes when required |
-| `PRT_ALLOWED_ORIGINS` | empty | Comma-separated exact origins; `*` rejected |
 | `PRT_DEVICE` | `auto` | `auto`, `cpu`, or `cuda` |
 | `PRT_HF_HOME` | normal HF cache | Writable/cache-readable path |
 | `PRT_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
 | `PRT_MODEL_UPLOAD_MAX_BYTES` | `10737418240` | Positive integer, default 10 GiB |
 | `PRT_DATASET_UPLOAD_MAX_BYTES` | `2147483648` | Positive integer, default 2 GiB |
+| `PRT_JOB_QUEUE_MAX` | `100` | Positive integer queued-job cap |
+| `PRT_BACKUP_MAX_COUNT` | `3` | Positive application-created backup cap |
+| `PRT_BACKUP_MAX_BYTES` | `21474836480` | Positive application-created backup byte cap |
 
 Invalid values stop startup with exit code `2` and one actionable English
 message.
@@ -173,15 +178,11 @@ For a network-enforced environment, users additionally apply host/container
 firewall policy; Compose does not claim to be a security boundary for outbound
 traffic.
 
-Offline readiness requires:
-
-- bundled frontend assets;
-- initialized or importable CSV history;
-- a reusable prediction run for each requested article, or both a compatible
-  local model and a previously user-saved validated body for every missing run;
-- `prediction_action=reuse`; recomputation always requires fresh retrieval and
-  is therefore unavailable offline;
-- no remote font, script, chart, documentation, analytics, or API dependency.
+Offline readiness requires only verified CSV state, built indexes, executor,
+and bundled frontend assets. Per-request preflight decides whether a particular
+model/body/run can satisfy an operation; readiness never predicts future input.
+`recompute` remains unavailable offline and no frontend asset has a remote
+dependency.
 
 The OSF link remains visible as text while offline but is not requested.
 
@@ -204,17 +205,17 @@ models/
         └── tokenizer files
 ```
 
-The base/tokenizer cache is separate from released fold artifacts. Explicit
-dependency setup is performed while online using a model-registration/setup
-command or normal Transformers cache tooling. Inference never downloads a
-missing dependency implicitly.
+The base/tokenizer cache is separate from released fold artifacts. Dependency
+setup uses external Transformers/Hugging Face tooling; the application has no
+setup/download CLI. Inference never downloads a missing dependency implicitly.
 
 ## 8. File ownership
 
-The container runs non-root. On Linux bind mounts, `PRT_UID` and `PRT_GID` in
-`.env` match the invoking user and the image entrypoint drops privileges to
-those numeric IDs. Startup checks that `/data` is writable and `/models` plus
-the seed dataset are readable before binding HTTP.
+The container runs as fixed non-root `10001:10001`; no `PRT_UID`/`PRT_GID`
+mechanism is promised. Users create/chown `data`, `cache/huggingface`, and other
+writable mounts to that ID before starting. A missing seed/model directory is
+allowed; if a configured path exists but is unreadable or wrong type, startup
+fails. `/data` must be writable.
 
 The application never changes permissions recursively and never makes model
 files world-writable.
@@ -248,8 +249,14 @@ predictions but can make inference unavailable.
 If the user opted to save article title/body, the backup contains that
 third-party content in `state/articles.csv`. It must be protected and handled
 according to applicable rights. The in-app purge can rewrite only live state
-and backups still located in the application's managed `data/backups`
-directory; it cannot locate or alter this external archive.
+and does not alter backups, including those in `data/backups`. The UI and purge
+result require manual deletion of every backup/copy that must lose the content.
+
+Application-created compaction/recovery backups retain at most 3 complete
+generations and 20 GiB total, deleting oldest complete generations only after a
+successful operation. User-created backups are not managed. Upload,
+compaction, and purge enforce the free-space formulas in the storage contract;
+ENOSPC fails safely without reporting an incomplete commit.
 
 ## 11. CI deployment matrix
 

@@ -39,13 +39,14 @@ The MVP shall:
 - start natively from a Linux terminal and through Docker Compose;
 - serve a responsive local frontend and versioned REST API;
 - verify and import the bundled public prediction release on first startup;
-- import additional compatible CSV files, manifest directories, or supported
-  ZIP containers;
+- import additional compatible CSV files, manifest directories through the
+  offline CLI, or supported upload containers;
 - maintain all authoritative mutable state as local CSV ledgers;
 - browse, search, filter, paginate, inspect, and export local articles,
   publishers, prediction runs, evaluations, models, imports, and jobs;
 - discover and validate supported local model artifacts;
-- register a model from a server-local path or a streamed browser/API upload;
+- register an official supported model from a configured server-local root or
+  a streamed browser/API upload;
 - show the official OSF download link and exact placement instructions;
 - run model inference locally from explicitly saved local text for a missing
   reusable run, or from ephemeral article retrieval for a missing run or
@@ -86,6 +87,11 @@ The MVP shall not:
 - claim that softmax values are calibrated confidence;
 - claim that a publisher result applies independently of its selected model,
   articles, fold, or aggregation method.
+- bind a non-loopback interface, accept arbitrary server-local paths through
+  the API, or support generic custom-model manifests;
+- automatically download/setup model dependencies, rewrite backups during a
+  content purge, resume SSE history across process restarts, or compact while
+  the server is running.
 
 ## 5. Exact CLI surface
 
@@ -105,13 +111,12 @@ publisher-reliability storage compact
 
 | Option | Default | Contract |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | Non-loopback values require an API key except the documented container exception |
+| `--host` | `127.0.0.1` | Must be a loopback bind; non-loopback is outside the MVP |
 | `--port` | `8000` | Integer `1..65535`; startup fails if unavailable |
 | `--data-dir` | `./data` | Authoritative CSV state, locks, logs, and uploads |
 | `--models-dir` | repeatable `./models` | Recursively scanned; hidden directories are skipped |
 | `--seed-dataset` | `./dataset/predictions` | CSV or manifest directory imported idempotently |
 | `--offline` | false | Blocks all outbound application HTTP requests |
-| `--api-key` | unset | Required for every externally reachable non-loopback bind |
 | `--log-level` | `info` | One of `debug`, `info`, `warning`, `error` |
 
 `dataset verify PATH` is read-only and validates any supported import
@@ -139,32 +144,38 @@ Exit code `0` means success, `2` invalid CLI/configuration, `3` invalid dataset
 or storage, and `1` any unexpected runtime failure. `serve` remains running
 until `SIGINT` or `SIGTERM` and performs a bounded graceful shutdown.
 `models scan` exits `0` when the scan itself completes even if individual
-artifacts are recorded as invalid, unsupported, or unavailable; its summary
-reports each status.
+artifacts are invalid/unavailable or reported unsupported; its summary reports
+each outcome, while only identities with an official manifest entry become
+model records.
 
 ## 6. Startup contract
 
-Startup performs these steps in order:
+Startup performs these steps in order. Steps 1–3 are read-only with respect to
+the data directory:
 
 1. Parse CLI and environment configuration and reject unknown or conflicting
    values.
-2. Refuse multiple workers or another live writer for the same data directory.
-3. Create missing CSV ledger files with exact versioned headers.
-4. Recover or ignore uncommitted transactions, complete any privacy-monotonic
-   interrupted content purge, and verify committed CSV rows.
-5. Verify the bundled dataset manifest and import it if its exact source
-   identity plus import schema version has not already been committed.
-6. Scan configured model directories and record each artifact as compatible,
-   unavailable dependency, unsupported, or invalid.
-7. Start the background job executor.
-8. Bind the HTTP server.
-9. Print the UI URL, API URL, API documentation URL, offline status, dataset
-   status, writable data directory, and model summary.
+2. Create and bind the configured loopback socket without accepting
+   connections. This reserves the port; an unavailable port terminates without
+   creating, locking, or changing the data directory.
+3. Validate existing path types/readability without creating state.
+4. Acquire the writer lock, then create missing ledgers only when no compaction
+   marker or staging directory exists.
+5. Recover an uncommitted tail or interrupted offline compaction and verify all
+   committed rows. Corrupt committed storage closes the reserved socket and
+   terminates; no diagnostic HTTP server is started.
+6. Verify/import the bundled dataset by content digest and schema version.
+7. Scan configured model roots without following symlinks.
+8. Requeue committed `queued` jobs and mark jobs left `running` failed with
+   `PROCESS_INTERRUPTED`.
+9. Put the reserved socket into listening mode and start the HTTP server and
+   bounded executor. No request is accepted before this step.
+10. Print the UI/API/documentation URLs and safe status summary.
 
 A missing model or seed dataset is not a startup failure. The server enters
 history-only or empty-history mode and displays corrective instructions. An
 invalid existing CSV database, unsafe bind configuration, unavailable port, or
-second writer is a startup failure.
+second writer is a startup failure and exposes no HTTP endpoint.
 
 ## 7. Operating modes
 
@@ -190,8 +201,9 @@ and raw HTML are always discarded.
 
 ### 7.4 Strict offline mode
 
-`--offline` and `PRT_OFFLINE=true` prevent the HTTP client and model downloader
-from creating outbound connections. A network-dependent job fails with
+`--offline` and `PRT_OFFLINE=true` install a deny-all application HTTP transport
+before any service/model code loads. All internal clients use that transport;
+model loaders are local-files-only. A network-dependent job fails with
 `NETWORK_REQUIRED`; it never silently switches to a partial or different input.
 
 ## 8. Evaluation workflows
@@ -220,20 +232,20 @@ Every recomputation or missing-run inference creates a new
 `prediction_run_id`; no run is overwritten. Existing publisher evaluations keep
 references to the exact runs originally aggregated.
 
-Evaluation selectors list `compatible` runnable models and `historical_only`
-virtual models separately. A historical-only model can reuse and aggregate its
-stored runs and can add title/body to an article whose run is found, but cannot
-create a missing run or recompute. If any required article lacks that
-historical output after canonical resolution, the job fails
+Evaluation selectors list `compatible` runnable models and non-runnable
+`historical_only`/`artifact_missing` identities separately. A non-runnable
+model can reuse/aggregate stored runs and add title/body to an article whose run
+is found, but cannot create a missing run or recompute. If any required article
+lacks that exact output after canonical resolution, the job fails
 `MODEL_NOT_RUNNABLE` before extraction/content saving for that article and
-suggests registering a local artifact; it never attributes the historical
-prediction to a different local checksum.
+suggests provisioning/relinking the exact identity; it never attributes a
+stored prediction to a different local checksum.
 
-A publisher request using a `historical_only` model accepts only
+A publisher request using a non-runnable model accepts only
 `discovery_mode=stored_only`; the UI disables `stored_first` and `web_only`, and
 the API rejects either with `MODEL_NOT_RUNNABLE` before job creation. Because
 `stored_only` itself requires `reuse + discard`, content enrichment for
-historical runs is done through single article, explicit article list, or stored
+stored runs is done through single article, explicit article list, or stored
 selection instead. Those modes remain allowed because every URL can be checked
 for an existing historical output without assuming discovery.
 
@@ -296,10 +308,10 @@ Duplicate submitted URLs after normalization are rejected with
 1. The user submits one HTTP(S) publisher homepage URL, requested count `2..50`
    (default `10`), one model, one aggregation method, discovery mode,
    `allow_partial`, `prediction_action`, and `content_retention`.
-2. The submitted publisher seed may contain a path or semantic query; discovery
-   starts from that exact offline-normalized URL, while publisher identity is
-   still only its normalized hostname. A successfully fetched seed becomes the
-   stored `homepage_url`.
+2. The submitted seed is stored only as `homepage_candidate_url`. It becomes
+   `homepage_resolved_url` only after a successful same-publisher fetch whose
+   final normalized URL has path `/` and no query; a section/query candidate is
+   never asserted as the publisher homepage.
 3. The normalized publisher hostname is resolved.
 4. `stored_only` selects only eligible stored articles and never accesses the
    network; it accepts only `reuse + discard`. `stored_first` first reuses
@@ -311,7 +323,8 @@ Duplicate submitted URLs after normalization are rejected with
    `first_seen_at` descending and canonical URL ascending. Discovered candidates
    are normalized, deduplicated, restricted to the publisher hostname, and
    ordered by canonical URL ascending.
-6. Each candidate is processed until the requested number satisfies both the
+6. Candidates are processed sequentially within this job until the requested
+   number satisfies both the
    prediction and requested retention controls or no
    candidates remain. Rejected, failed, reused, recomputed, inferred,
    content-saved, and used counts are shown.
@@ -345,18 +358,30 @@ whose publisher identity differs from the current page.
 1. The user selects one `.csv`, `.csv.gz`, a directory containing
    `manifest.json` and listed CSV parts, or a `.zip` containing either exactly
    one CSV or one top-level manifest plus exactly its listed CSV parts.
-2. The backend streams and validates the source; the browser never loads the
-   entire file into memory, and an uploaded dataset is never spooled to disk.
+2. The browser streams the source. The backend enforces byte/free-space limits,
+   computes a transport SHA-256 while writing a private mode-`0600` spool,
+   fsyncs it, and atomically renames it. Only then does it commit and return a
+   `dataset_import` job. Failed acquisition creates no job.
 3. Only allowlisted fields are projected. Protected columns are named in a
    warning but their values are neither logged nor persisted. Source `title`,
    `text`, and `authors` values are discarded unconditionally; their
    compatibility columns remain empty.
-4. Exact source checksum, row counts, accepted rows, rejected rows, duplicate
+4. The format-independent content digest, optional transport checksum, row
+   counts, accepted rows, rejected rows, duplicate
    conflicts, and warnings are committed to `imports.csv`.
    Each rejected data row also creates a safe, value-minimized entry in
-   `import_rejections.csv` containing its source line and stable error code.
-5. Reimporting the same checksum and schema version is idempotent.
+   `import_rejections.csv` containing logical source part/data-record number and
+   stable error code.
+5. Reimporting the same content digest and schema version is idempotent.
 6. The source is never modified.
+
+Parsing writes projected, non-authoritative staging ledgers without holding the
+CSV writer mutex or exposing rows. Whole-input duplicate/conflict validation
+finishes before a short final transaction commits all accepted rows, rejection
+records, and the import summary. A conflict found late therefore excludes the
+staged pair before either prediction run is authoritative. The acquired upload
+and staging files are deleted immediately after the terminal transaction; a
+crash may leave them only for the documented recovery/retry policy.
 
 An import with both accepted and rejected rows finishes
 `succeeded_with_rejections`; accepted rows commit atomically with the import
@@ -365,16 +390,21 @@ with zero acceptable rows is `failed` and commits no article or prediction.
 
 Within one import, duplicate canonical URLs can merge non-conflicting outputs
 from distinct model identities. A different output for the same article/model
-identity in that source is rejected and reported. Editorial source differences
+identity marks that key conflicted: every occurrence for that key is rejected,
+reported, and produces no prediction run. For simple row counters/provenance,
+each source row containing a conflicted key is rejected in full; its otherwise
+non-conflicting outputs do not commit. Editorial source differences
 are discarded before comparison and cannot create a conflict. A later import
-with a different source identity creates separate imported runs. The
+with a different content digest creates separate imported runs. The
 first-occurrence metadata policy applies only to the already generated bundled
 release.
 Import rejection details remain available after restart through the UI and API.
 
 ### WF-006 — Register a model
 
-The user either supplies a server-local path or uploads one file/archive.
+The user scans configured model roots or uploads one file/archive. Scan directly
+registers recognized official identities; free-form server paths are never
+accepted by the API. Generic custom manifests are outside the MVP.
 Uploads are streamed into the configured data directory and validated before
 registration. Directory artifacts are uploaded as `.zip` or `.tar.gz`. A model
 does not become selectable until family, fold, artifact checksum, loader recipe,
@@ -383,11 +413,12 @@ base/tokenizer dependencies, class count, and runtime compatibility pass.
 ### WF-007 — Clear saved local content
 
 From article detail, the user confirms the canonical URL and starts a
-`content_purge` job. The job blanks title/body in every physical version of that
-article in live CSV and application-managed backups, verifies the rewritten
-files, then reports success. Prediction runs and evaluations remain unchanged.
-The UI warns that copies made outside the configured data directory cannot be
-found or altered by the application.
+`content_purge` job. It takes exclusive maintenance access, temporarily rejects
+affected reads and all mutations, rewrites every live `articles.csv` version,
+fsyncs and swaps the file, rebuilds indexes, and appends a purge audit row
+before service resumes. Prediction runs and evaluations remain unchanged. No
+backup is rewritten automatically; the UI requires acknowledgement that all
+backups and external copies containing the content need manual deletion.
 
 ## 9. Aggregation controls
 
@@ -412,7 +443,7 @@ The frontend uses seven top-level destinations:
 | `/evaluate` | Single article, article list, and publisher evaluation forms |
 | `/articles` | Searchable and paginated article history |
 | `/publishers` | Searchable and paginated publisher history |
-| `/imports` | Dataset import by upload/local path, history, counters, warnings, and rejection reports |
+| `/imports` | Dataset import by upload, history, counters, warnings, and rejection reports |
 | `/models` | Model compatibility, registration, upload, OSF instructions |
 | `/jobs` | Active and completed job history, progress, warnings, and errors |
 
@@ -485,13 +516,13 @@ save title/body. These map directly to the two controls and never create a
 third implicit behavior. An unknown/missing-run article displays the expected
 network requirement instead of an existing-result prompt.
 
-For a historical-only selection, `Recompute` is disabled with model setup
+For a non-runnable selection, `Recompute` is disabled with model setup
 guidance. `Save extracted title and body locally` remains available for an
 explicit article that has a reusable historical run; it is disabled in the
 historical publisher form because that form is constrained to
 `stored_only + reuse + discard`.
 
-The model selector separates runnable and historical-only entries and displays
+The model selector separates runnable and non-runnable stored-output entries and displays
 family, fold, shortened model ID, and status. Aggregation choices show their
 formula summary and disabled reason. Before submission the page states whether
 the selected operation can require network access; strict offline mode never
@@ -519,19 +550,25 @@ using the exact same API values and an accessible text summary.
 
 ## 12. Job behavior
 
+The exhaustive persisted job types are `article_evaluation`,
+`article_list_evaluation`, `publisher_evaluation`, `dataset_import`,
+`model_scan`, `model_upload`, `model_validate`, and `content_purge`. CLI dataset
+import may create `dataset_import`; storage verify/compaction are synchronous
+offline CLI operations and never job types.
+
 Job states are `queued`, `running`, `succeeded`, `failed`, and `cancelled`.
 Progress is an integer `0..100`. The exhaustive phase identifiers are
 `queued`, `validating`, `scanning`, `resolving_local`, `discovering`,
 `retrieving`, `extracting`, `language_check`, `loading_model`, `inferring`,
-`aggregating`, `importing`, `compacting`, `purging_content`, `verifying`, `committing`,
+`aggregating`, `importing`, `purging_content`, `verifying`, `committing`,
 `cancelling`, `completed`, `failed`, and `cancelled`. Jobs use only applicable
 phases. Article jobs follow local resolution, optional retrieval/extraction/
 language validation, optional model loading/inference, and commit. List and
 publisher jobs repeat that candidate sequence; publisher discovery may occur
 between candidate attempts. Once `aggregating` starts, no candidate phase may
 reappear. Import jobs use `importing -> verifying -> committing`; model jobs use
-`scanning` or validation/loading as applicable; compaction uses
-`compacting -> verifying -> committing`; content purge uses
+`scanning` or validation/loading as applicable. Compaction is not a job and
+reports progress only on the offline CLI. Content purge uses
 `purging_content -> verifying -> committing`. A cancellation request switches
 to `cancelling` at the next safe boundary. Terminal phases are `completed` for
 `succeeded`, `failed` for `failed`, and `cancelled` for `cancelled`. Queued jobs
@@ -550,30 +587,34 @@ safe boundary.
 
 At most one GPU inference job and four network/extraction jobs run concurrently.
 CPU-only inference concurrency is exactly one in the MVP. CSV commits are
-serialized.
+serialized. Candidates within one publisher job are sequential; network lanes
+serve different jobs. At most `PRT_JOB_QUEUE_MAX` jobs are `queued` (default
+`100`); overflow creates no job and returns `JOB_QUEUE_FULL`.
+
+On shutdown, accepting and dequeuing stop immediately. A safe boundary is
+before or after one network call, one candidate, one inference, or one complete
+CSV transaction—never inside a transaction. Workers have 30 seconds to reach a
+boundary. At the deadline the process exits after any in-progress CSV
+transaction finishes; noncommitting retrieval/inference may be terminated. On
+restart, `queued` jobs are requeued and persisted `running` jobs become failed
+with `PROCESS_INTERRUPTED`; no running job is resumed.
+
+Retry creates a linked job only from reproducible input. Evaluation and model
+scan/validate jobs are retryable. Upload jobs are
+retryable only while their acquired spool exists. After terminal cleanup the
+job exposes `retry_available=false`; retry returns `SOURCE_NOT_AVAILABLE` and
+the user must upload again.
 
 ## 13. Stable error behavior
 
-The UI and API use these codes where applicable:
-
-`INVALID_URL`, `UNSUPPORTED_SCHEME`, `CANONICAL_IDENTITY_CHANGED`,
-`DUPLICATE_URL_INPUT`,
-`MIXED_PUBLISHERS`, `NETWORK_REQUIRED`, `NETWORK_TIMEOUT`, `ROBOTS_DENIED`,
-`HTTP_ERROR`, `CONTENT_TOO_LARGE`, `EXTRACTION_FAILED`, `TEXT_EMPTY`,
-`TEXT_TOO_SHORT`, `LANGUAGE_DETECTION_FAILED`, `NON_ENGLISH`,
-`MODEL_NOT_FOUND`, `MODEL_NOT_RUNNABLE`, `MODEL_INCOMPATIBLE`, `MODEL_DEPENDENCY_MISSING`,
-`MODEL_RESOURCE_INSUFFICIENT`, `PROBABILITIES_REQUIRED`,
-`INSUFFICIENT_ARTICLES`, `REQUESTED_COUNT_UNMET`, `IMPORT_SCHEMA_INVALID`,
-`IMPORT_CONFLICT`, `PROCESS_INTERRUPTED`, `STORAGE_LOCKED`, `STORAGE_CORRUPT`,
-and `INTERNAL_ERROR`.
-
-This is the exhaustive domain and background-job code set for version 1. The
-API contract separately defines the exhaustive HTTP transport/resource code
-set; implementations shall not invent another stable code without a versioned
-contract change.
+`api-contract.md` section 3 is the single exhaustive definition and synchronous
+HTTP mapping of every stable error code. Reading an accepted job remains HTTP
+`200`; a terminal job embeds one of those codes in its `error` field.
+Implementations shall not create a second registry or invent an unversioned
+stable code.
 
 Errors never include protected source values, editorial content, access tokens,
-API keys, or full stack traces. Debug traces remain in local logs only when
+credentials, or full stack traces. Debug traces remain in local logs only when
 debug logging is explicitly enabled and are still content/secret-redacted.
 
 ## 14. Functional requirements
@@ -582,13 +623,13 @@ debug logging is explicitly enabled and are still content/secret-redacted.
 | --- | --- |
 | FR-001 | The native CLI and Docker Compose shall start the same single-user application contract. |
 | FR-002 | The application shall expose the frontend, REST API, OpenAPI document, and health endpoint from one origin. |
-| FR-003 | Default host publication shall be loopback-only. |
+| FR-003 | Every MVP publication shall be loopback-only and validate Host/Origin on the documented boundary. |
 | FR-004 | Every authoritative mutable record shall be persisted in the versioned CSV store. |
 | FR-005 | The bundled manifest release shall be verified and imported idempotently. |
 | FR-006 | Protected reference-provider fields shall never cross the import projection boundary. |
 | FR-007 | Browsing, filtering, export, and aggregation of stored compatible predictions shall work offline. |
 | FR-008 | `reuse` shall select the latest compatible immutable run without network when one exists. |
-| FR-009 | Title/body retention shall require explicit `save_local`; default discard, authors/raw HTML shall never persist, and confirmed purge shall physically blank managed copies. |
+| FR-009 | Title/body retention shall require explicit `save_local`; default discard, authors/raw HTML shall never enter authoritative state, and purge shall blank live state while backups require manual deletion. |
 | FR-010 | Missing-run inference may use user-saved validated text; otherwise it requires network, while `recompute` always requires fresh retrieval. |
 | FR-011 | The three evaluation input modes and their limits shall be identical in UI and API. |
 | FR-012 | Mixed-publisher explicit lists shall never create a publisher evaluation. |
@@ -597,7 +638,7 @@ debug logging is explicitly enabled and are still content/secret-redacted.
 | FR-015 | Aggregation methods shall follow the scientific formulas and availability rules exactly. |
 | FR-016 | Every new successful run shall contain one class and five finite probabilities summing to one within tolerance. |
 | FR-017 | Missing historical probabilities shall remain missing and display as `Not available`. |
-| FR-018 | Runnable model fold and artifact checksum shall be part of exact model identity; historical virtual identities shall follow the release-digest rule. |
+| FR-018 | Exact model identity shall include every scientific setting and immutable dependency revision but no filesystem locator; artifact loss shall not invalidate historical runs. |
 | FR-019 | Unsupported or ambiguous models shall fail closed without executing artifact code. |
 | FR-020 | New article inference shall use unchanged `newspaper3k` text after deterministic English validation. |
 | FR-021 | Long operations shall be inspectable and cancellable background jobs. |
@@ -605,9 +646,12 @@ debug logging is explicitly enabled and are still content/secret-redacted.
 | FR-023 | API list endpoints shall use stable cursor pagination and bounded page sizes. |
 | FR-024 | Frontend charts shall have exact accessible table equivalents. |
 | FR-025 | Strict offline mode shall prevent all application-initiated outbound HTTP requests. |
-| FR-026 | Non-loopback binding shall require API-key authentication and restrictive CORS. |
-| FR-027 | Imports shall stream, preserve their sources, and be idempotent by checksum and schema version. |
+| FR-026 | Loopback requests shall resist DNS rebinding through exact Host validation and same-origin browser mutation checks. |
+| FR-027 | Upload acquisition and staged import shall be bounded, crash-safe, atomic, and idempotent by content digest plus schema version. |
 | FR-028 | Native and container deployments shall pass the same acceptance suite. |
+| FR-029 | Idempotency keys shall survive restart and compaction through a documented CSV ledger. |
+| FR-030 | The job queue shall be bounded and restart/retry behavior shall depend only on persisted state and source availability. |
+| FR-031 | Compaction, live-state purge, uploads, and backups shall enforce deterministic recovery, retention, and free-space rules. |
 
 ## 15. Non-functional requirements
 
@@ -616,7 +660,7 @@ debug logging is explicitly enabled and are still content/secret-redacted.
 | NFR-001 | With 100,000 articles and 400,000 predictions on reference hardware, a filtered first page shall return within 2 seconds after indexes load. |
 | NFR-002 | Startup shall stream seed import, verify tracked editorial fields are empty, and keep opt-in runtime content only under the ignored data directory. |
 | NFR-003 | Frontend interaction shall remain responsive while jobs run. |
-| NFR-004 | Graceful shutdown shall stop accepting jobs, wait up to 30 seconds for a safe boundary, flush CSV files, and mark unfinished jobs interrupted. |
+| NFR-004 | Graceful shutdown shall stop accepting jobs, wait 30 seconds for documented safe boundaries, never interrupt a CSV commit, and let restart fail persisted running jobs as interrupted. |
 | NFR-005 | Every persisted timestamp shall be UTC RFC 3339 and every identifier format shall follow the CSV contract. |
 | NFR-006 | The image and frontend shall contain no model weights, base models, remote fonts, analytics, or CDN dependency. |
 | NFR-007 | Logs shall rotate locally and exclude secrets and editorial content at every level. |
@@ -626,7 +670,8 @@ debug logging is explicitly enabled and are still content/secret-redacted.
 
 ## 16. Release gate
 
-The application is not an MVP release until every acceptance test passes,
+The application is not an MVP release until every applicable CPU-gate
+acceptance test passes (hardware-specific tests report separately),
 OpenAPI matches the API contract, CSV verification survives forced interruption
 tests, native and Compose behavior match, and a clean offline run can browse and
 aggregate the bundled history without any outbound connection.

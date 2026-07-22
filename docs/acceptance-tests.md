@@ -30,14 +30,17 @@ verification passes and API resources are identical except deployment metadata.
 ### AT-004 — Graceful shutdown
 
 **Given** queued and running jobs, **when** the process receives `SIGTERM`,
-**then** it rejects new jobs, reaches a safe boundary within 30 seconds, flushes
-CSV, marks unfinished jobs interrupted on restart, and exits without committed
-record loss.
+**then** it rejects new jobs, dequeues no queued job, requeues persisted queued jobs on
+restart, and gives running work 30 seconds to reach a documented boundary. At
+deadline noncommitting work is terminated, any active CSV transaction finishes,
+and restart marks only persisted running jobs `PROCESS_INTERRUPTED` without
+committed loss.
 
 ### AT-005 — Port conflict
 
 **Given** the configured port is occupied, **when** startup runs, **then** it
-exits nonzero with one actionable message and does not modify CSV state.
+exits nonzero with one actionable message and creates/modifies no data-directory
+file, lock, ledger, recovery artifact, model record, import, or job.
 
 ### AT-006 — Missing models
 
@@ -53,7 +56,9 @@ requiring inference returns `MODEL_NOT_FOUND` or a dependency-specific code.
 ### AT-008 — Invalid configuration
 
 **Given** an unknown option, invalid port, malformed boolean, or unwritable data
-directory, **when** startup runs, **then** it exits code `2` before binding HTTP.
+directory, **when** startup runs, **then** it exits code `2` without accepting
+an HTTP request or mutating persistent state. A socket reserved solely to prove
+port availability is closed before exit.
 
 ## B. CSV storage
 
@@ -90,8 +95,9 @@ removes only the malformed tail, records the abort/warning, and passes verify.
 ### AT-014 — Committed corruption fails closed
 
 **Given** a malformed committed middle row or broken committed foreign key,
-**when** startup runs, **then** readiness fails with `STORAGE_CORRUPT` and no
-automatic guessed repair occurs.
+**when** startup runs, **then** it exits with `STORAGE_CORRUPT`, closes the
+reserved socket, serves no liveness/diagnostic HTTP endpoint, mutates no
+authoritative row, and performs no guessed repair.
 
 ### AT-015 — Record version semantics
 
@@ -129,13 +135,13 @@ skipped later occurrences.
 
 ### AT-020 — Protected source data absent
 
-**Given** every bundled part, imported projection, local ledger, API response,
-UI payload, export, log, and reachable Git object, **when** the protected-data
-audit runs, **then** bundled and runtime CSV headers contain no protected source
-columns and no original label, score, range, or reference-provider metadata
-value is present. Bundled and imported editorial compatibility fields are
-empty; runtime title/body can be non-empty only after an auditable explicit
-`save_local` request. Authors and raw HTML are always absent.
+**Given** forbidden column-name fixtures and canary values unique to each
+protected field (not ordinary scalar values such as `0` or `1`), **when** every
+bundled/imported projection, ledger, API/UI payload, export, log, and reachable
+Git object is audited, **then** no canary is present and no forbidden name exists
+outside the explicitly permitted value-free documentation/audit locations. Bundled
+and imported editorial fields are empty; runtime title/body can be non-empty
+only after auditable `save_local`. Authors/raw HTML are absent.
 Blocked column names may appear only in documentation, manifest exclusion
 metadata, and value-free warnings.
 
@@ -143,14 +149,16 @@ metadata, and value-free warnings.
 
 **Given** the bundled release was imported, **when** startup repeats, **then**
 the first import yields exactly 19,411 canonical articles, 77,708 unique
-prediction runs, and 20 historical virtual models; the same checksum/schema then
-resolves to the existing import and those counts do not change.
+prediction runs, and 20 historical virtual models; the same content digest and
+schema then resolve to the existing import and those counts do not change.
 
 ### AT-022 — Streaming large import
 
-**Given** a schema-compatible source larger than available browser memory,
-**when** it is uploaded/imported, **then** backend memory remains bounded, the UI
-shows job progress, and the browser never loads the complete file.
+**Given** a generated 512 MiB, 600,000-row schema-compatible CSV, a browser
+streaming fixture, and a worker cgroup limited to 256 MiB RSS, **when** it is
+uploaded/imported with a 1 GiB limit and sufficient disk, **then** peak worker
+RSS stays below 192 MiB, the acquired spool reaches exactly 512 MiB, progress is
+observable, and browser JS never creates an ArrayBuffer/Blob above 8 MiB.
 
 ### AT-023 — Protected user-import projection
 
@@ -163,10 +171,10 @@ in a value-free warning, and blocked/editorial values appear nowhere.
 
 **Given** two rows in one user source resolve to one canonical URL with
 conflicting outputs for the same model identity, **when** import runs, **then**
-the conflict is counted and
-rejected; the runtime does not apply the bundled first-occurrence policy. Its
-source line and `IMPORT_CONFLICT` code remain queryable after restart without
-persisting either editorial source value.
+the conflict is counted, every occurrence of that article/model key is
+rejected, and no run is created for it; the runtime does not apply the bundled
+first-occurrence policy. Each source part/data-record and `IMPORT_CONFLICT`
+remain queryable after restart without persisting editorial source values.
 
 ### AT-025 — Import source immutability
 
@@ -209,19 +217,21 @@ run, **then** default is 25, allowed values are 25/50/100, and others return
 
 **Given** a mutation request and key, **when** the same body/key is repeated,
 **then** it returns the original job/resource; a different body with that key
-returns `IDEMPOTENCY_CONFLICT`.
+returns `IDEMPOTENCY_CONFLICT`. The same assertions hold after process restart
+and after offline compaction; an expired 30-day record may create a new resource.
 
 ### AT-032 — Error privacy
 
 **Given** validation, network, model, and internal failures, **when** API errors
-and logs are inspected, **then** API keys, authorization headers, editorial content,
+and logs are inspected, **then** credentials, authorization headers, editorial content,
 protected values, unrestricted paths, and production stack traces are absent.
 
 ### AT-033 — SSE job events
 
-**Given** a running job, **when** a client subscribes, disconnects, and resumes
-with `Last-Event-ID`, **then** it receives ordered snapshots/progress/terminal
-events without duplicating or cancelling the job.
+**Given** a running job, **when** a client reconnects with a retained current-
+process `Last-Event-ID`, **then** later events are ordered and the job is not
+cancelled. After restart or ring eviction, the old ID yields one new full
+persisted snapshot and no promise to replay intermediate progress.
 
 ### AT-034 — CSV export
 
@@ -267,11 +277,11 @@ without extraction or inference.
 
 ### AT-040 — URL normalization boundaries
 
-**Given** fragments, default ports, `utm_*`, `fbclid`, `homepagePosition`, path
-case, trailing slashes, and semantic query parameters, **when** normalized,
-**then** the exact `urllib.parse` algorithm is reproducible, only documented
-tracking/default components change, duplicate query pairs survive, and semantic
-components remain identity-significant.
+**Given** committed fixtures covering IDNA UTS #46, default ports, malformed and
+mixed-case percent escapes, fragments, tracking keys, `+`, empty/duplicate query
+components, path case and trailing slash, **when** normalized, **then** expected
+bytes match exactly: only tracking/default/fragment components change and all
+retained query order, duplicates, and encoding remain identity-significant.
 
 ### AT-041 — Publisher hostname identity
 
@@ -323,7 +333,8 @@ same-host unique articles count and every rejection category is reported.
 
 ### AT-048 — Single article
 
-**Given** a valid article and compatible model, **when** single evaluation
+**Given** a valid article, compatible model, and no reusable exact-model run,
+**when** single evaluation
 with the default `reuse + discard` completes, **then** one immutable article
 run with five probabilities commits and no publisher evaluation is created.
 API payloads, frontend state, logs, caches, temporary directories, and every
@@ -351,9 +362,10 @@ reported as article outputs only.
 ### AT-052 — Stored-only publisher request
 
 **Given** enough eligible stored articles, **when** a `stored_only` publisher
-ordering, accepts only `reuse + discard`, makes zero network calls, and commits
-an evaluation using the requested number of existing runs. Any other control
-combination is rejected before job creation.
+request runs, **then** it follows documented deterministic ordering, accepts
+only `reuse + discard`, makes zero network calls, and commits an evaluation
+using the requested number of existing runs. Any other control combination is
+rejected before job creation.
 
 ### AT-053 — Stored-first publisher request
 
@@ -447,16 +459,21 @@ canonical resolution saves no content and fails `MODEL_NOT_RUNNABLE`.
 ### AT-066 — Official BERT/RoBERTa registration
 
 **Given** an official `.pt` fold and available base/tokenizer, **when** validated,
-**then** strict tensor keys/shapes and frozen reference outputs pass before the
-model becomes `compatible`.
+**then** the embedded official manifest supplies immutable base/tokenizer
+revisions and complete scientific identity, and strict tensor keys/shapes plus
+frozen reference outputs pass before the model becomes `compatible`.
 
 ### AT-067 — Official Llama registration
+
+**Hardware-specific, non-blocking for the CPU release gate.**
 
 **Given** the released fold and authorized cached base, **when** validated,
 **then** the exact 4-bit/LoRA/tokenizer recipe and reference fixture pass or the
 model remains non-compatible with a specific reason.
 
 ### AT-068 — Official Mistral registration
+
+**Hardware-specific, non-blocking for the CPU release gate.**
 
 **Given** a released PEFT fold directory, **when** validated, **then** declared
 24B base identity, adapter config, tokenizer, class count, 1,024-token policy,
@@ -465,8 +482,9 @@ and reference output pass before compatibility.
 ### AT-069 — Missing model dependency
 
 **Given** a recognized artifact without base/tokenizer/runtime, **when** scanned,
-**then** it becomes `dependency_missing`, setup instructions identify the
-missing dependency, and no implicit inference download starts.
+**then** its deterministic model ID is still computed from the official
+manifest, it becomes `dependency_missing`, instructions identify external
+provisioning, and no implicit application download starts.
 
 ### AT-070 — Insufficient resources
 
@@ -514,12 +532,12 @@ summary convey the exact same API values.
 are inspected, **then** host exposure is loopback-only, wildcard CORS is absent,
 and no authentication is requested locally.
 
-### AT-077 — Non-loopback safety
+### AT-077 — Non-loopback rejection
 
-**Given** a non-loopback host without an API key, **when** startup runs, **then**
-it fails unless it is the exact documented container flag combination. The flag
-is rejected natively. With a valid key and explicit origins, protected API
-calls require the Bearer key and wildcard origin remains rejected.
+**Given** any native non-loopback bind, **when** startup runs, **then** it fails
+before data mutation. The image-internal exception succeeds only with its
+immutable marker/flag and the committed Compose file publishes host loopback;
+using the flag natively fails.
 
 ### AT-078 — No telemetry or external assets
 
@@ -540,8 +558,10 @@ calibration limits, exact model/fold, selected articles, and aggregation method.
 **Given** 100,000 articles and 400,000 predictions with startup indexes already
 built on Ubuntu 24.04, four x86-64 CPU cores, 16 GiB RAM, and local SSD storage,
 **when** 20 sequential filtered first-page requests run after one warm-up,
-**then** p95 server time is at most 2 seconds; no title/body value is copied into
-a search/index structure, regardless of opt-in content in `articles.csv`.
+**then** p95 wall time from request send through complete response is at most 2
+seconds. A unique 1 MiB saved-content canary appears only in the dedicated
+content response and never in normal search/list/detail/export responses; the
+test does not inspect private index classes.
 
 ### AT-081 — Repository integrity
 
@@ -553,9 +573,12 @@ project-owned generated outputs/database arrangement.
 
 ### AT-082 — Native/Compose scientific equivalence
 
-**Given** identical frozen text, exact model artifact, recipe, and device class,
-**when** native and container inference run, **then** class matches and each
-probability is within the loader fixture tolerance.
+**Given** identical frozen UTF-8 text, exact model identity, CPU device class,
+float32 logits/softmax, and deterministic algorithms enabled, **when** native
+and CPU-container inference run, **then** class matches and each float64-decoded
+response probability has absolute error at most `1e-6` and relative error at
+most `1e-5` versus the committed reference vector. CUDA/quantized equivalence
+is hardware-specific and non-blocking for the CPU gate.
 
 ### AT-083 — Full offline smoke test
 
@@ -592,10 +615,122 @@ run already exists, **then** the page is fetched/validated, only title/body are
 saved, no inference/new run occurs, and dedicated content read succeeds while
 normal resources/exports remain content-free and the frontend renders it as
 inert text. **When** purge is confirmed,
-**then** every managed live and backup CSV version is physically blanked,
-authors/raw HTML never appear, runs/evaluations remain unchanged, external-copy
-limits are disclosed, and an interrupted purge finishes idempotently before
-next readiness. A later `discard` request never purges or replaces previously
+**then** every live CSV version is physically blanked, indexes are rebuilt,
+authors/raw HTML never appear, and runs/evaluations remain unchanged. Managed
+and external backups are untouched and explicitly reported as requiring manual
+deletion; an interrupted live swap finishes idempotently before readiness. A
+later `discard` request never purges or replaces previously
 saved content. If content-only retrieval resolves to another canonical article,
 it returns `CANONICAL_IDENTITY_CHANGED`, saves nothing under the old identity,
 and leaves the reused run intact.
+
+## L. Recovery, capacity, and contract completeness
+
+### AT-087 — Compaction crash matrix
+
+**Given** a stopped valid store, **when** compaction is killed before the first
+rename, between the two renames, and after swap before cleanup, **then** the next
+verify follows the marker/directory matrix, never creates empty ledgers, and
+exposes exactly the pre-compaction current resources in every case.
+
+### AT-088 — Full-disk failure safety
+
+**Given** deterministic fault injection that raises `ENOSPC` on each write,
+fsync, and rename boundary of upload acquisition, import commit, compaction, and
+purge, **when** the operation runs, **then** it returns
+`STORAGE_SPACE_INSUFFICIENT`, reports no incomplete success/commit, and verify or
+documented marker recovery restores one valid state.
+
+### AT-089 — Upload retry source availability
+
+**Given** one normally failed upload whose terminal cleanup removed its spool
+and one process-interrupted upload with an intact matching spool, **when** retry
+is requested, **then** the first exposes `retry_available=false` and returns
+`SOURCE_NOT_AVAILABLE`, while the second can create one linked retry until its
+24-hour expiry. No source is reconstructed from request metadata.
+
+### AT-090 — Exclusive purge and index rebuild
+
+**Given** saved content and concurrent reads, **when** purge runs, **then** it
+drains readers, rejects affected reads/all mutations with
+`SERVICE_UNAVAILABLE`, swaps verified live state, rebuilds indexes, appends one
+purge audit, and subsequently returns content-not-found while historical runs
+remain queryable. Backups remain byte-identical.
+
+### AT-091 — Missing artifact preserves history
+
+**Given** a model with persisted runs/evaluations, **when** its artifact is
+removed and a scan runs, **then** status becomes `artifact_missing`, runnable
+and artifact availability are false, new inference is blocked, and exact old
+runs/evaluations remain browseable and aggregable. Relinking identical bytes
+restores the same model ID.
+
+### AT-092 — Bounded job queue
+
+**Given** queue maximum 3 and three committed queued jobs held from execution,
+**when** two creation requests race, **then** neither can increase queued count
+above 3; each rejected request is `503 JOB_QUEUE_FULL` and has no job or
+idempotency row.
+
+### AT-093 — Host and Origin defense
+
+**Given** loopback service fixtures, **when** Host/absolute authorities contain
+an attacker hostname, wrong port, suffix trick, or DNS-rebinding name, **then**
+each is `421 INVALID_HOST`. Browser mutations from cross-site, `null`, or
+lookalike origins are `403 ORIGIN_NOT_ALLOWED`; exact same-origin and a
+non-browser request without Origin behave as documented.
+
+### AT-094 — Complete error mapping
+
+**Given** the complete API section-3 registry, one public synchronous emitter
+fixture for every synchronously reachable code, and terminal-job fixtures for
+job-only codes, **when** executed, **then** every synchronous status matches the
+registry/OpenAPI; job creation is `202` and every terminal job read is `200`
+with its domain code embedded.
+
+### AT-095 — Late import conflict remains atomic
+
+**Given** a large input whose final row conflicts with its first row for the
+same article/model, **when** validation completes, **then** no authoritative row
+was visible during staging, the conflicting pair creates no prediction run,
+all other accepted rows and safe rejection records become visible in one final
+transaction, and the writer mutex was not held while reading the source.
+
+### AT-096 — Format-independent dataset digest
+
+**Given** identical ordered projected records encoded as CSV, CSV.GZ,
+single-CSV ZIP, manifest directory, and manifest ZIP with varying compression,
+filenames, and part boundaries, **when** imported, **then** each computes the
+same `prt-dataset-content-v1` digest and historical virtual model IDs; the first
+successful digest/schema import is reused by the rest.
+
+### AT-097 — Root and symlink path safety
+
+**Given** artifacts inside/outside configured roots plus file/directory
+symlinks, archive traversal entries, changed roots, and retries after relocation,
+**when** scan/registration/validate/retry/upload execute, **then** only current
+regular non-symlink descendants of configured roots are read, archive links are
+rejected, and no API request explores an arbitrary server path.
+
+### AT-098 — Publisher homepage evidence
+
+**Given** publishers first observed from article URLs, a section/query seed, a
+failed root fetch, and a successful same-publisher root fetch, **when** records
+are read, **then** no `https://hostname/` was invented, the section/query exists
+only as `homepage_candidate_url`, failed retrieval leaves resolved URL empty,
+and only the successful normalized root becomes `homepage_resolved_url`.
+
+### AT-099 — Local readiness and request preflight
+
+**Given** verified local state but no models, saved bodies, or network access,
+**when** readiness is requested, **then** it is `200 ready`. A subsequent
+request that needs those resources reports its model/body/network condition in
+preflight or job error without changing readiness for available local features.
+
+### AT-100 — Sequential publisher candidate cap
+
+**Given** one publisher job requesting two articles and candidates whose worker
+barriers would expose overlap, **when** four network lanes are available,
+**then** that job has at most one candidate active, stops scheduling after two
+successes, and creates no extra run/content. Separate publisher jobs may occupy
+the other lanes.

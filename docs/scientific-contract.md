@@ -57,21 +57,23 @@ fact checks, or protected ground-truth ratings.
 
 The repository contains a public history as a manifest and ordered CSV parts.
 The application validates and imports that release incrementally on first use.
-At startup or through the frontend, the user may also select any CSV or
-manifest directory that conforms to the supported schema; there is no
-scientific requirement on its number of rows or total size.
+Through the offline CLI the user may also select a CSV, CSV.GZ, supported ZIP,
+or manifest directory; the frontend/API accepts the documented streamed file
+and ZIP containers, not server-local directories. There is no scientific
+requirement on row count beyond the operational limits owned by the API and
+storage contracts.
 
 `dataset/sampleDataset.csv` is a small, tracked, synthetic structural example.
 The private `dataset/fullDataset.csv` remains ignored by Git. The generated
 `dataset/predictions/` release contains article/publisher identifiers and model
 outputs, but no editorial content or protected reference-provider columns.
 
-The current wide-format schema is:
+The bundled legacy wide schema is:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `article_id` | No | Source-local identifier; never the application identity |
-| `url` | Yes | Canonical article URL and application article identity |
+| `url` | Yes | Canonical URL used to derive the application UUIDv5 article ID |
 | `title` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
 | `text` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
 | `authors` | Yes | Compatibility source column; tracked public release requires empty, user-import value is discarded |
@@ -85,13 +87,21 @@ A family may be absent from an input file. A represented family must at least
 provide its predicted-label and fold columns. Probability columns are accepted
 only as a complete five-column vector; partial vectors are invalid.
 
+User imports use a smaller schema: `url` and at least one represented family's
+`predicted_label`/`fold_id` are required; `article_id`, `domain`, `title`,
+`text`, and `authors` are optional compatibility fields. Domain, when present,
+is checked then recomputed; editorial fields, when present, are discarded. The
+bundled verifier alone requires the full legacy header and empty editorial
+values.
+
 The importer applies the following conversion without implementation-specific
 guessing:
 
 - source `article_id` values are never application identifiers; they are used
   only in an import diagnostic when present;
-- `url` is stripped of surrounding whitespace and normalized under the URL
-  contract below; that canonical URL becomes `article_id`;
+- `url` is stripped and normalized; conceptual identity is that canonical URL,
+  while the persisted `article_id` is the namespace UUIDv5 of
+  `article:<canonical_url>` from the storage contract;
 - `domain` is recomputed from the canonical URL. A non-empty source `domain`
   that normalizes to a different publisher rejects the row;
 - source `title`, `text`, and `authors` values are discarded before any
@@ -102,14 +112,21 @@ guessing:
 - a probability vector must be either entirely empty or contain all five
   finite probabilities and satisfy the probability contract below.
 
-Any row that violates these rules is rejected with its source row number and a
-stable error code. Valid rows from the same import continue to be processed.
+Any row that violates these rules is rejected with its logical source part,
+data-record number, and stable error code. Valid rows continue.
+Exactly one primary row code is chosen by this order: CSV field count/size,
+URL syntax/normalization, optional domain agreement, required model columns,
+class/fold ranges, then probability-vector validity. After those checks, the
+whole-input conflict pass may replace acceptance with `IMPORT_CONFLICT` for all
+source rows containing a conflicted article/model key; such a row contributes
+no other output. This order makes rejection IDs and counters deterministic.
 
 The importer converts this wide format into the normalized CSV ledgers defined
-in `csv-storage-contract.md`. It must leave a server-local source file
-unchanged, retain an import checksum, and report
+in `csv-storage-contract.md`. It must leave a server-local source unchanged,
+retain the content digest and (for upload) transport checksum, and report
 conflicting duplicate predictions instead of silently choosing one.
-Conflicts are scoped to repeated article/model outputs within that source;
+Conflicts are scoped to repeated article/model outputs within that source; all
+occurrences of a conflicted pair are excluded before authoritative publish;
 later imports with different source identities create separate immutable runs.
 
 The generated bundled release is a documented exception chosen before
@@ -224,8 +241,9 @@ from the notebook filename.
 
 Because a `state_dict` contains weights but no tokenizer files or reliable
 architecture metadata, the relevant base configuration and tokenizer must be
-available in the local Transformers cache or downloaded during an explicit
-setup action. A Mistral fold directory includes its adapter configuration,
+available in the local Transformers cache or provisioned with external
+Transformers/Hugging Face tooling before registration. The application has no
+setup/download command. A Mistral fold directory includes its adapter configuration,
 adapter weights, and tokenizer files, but not the 24B base weights. Llama may
 additionally require authorized access to its base model. No released artifact
 eliminates its declared base-model dependency.
@@ -277,13 +295,20 @@ multiple of 8. Flash Attention 2 is an optional optimization, not a condition
 for prediction equivalence; eager attention is the documented fallback.
 Loading an official checkpoint must not execute code embedded in the artifact.
 
-The filename is sufficient only for a recognized official `.pt` recipe.
-Mistral recognition uses its standard PEFT configuration plus the approved
-base-model identity and expected fold directory. An unknown custom checkpoint
-requires an explicit supported family selection or a separate manifest
-describing architecture, tokenizer, input length, class count, adapter
-relationship, and runtime requirements. The tool must reject ambiguity instead
-of guessing.
+Every release embeds one versioned `official-model-manifest-v1.json` in the
+wheel/image. For each official family/fold it declares artifact pattern and
+required expected artifact digest, loader recipe/version, class order, max tokens, padding,
+adapter configuration, output-relevant runtime options, and base/tokenizer
+repository plus immutable commit hashes. Mutable refs such as `main` are
+invalid. Runtime can therefore know identity before dependencies are installed
+and compares cached dependencies when they become available.
+`official_manifest_entry_sha256` is SHA-256 of that family/fold entry serialized
+as canonical JSON (sorted keys, no insignificant whitespace), so unrelated
+manifest entries do not change an identity.
+
+The filename only selects an official manifest entry. Generic custom manifests
+are outside the MVP; unknown artifacts are `unsupported` and no embedded code
+or architecture guess is attempted.
 
 ## 6. Probability contract
 
@@ -306,7 +331,7 @@ unless calibration is separately demonstrated.
 The MVP adopts this identity policy:
 
 ```text
-article identity    = canonical article URL
+article identity    = canonical URL; persisted ID is its namespace UUIDv5
 publisher identity  = normalized publisher domain
 prediction run      = immutable run ID + article identity + model identity
 ```
@@ -404,8 +429,7 @@ versions are unavailable and must not be guessed.
 
 `artifact_sha256` is deterministic. For a single-file artifact it is SHA-256
 of the exact file bytes. For a directory artifact, symlinks are rejected; the
-application recursively enumerates regular files, excludes only
-`publisher-reliability-model.json`, represents each as
+application recursively enumerates every regular file and represents each as
 `{"path":<relative POSIX path>,"sha256":<file digest>,"size":<bytes>}`,
 sorts entries by the UTF-8 bytes of `path`, serializes the array as canonical
 JSON (sorted object keys, no insignificant whitespace), and hashes those UTF-8
@@ -414,26 +438,36 @@ archives are hashed after safe extraction using this directory rule, so archive
 compression and entry order do not change model identity.
 
 A runnable model ID is the SHA-256 of UTF-8 canonical JSON with sorted keys and
-no insignificant whitespace containing:
+no insignificant whitespace. It excludes filesystem locator/path and contains:
 
 ```json
 {
   "artifact_sha256": "...",
+  "official_manifest_entry_sha256": "...",
   "base_model": "...",
   "base_revision": "...",
+  "class_order": [0, 1, 2, 3, 4],
   "family": "bert",
   "fold_id": 1,
   "loader_recipe": "bert_state_dict",
   "loader_recipe_version": "1",
   "max_tokens": 256,
   "padding_policy": "fixed_max_length",
+  "adapter_config_sha256": null,
+  "runtime_scientific": {
+    "dtype": "float32",
+    "quantization": null
+  },
   "tokenizer_revision": "...",
   "tokenizer_source": "bert-base-uncased"
 }
 ```
 
-Every key is required. Any changed artifact, revision, tokenizer, length,
-padding, or recipe creates a new model ID.
+Every key, including explicit nulls, is required. Any changed artifact,
+manifest, revision, class order, tokenizer, length, padding, adapter config,
+recipe, dtype, quantization, or output-relevant runtime option changes model
+identity. A performance option may be excluded only when the official manifest
+classifies it non-scientific and the reference-equivalence test passes.
 
 Remote Hugging Face identities resolve `base_revision` and
 `tokenizer_revision` to immutable repository commit hashes; mutable names such
@@ -457,12 +491,12 @@ ID is the SHA-256 of canonical JSON:
 }
 ```
 
-`family` and `fold_id` vary per imported output. A user-supplied historical
-import uses `release_id = "user_import:<source_sha256>"` and that import's
-`dataset_content_digest` is exactly the lowercase SHA-256 of the uploaded or
-server-local source bytes. For the bundled manifest release only, it is the
-manifest's verified `content_digest_sha256`. These rules prevent unrelated
-files from sharing a virtual model and avoid an undefined reserialization step.
+`family` and `fold_id` vary per imported output. A user import uses
+`release_id = "user_import:<content_sha256>"`; `dataset_content_digest` is the
+`prt-dataset-content-v1` digest from the storage contract for CSV, CSV.GZ, ZIP,
+manifest directory, and manifest ZIP alike. The bundled manifest also records
+that digest. Compression and archive metadata therefore do not alter a virtual
+model identity.
 
 Such a model is `historical_only`: stored runs can be browsed and aggregated
 but it cannot infer a missing prediction. Registering a local artifact creates
@@ -470,6 +504,12 @@ a separate exact model ID; historical outputs are not silently claimed as
 outputs of that artifact. A runnable artifact can infer a missing run from
 user-saved validated body or fresh online retrieval; a historical-only model
 cannot infer from either.
+
+Likewise, removing a registered artifact changes only its deployment
+availability (`artifact_missing`, not runnable). Its scientific model ID and
+every immutable prediction run remain valid inputs to browsing and aggregation.
+Relinking byte-identical resources may restore runnability without changing the
+ID; different resources create a different ID.
 
 ## 11. Required scientific warnings
 

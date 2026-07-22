@@ -49,10 +49,10 @@ executor.
 | Python package | Responsibility |
 | --- | --- |
 | `config` | CLI/environment parsing, typed settings, safety validation |
-| `api` | Versioned routes, authentication, error envelope, OpenAPI |
+| `api` | Versioned routes, Host/Origin boundary, error envelope, OpenAPI |
 | `services` | Shared use cases used by API and startup commands |
 | `storage` | CSV schema, transactions, locks, indexes, recovery, compaction |
-| `imports` | Streaming dataset/manifest verification and projection |
+| `imports` | Bounded upload acquisition, staged dataset verification, and projection |
 | `identity` | URL normalization, canonical resolution, publisher hostname identity |
 | `retrieval` | Safe HTTP, robots policy, discovery, `newspaper3k` extraction |
 | `language` | Deterministic English and minimum-text validation |
@@ -76,8 +76,8 @@ transaction ledger. In-memory indexes accelerate reads but are disposable and
 are rebuilt from committed CSV rows at startup.
 
 The only exception to physical append-only history is a confirmed local-content
-purge, which irreversibly blanks editorial fields under sections 16 and the CSV
-purge contract without changing scientific records.
+purge, which exclusively rewrites live `articles.csv`; backups are not rewritten
+by purge and the user must remove relevant copies manually.
 
 The repository seed release is immutable input. On first startup it is verified
 and projected into the local CSV store. The source parts are never edited and
@@ -90,9 +90,17 @@ The application shall not use SQLite as a cache, index, queue, or fallback. A
 process-local Python index is allowed because CSV remains authoritative and a
 restart can reconstruct the exact state.
 
+Dataset/model upload acquisition is operational storage, not authoritative
+state: mode-`0600` spools are inaccessible to API reads, bounded by configured
+size/free-space checks, and referenced only by their job. Dataset projection
+may stage allowlisted rows on disk so the complete source is checked before a
+short commit. Terminal cleanup removes source/staging bytes immediately; only
+a process interruption may leave a source temporarily available for retry.
+
 ## 5. Write transaction model
 
-Only one application process may own a data directory. Startup acquires an
+Only one application process may own a data directory. After successful
+loopback socket reservation, startup acquires an
 exclusive POSIX `flock` on `<data-dir>/.writer.lock` and retains it until clean
 shutdown. Failure to acquire it is `STORAGE_LOCKED`.
 
@@ -111,7 +119,8 @@ the privacy-monotonic rewrite protocol in section 16:
 Readers expose only rows whose latest transaction state is `COMMITTED`. An
 interruption before step 4 leaves invisible rows. Recovery reports and ignores
 uncommitted transactions. A malformed final physical row is backed up and
-truncated only by the explicit recovery routine before the HTTP server binds.
+truncated only by the explicit recovery routine before the reserved socket is
+put into listening mode and any HTTP request can be accepted.
 
 Multi-ledger consistency is therefore determined by the transaction commit
 marker, not by assuming several file appends are atomically simultaneous.
@@ -150,6 +159,11 @@ executor has separate bounded lanes:
 - GPU inference lane: exactly 1 concurrent task;
 - CSV commit lane: exactly 1 writer through the storage mutex.
 
+The queue admits at most the configured 100 jobs by default. Admission and the
+job row commit occur under one mutex, so concurrent requests cannot exceed the
+limit. Publisher candidates are sequential within one job; the four network
+slots are shared by different jobs.
+
 The exhaustive phase identifiers and ordering rules are defined in Product
 Specification section 12. The executor maps retrieval work to `retrieving`,
 model execution to `inferring`, and privacy erasure to `purging_content`
@@ -157,41 +171,46 @@ followed by `verifying` and `committing`; it shall not emit architecture-only al
 Phase and integer progress are persisted at meaningful boundaries, not for
 every token or HTTP byte.
 
-On startup, `queued` jobs return to the queue. A job left `running` is appended
-as `failed` with `PROCESS_INTERRUPTED`; it is never silently resumed after a
-potentially partial model or network operation. The user can retry it as a new
-job linked by `retry_of_job_id`.
+On startup, `queued` jobs (which by definition have no started side effect)
+return to the queue. A job left `running` is appended as `failed` with
+`PROCESS_INTERRUPTED`; it is never resumed. Retry creates a new linked job only
+when the persisted safe request is sufficient. Upload retry additionally
+requires its acquired source file; terminal cleanup normally makes it
+unavailable and forces a new upload.
 
 ## 8. URL and publisher identity flow
 
 ### 8.1 Offline normalization
 
-For an HTTP(S) URL the application uses Python `urllib.parse` and:
+For an HTTP(S) URL the application uses Python `urllib.parse` plus the locked
+`idna` package and:
 
 1. trims surrounding whitespace;
 2. rejects control characters and every `%` not followed by two hexadecimal
    digits, then parses with `urllib.parse.urlsplit`, rejects user-info, and
    accepts only an explicit case-insensitive `http` or `https` scheme plus a
-   non-empty host;
-3. lowercases the scheme, lowercases and IDNA-normalizes the hostname, and
-   preserves a valid non-default numeric port;
+   non-empty DNS host; IPv4/IPv6 literal article hosts are outside the MVP;
+3. NFC-normalizes the hostname and applies IDNA UTS #46 non-transitional
+   processing with STD3 rules, then lowercases its ASCII result and preserves a
+   valid non-default numeric port;
 4. removes the fragment;
 5. removes default port `80` for HTTP and `443` for HTTPS;
 6. normalizes an empty path to `/`;
-7. parses the query with `urllib.parse.parse_qsl(keep_blank_values=True)`,
-   removes every pair whose key, compared with ASCII case-insensitivity,
-   matches `utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid`, or
-   `homepageposition`;
-8. sorts remaining decoded `(key,value)` pairs lexicographically, preserving
-   duplicate pairs, then encodes them with `urllib.parse.urlencode`;
-9. does not alter path case, trailing slash, or percent-encoded path data.
+7. splits the raw query only on `&`, preserving empty components, order,
+   duplicates, `+`, and percent-escape case. For the tracking check only, it
+   takes bytes before the first `=`, percent-decodes strict UTF-8, and
+   ASCII-casefolds them. It drops components whose decoded key starts `utm_` or
+   equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`, or `homepageposition`;
+8. rejoins retained raw components with `&` without sorting or re-encoding;
+9. does not alter path case, trailing slash, percent encoding, query value
+   encoding, order, or duplicates.
 
 Malformed percent escapes, an invalid port, missing host, username/password,
 or control character make the URL `INVALID_URL`. A syntactically valid URL with
 a scheme other than HTTP(S) is `UNSUPPORTED_SCHEME`. Internationalized
-hostnames are stored in lowercase ASCII IDNA form. Query normalization
-deliberately normalizes equivalent encodings; it never discards a
-non-allowlisted query key.
+hostnames are stored in lowercase ASCII IDNA form. Malformed/non-UTF-8 tracking
+keys are invalid rather than guessed; retained non-tracking query components
+remain byte-equivalent.
 
 This normalized candidate is checked locally before any network operation.
 
@@ -214,6 +233,11 @@ Publisher identity is the canonical article hostname lowercased and
 IDNA-normalized with one leading `www.` removed. Other subdomains are preserved
 and are different publishers unless an explicit user-managed alias feature is
 added after the MVP. Registrable-domain guessing is not used.
+
+A publisher may have a submitted `homepage_candidate_url` without any verified
+homepage. `homepage_resolved_url` is stored only after a successful safe fetch
+ends on the same publisher with normalized path `/` and no query. Article or
+section URLs never cause the application to invent `https://hostname/`.
 
 ## 9. Retrieval safety
 
@@ -283,26 +307,37 @@ its result.
 
 ## 10. Model lifecycle
 
-Artifacts are discovered from configured roots, excluding hidden directories,
-temporary files, and symlinks that resolve outside a configured root. Registry
-states are:
+Absent configured roots are skipped. Existing roots are resolved once at
+startup and must be readable real directories, not symlinks.
+Scan, validate, and retry reject every symlink encountered below a root;
+managed uploads reject links before extraction. The API can start a scan of all
+configured roots but cannot submit filesystem paths. Registry states are:
 
 - `compatible`: artifact and every runtime dependency are ready;
 - `historical_only`: virtual imported model identity whose predictions can be
   browsed and aggregated but which has no runnable artifact;
+- `artifact_missing`: a previously registered scientific identity whose
+  locator is absent; historical runs remain browseable/aggregable;
 - `dependency_missing`: artifact recognized but base/tokenizer/runtime missing;
 - `resource_unavailable`: recognized but required device/resources unavailable;
-- `invalid`: expected artifact has a validation failure;
-- `unsupported`: no explicit supported recipe or custom manifest.
+- `invalid`: expected official artifact has a validation failure.
 
-Only `compatible` models can start inference. `historical_only` models remain
+An unknown/ambiguous artifact has no scientific model ID and therefore no
+`models.csv` row; scan reports it as an `unsupported` outcome only in the safe
+job/CLI result.
+
+Every response separately exposes `artifact_available` and `runnable`. Only
+`compatible` records with both true can start inference. `historical_only` and
+`artifact_missing` models remain
 selectable for browsing, reusing/aggregating stored runs, and content-only
 enrichment after a run is resolved; they never start inference. Loading is lazy and cached
 by model ID. The cache contains at most one large quantized model at a time and
 evicts an idle model before another is loaded. Eviction never deletes artifact
 files.
 
-Preflight checks disk readability, artifact checksum, expected tensors/config,
+The artifact locator is mutable deployment metadata and is excluded from model
+identity. Relinking an identical digest updates the record without changing its
+model ID. Preflight checks disk readability, artifact checksum, expected tensors/config,
 base/tokenizer availability, device backend, and a conservative free-memory
 estimate. Failure produces a specific state without terminating historical
 browsing.
@@ -323,27 +358,26 @@ The frontend never parses CSV directly. It uses documented API resources. API
 responses never include unrestricted server paths; artifact paths are displayed
 as redacted basename plus configured root label.
 
-## 12. Network exposure and authentication
+## 12. Loopback request boundary
 
-Native loopback binding requires no login and CORS is disabled because UI and
-API are same-origin. The only no-key non-loopback process bind is the official
-container's internal `0.0.0.0:8000`, and only when
-`PRT_CONTAINER_LOOPBACK_ONLY=true`; the official Compose file simultaneously
-publishes that port on host `127.0.0.1` only. This flag is invalid for native
-execution—recognized by the absence of the image-baked read-only marker
-`/opt/publisher-reliability/.container-image`—and invalid together with an API
-key. Its name and startup warning make the trust boundary explicit because the
-process cannot inspect the container engine's host publishing rule.
+The MVP binds only `127.0.0.1` or `::1`. The official container may listen on
+`0.0.0.0` internally only with the image marker and
+`PRT_CONTAINER_LOOPBACK_ONLY=true`, while Compose publishes host loopback
+exactly. Every other bind is invalid configuration; API-key/non-loopback mode
+is deferred.
 
-Every other non-loopback `--host` requires an API key of at least 32 random
-bytes. The API accepts it only as `Authorization: Bearer <key>`. The frontend
-prompts for the key and stores it in session memory only, never local storage or
-CSV.
+Before routing, middleware validates `Host` against the one exact configured
+`PRT_PUBLIC_ORIGIN` host and port (default
+`http://127.0.0.1:8000`). Absolute-form targets must have the same authority.
+Compose passes the host-published port explicitly. Any mismatch is
+`421 INVALID_HOST`, preventing DNS rebinding from treating a loopback socket as
+an arbitrary-host service.
 
-For non-loopback mode, allowed origins must be explicitly configured; wildcard
-CORS is rejected. TLS termination is outside the MVP, so documentation labels
-non-loopback HTTP as appropriate only for a trusted private network behind a
-user-managed secure proxy.
+For unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`) a present browser
+`Origin` must exactly equal the configured scheme/host/port, and
+`Sec-Fetch-Site: cross-site` is rejected. Missing `Origin` remains valid for
+non-browser CLI clients. `null`, wildcard, suffix, and sibling origins are not
+accepted. CORS response headers are not emitted because the UI is same-origin.
 
 ## 13. Native and container deployment
 
@@ -358,8 +392,10 @@ mounts:
 - an optional Hugging Face cache read-write at `/cache/huggingface`.
 
 The image contains application and frontend assets, not model weights or base
-model caches. The service runs as a non-root UID/GID configurable to match the
-host. Compose declares one replica and never starts multiple workers.
+model caches. The service runs as the fixed non-root UID/GID `10001:10001`;
+writable host mounts are prepared for that identity as defined by the
+deployment contract. Compose declares one replica and never starts multiple
+workers.
 
 GPU execution is a separate Compose profile that requests NVIDIA devices. CPU
 and GPU profiles use the same image version and CSV directory but must not run
@@ -369,7 +405,7 @@ simultaneously because the writer lock prevents it.
 
 Structured JSON logs include timestamp, level, request ID, job ID, phase, error
 code, duration, and safe identifiers. They exclude all editorial content, protected
-values, API keys, authorization headers, cookies, full upload paths, and model
+values, credentials, authorization headers, cookies, full upload paths, and model
 tensor contents. URLs are logged only at `debug`; normal logs use article ID and
 hostname.
 
@@ -387,29 +423,25 @@ the loopback endpoint `/api/v1/status`; no telemetry leaves the machine.
 | Mixed publishers | No publisher evaluation transaction commits |
 | Missing probabilities | Hard-class methods remain available; probability mean is disabled |
 | CSV tail interrupted | Recovery backs up and removes only the malformed uncommitted tail |
-| CSV checksum/schema failure | Readiness fails; no mutation or HTTP serving beyond liveness |
+| CSV checksum/schema failure | Reserved socket closes; process exits without any HTTP server |
 | Process interruption | Running jobs become failed on restart; committed data remains visible |
 | Insufficient RAM/VRAM | Preflight fails the job before model load and preserves browsing |
-| Frontend build missing | Production readiness fails and the server does not bind |
-| Content purge interrupted | Before readiness, recovery idempotently finishes blanking every application-managed live/backup copy; predictions and evaluations remain intact |
+| Frontend build missing | Reserved socket closes and the process exits without accepting HTTP requests |
+| Content purge interrupted | Startup completes or rolls forward the live-file swap, rebuilds indexes, and records the audit; backups remain untouched |
+| Full disk | Acquisition/maintenance fails before commit with `STORAGE_SPACE_INSUFFICIENT`; a visible commit is never reported without all required fsyncs |
 
 ## 16. Local-content purge recovery
 
 Content purge is the one documented exception to ordinary append-only entity
-history. It is privacy-monotonic: once confirmed, recovery never restores an
-older title/body merely to regain transaction symmetry.
-
-With the writer lock held, the worker enumerates the live `articles.csv` and
-every application-created CSV backup, writes a verified redacted sibling for
-each, fsyncs it and its directory, and atomically replaces that file. The
-operation is idempotent. If the process stops after only some replacements,
-startup detects the interrupted `content_purge` job, completes the same
-redaction across the remaining managed files before readiness, then records a
-recovery warning. The old job is still terminally marked `failed` with
-`PROCESS_INTERRUPTED`; the deterministic startup recovery is a separate
-storage-recovery action, not a resumed job. No unredacted staging copy is left
-behind. External user-created copies are outside the managed set and the UI
-warns about them before confirmation.
+history. The worker takes a service-wide maintenance lock, drains readers,
+blocks mutations, writes and verifies a redacted live `articles.csv` sibling,
+fsyncs it and the state directory, records a small purge marker, atomically
+replaces the live file, rebuilds indexes, and commits `purges.csv` audit state.
+The marker makes restart roll forward a completed replacement and never restore
+unredacted live content. Backups are deliberately not scanned or rewritten;
+the confirmation and terminal result list their directory and manual-deletion
+obligation without claiming deletion of open file descriptors or external
+copies.
 
 ## 17. Architecture invariants
 
@@ -423,7 +455,11 @@ warns about them before confirmation.
    model.
 7. No protected reference field passes the import boundary.
 8. Offline mode creates no outbound application connection.
-9. Container and native modes produce byte-compatible CSV state.
+   A deny-all transport is injected before startup imports clients, loaders run
+   local-files-only, and ambient proxy settings remain disabled.
+9. Container and native modes produce scientifically identical CSV state;
+   deployment locators may differ and are ignored by compatibility checks.
 10. Every externally observable behavior is covered by an acceptance test.
-11. Authors and raw HTML never persist; title/body persist only after explicit
-    `save_local` and can be physically purged from every managed CSV copy.
+11. Authors and raw HTML never enter authoritative state; title/body persist
+    only after explicit `save_local` and can be purged from live state under
+    exclusive access, with backup deletion left explicit and manual.

@@ -51,9 +51,16 @@ or when the user explicitly downloads a missing model dependency.
   2 through 50 articles; the publisher-discovery default is 10.
 - **Jobs:** model loading, retrieval, inference, import, and aggregation execute
   as inspectable background jobs. The API returns a job identifier immediately.
-- **Security:** no authentication is required for native loopback or the
-  documented loopback-published Compose service. Every other non-loopback bind
-  is rejected unless an API key is configured.
+- **Security:** the MVP is loopback-only. Native execution binds a loopback
+  address and Compose publishes only on host loopback. Non-loopback binds are
+  rejected. Mutation requests from browsers additionally require a valid
+  same-origin `Origin`; every request must pass the documented `Host` check.
+- **Uploads:** dataset bytes are acquired into a private, bounded spool before
+  an import job is created. The spool is operational, never authoritative, and
+  is removed as soon as the job reaches a durable terminal state.
+- **Maintenance:** compaction is an offline CLI operation. Content purge takes
+  an exclusive maintenance lock, rewrites live state, and rebuilds indexes;
+  external and application-created backups require explicit manual deletion.
 
 ## Offline and online behavior
 
@@ -77,7 +84,8 @@ Network access is required only for:
 - resolving redirects or a page-declared canonical URL after the offline URL
   lookup misses;
 - discovering additional articles from a publisher homepage;
-- explicitly downloading a missing base model or tokenizer.
+- downloading a missing base model or tokenizer with external model tooling;
+  the application itself has no setup/download command.
 
 Starting with `--offline` or `PRT_OFFLINE=true` disables every outbound HTTP
 request. An operation that cannot complete locally fails with the stable error
@@ -119,13 +127,23 @@ before the application attempts web discovery for the missing count.
 | `LICENSE` | Apache-2.0 terms for project-owned software and documentation |
 | `MODEL-OUTPUT-LICENSE.md` | CC0-1.0 dedication limited to project-owned generated outputs/database arrangement |
 
-If two documents appear to conflict, the more specific contract governs:
+Contract ownership is disjoint. When text overlaps, the owner governs, and the
+architecture supplies cross-cutting invariants:
 
-1. scientific behavior: `scientific-contract.md`;
-2. CSV persistence: `csv-storage-contract.md`;
-3. HTTP behavior: `api-contract.md`;
-4. deployment behavior: `deployment.md`;
-5. product presentation and workflows: `product-specification.md`.
+1. `scientific-contract.md`: formulas, model/input identity, and scientific
+   compatibility;
+2. `csv-storage-contract.md`: durable representation, transactions, recovery,
+   retention, and maintenance;
+3. `api-contract.md`: HTTP schemas, status codes, security, and error mapping;
+4. `deployment.md`: process/container configuration and operating procedures;
+5. `product-specification.md`: scope, workflows, UI, and requirements;
+6. `architecture.md`: component boundaries and cross-contract invariants. It
+   may constrain all owners but cannot redefine an owner-specific schema or
+   formula.
+
+If two owner-specific rules still conflict, the earlier owner in this list
+governs only that overlapping subject. Acceptance tests are verification, not
+an independent source of requirements.
 
 An ambiguity discovered during implementation is a specification defect. It
 must be resolved in these documents and covered by an acceptance test before
@@ -165,8 +183,9 @@ BERT, RoBERTa, and Llama folds are released as notebook-defined `.pt`
 
 ## Definition of done
 
-The MVP is complete only when every acceptance test passes in native Linux and
-Docker Compose, the OpenAPI document matches `docs/api-contract.md`, all local
+The MVP is complete only when every applicable CPU-gate acceptance test passes
+in native Linux and Docker Compose (hardware-specific tests report separately),
+the OpenAPI document matches `docs/api-contract.md`, all local
 state is inspectable as CSV, browsing works with outbound networking disabled,
 and no protected reference field is present in Git history, runtime state,
 logs, API responses, UI state, or exports. Blocked source column names may

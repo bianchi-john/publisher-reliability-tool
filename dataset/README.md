@@ -55,15 +55,15 @@ names, trademarks, model weights, or source pages.
 
 At first startup the application verifies this manifest and streams the release
 into the authoritative CSV ledgers under the configured data directory. Import
-is idempotent by the exact manifest-source checksum and import schema version;
-the manifest's separate content digest remains the historical-model identity
-input. The tracked parts remain immutable.
+is idempotent by the manifest's `prt-dataset-content-v1` digest and schema
+version; that same digest is the historical-model identity input. Part byte
+checksums remain transport-integrity checks.
 
 At runtime the user can also select a CSV, `.csv.gz`, single-CSV ZIP, manifest
 directory, or ZIP containing one manifest and exactly its listed parts. A
-server-local source is streamed subject to available disk and platform file
-limits; browser/API uploads use the documented 2 GiB compressed and extracted
-limits. The importer leaves a server-local source unchanged and projects URLs,
+server-local source is CLI-only and remains unchanged. Browser/API uploads use
+a private bounded acquired spool and the documented 2 GiB compressed/extracted
+limits; terminal/restart cleanup removes it. The importer projects URLs,
 publisher domains, and model outputs into the local CSV store. Source title,
 text, and author values are discarded. Protected reference columns are
 reported by name only and their values never persist.

@@ -34,16 +34,23 @@ scientific identifier and output.
 │   ├── evaluation_articles.csv
 │   ├── jobs.csv
 │   ├── imports.csv
-│   └── import_rejections.csv
+│   ├── import_rejections.csv
+│   ├── idempotency_keys.csv
+│   └── purges.csv
 ├── backups/
 ├── logs/
 ├── managed-models/
-└── uploads/
+├── uploads/
+│   ├── datasets/
+│   └── models/
+├── staging/
+└── maintenance/
 ```
 
 Only files under `state/` are the database. Lock, backup, log, managed-model,
-and upload files are operational support files and are not queryable records.
-`uploads/` is used only for model artifacts; dataset uploads are never spooled.
+upload/staging/maintenance files are operational support files and are not
+queryable records. Uploads are private acquired spools, not authoritative
+content; terminal cleanup removes them under section 9.
 
 ## 3. Physical CSV rules
 
@@ -82,12 +89,15 @@ UTF-8 byte checks above.
 
 ## 4. Identifier rules
 
-- Transaction, job, evaluation, import, and locally inferred prediction-run IDs:
-  lowercase canonical UUIDv4.
+- Transaction, job, evaluation, structurally failed import, and locally inferred
+  prediction-run IDs: lowercase canonical UUIDv4.
 - Application UUID namespace:
   `6f63a5f4-97aa-4bb8-a73f-2a30fc9fcf31`.
 - Publisher ID: UUIDv5 of `publisher:<normalized_hostname>` in that namespace.
 - Article ID: UUIDv5 of `article:<canonical_url>` in that namespace.
+- Syntactically complete import ID (including a zero-accepted failure): UUIDv5 of
+  `import:<content_sha256>:<schema_version>` in that namespace. A structurally
+  unparseable import with no complete content digest uses UUIDv4.
 - Model ID: lowercase 64-character SHA-256 of the canonical model-identity JSON
   defined by the scientific contract.
 - Imported prediction-run ID: UUIDv5 of
@@ -95,6 +105,9 @@ UTF-8 byte checks above.
   application namespace.
 - Evaluation-article row ID: lowercase SHA-256 of
   `evaluation-article:<evaluation_id>:<position>`.
+- Import rejection ID: lowercase SHA-256 of
+  `import-rejection:<import_id>:<source_part>:<source_row>:<error_code>`; one
+  primary rejection code is selected per rejected record.
 - Record version: positive integer starting at `1` and increasing by exactly
   one for each new version of the same record ID. A compacted baseline may
   begin above `1` under section 10 and later versions increment from it.
@@ -146,7 +159,7 @@ transaction_id,event,commit_sequence,operation,actor,request_id,occurred_at
   gaps are permitted only after documented compaction removes obsolete
   transactions.
 - `operation`: stable operation name such as `seed_import`, `prediction_create`,
-  `evaluation_create`, `model_register`, or `job_update`.
+  `evaluation_create`, `model_scan`, or `job_update`.
 - `actor`: `startup`, `cli`, `api`, or `recovery`.
 - `request_id`: optional API request UUID.
 
@@ -157,14 +170,15 @@ corruption.
 ### 6.3 `publishers.csv`
 
 ```text
-publisher_id,normalized_hostname,homepage_url,display_name,first_seen_at,last_seen_at,record_version,record_operation,transaction_id,recorded_at
+publisher_id,normalized_hostname,homepage_candidate_url,homepage_resolved_url,display_name,first_seen_at,last_seen_at,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - `publisher_id` and `normalized_hostname` are unique in current state.
-- `homepage_url` is `https://<normalized_hostname>/` unless a successfully
-  resolved homepage URL is stored.
+- `homepage_candidate_url` is optional user/discovery input.
+  `homepage_resolved_url` is present only after safe retrieval ends at the same
+  publisher with path `/` and no query; no URL is synthesized from a hostname.
 - `display_name` is a present but nullable compatibility field and is always empty; the UI
   displays `normalized_hostname`.
 
@@ -196,21 +210,29 @@ Constraints:
 ### 6.5 `models.csv`
 
 ```text
-model_id,family,fold_id,artifact_kind,artifact_path,artifact_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,max_tokens,class_count,status,status_detail,registered_at,last_validated_at,record_version,record_operation,transaction_id,recorded_at
+model_id,family,fold_id,artifact_kind,artifact_locator,artifact_sha256,manifest_entry_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,class_order_json,max_tokens,padding_policy,adapter_config_sha256,runtime_scientific_json,class_count,status,artifact_available,runnable,status_detail,registered_at,last_validated_at,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
-- `family`: `bert`, `roberta`, `llama`, `mistral`, or `custom`.
-- `fold_id`: integer `1..5` for official folds; optional only for custom models.
-- `artifact_kind`: `state_dict`, `peft_directory`, `hf_directory`,
-  `custom_manifest`, or `historical_virtual`.
+- `family`: `bert`, `roberta`, `llama`, or `mistral`; generic custom models are
+  outside schema version 1.
+- `fold_id`: integer `1..5` for every official or historical fold.
+- `artifact_kind`: `state_dict`, `peft_directory`, `hf_directory`, or
+  `historical_virtual`.
 - `class_count` is exactly `5` for a selectable model.
 - `status` is one registry state defined in `architecture.md`.
-- `historical_virtual` records use a logical release identity, have empty path
-  and artifact checksum fields, and use status `historical_only`.
-- API responses redact `artifact_path`; the complete path remains local CSV
-  state because the loader needs it.
+- `historical_virtual` records use a logical release identity, have empty
+  locator/artifact/manifest/config fields, set both availability booleans false,
+  and use status `historical_only`.
+- `artifact_locator` is mutable deployment metadata excluded from `model_id`;
+  API responses redact it. Relinking the same digest updates only the record.
+- `class_order_json`, padding, adapter digest, normalized official manifest-entry digest, loader recipe,
+  immutable base/tokenizer revisions, and `runtime_scientific_json` cover every
+  option capable of changing output. Built-in official manifests provide them.
+- `artifact_available` and `runnable` are independent from the durable
+  scientific record. A missing artifact sets both false and status
+  `artifact_missing` without invalidating existing runs/evaluations.
 
 ### 6.6 `prediction_runs.csv`
 
@@ -278,36 +300,39 @@ Constraints:
 ### 6.9 `jobs.csv`
 
 ```text
-job_id,job_type,status,phase,progress,request_json,result_json,error_code,error_message,retry_of_job_id,cancel_requested,created_at,started_at,finished_at,record_version,record_operation,transaction_id,recorded_at
+job_id,job_type,status,phase,progress,request_json,result_json,error_code,error_message,retry_of_job_id,retry_available,source_spool_id,cancel_requested,created_at,started_at,finished_at,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - `job_type`: `article_evaluation`, `article_list_evaluation`,
-  `publisher_evaluation`, `dataset_import`, `model_scan`, `model_register`,
-  `model_upload`, `content_purge`, `storage_verify`, or `storage_compact`.
+  `publisher_evaluation`, `dataset_import`, `model_scan`,
+  `model_upload`, `model_validate`, or `content_purge`.
+  Offline `storage compact` is a CLI maintenance operation, not an online job.
 - `status`: `queued`, `running`, `succeeded`, `failed`, or `cancelled`.
 - `progress`: integer `0..100`.
-- `request_json` contains normalized request parameters, not API keys or
+- `request_json` contains normalized request parameters, not credentials or
   editorial content.
 - `result_json` contains safe IDs and counters, not editorial content.
 - `error_message` is English and safe for display.
+- `source_spool_id` is an opaque relative identifier, never a path. Upload
+  retry is available only while that acquired file exists.
 
 Job status changes append versions; existing physical rows are never edited.
 
 ### 6.10 `imports.csv`
 
 ```text
-import_id,source_kind,source_name,source_sha256,schema_version,status,source_rows,accepted_rows,rejected_rows,duplicate_rows,protected_columns_json,warnings_json,started_at,completed_at,record_version,record_operation,transaction_id,recorded_at
+import_id,source_kind,source_name,content_sha256,transport_sha256,schema_version,status,source_rows,accepted_rows,rejected_rows,duplicate_rows,protected_columns_json,warnings_json,started_at,completed_at,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - `source_kind`: `bundled_manifest`, `manifest_directory`, `csv`, `csv_gz`,
   `zip_csv`, or `zip_manifest`.
-- `source_sha256` is SHA-256 of exact source-file bytes for `csv`, `csv_gz`, and
-  `zip_csv`, and `zip_manifest`; for a manifest directory it is SHA-256 of exact
-  `manifest.json` bytes after every listed part digest has been verified.
+- `content_sha256` is the format-independent digest below. `transport_sha256`
+  is SHA-256 of acquired upload bytes or an exact CLI source file; it is empty
+  only for a manifest directory with no single transport stream.
 - `source_name` is a basename or logical release name, never an unrestricted
   user path in API output.
 - `status` is `succeeded`, `succeeded_with_rejections`, or `failed`.
@@ -315,33 +340,96 @@ Constraints:
   row; accepted records commit and every rejection is recorded separately.
 - `failed` is used when the container/schema cannot be processed or no row is
   acceptable; it contributes no articles or prediction runs.
-- Current `(source_sha256,schema_version)` with status `succeeded` or
+- `duplicate_rows` counts a semantically valid row whose projected model
+  outputs are all identical to outputs already seen for the same canonical
+  article and add nothing. A row adding a new distinct model identity is
+  accepted. Whole-input conflict resolution can reclassify an earlier staged
+  row from accepted/duplicate to rejected before final counters commit.
+- Current `(content_sha256,schema_version)` with status `succeeded` or
   `succeeded_with_rejections` is unique.
 - `protected_columns_json` lists column names only.
+
+The sole dataset content-digest algorithm is `prt-dataset-content-v1`. Parse
+uncompressed logical CSV records in source order (manifest parts use manifest
+order), project string fields to the supported public columns before semantic
+row validation, discard ignored/editorial fields, and serialize each projected
+data record—including records later rejected—without a header using the
+exact UTF-8 RFC-4180 writer/header order used by
+`scripts/prepare_public_dataset.py::serialize_csv_row`. SHA-256 the
+concatenation. Optional columns absent from a user schema serialize as empty in
+that canonical projection. CSV, CSV.GZ, single-CSV ZIP, manifest directory, and
+manifest ZIP
+therefore produce the same digest for the same ordered projected records;
+compression, filenames, part boundaries, and archive metadata are irrelevant.
+Structurally unparseable sources have no complete content digest/idempotent
+successful import; syntactically parsed imports with row rejections do. The
+bundled manifest's `content_digest_sha256` uses this same algorithm and listed
+part byte digests remain independent transport-integrity checks.
 
 ### 6.11 `import_rejections.csv`
 
 ```text
-rejection_id,import_id,source_row,error_code,safe_identifier,message,record_version,record_operation,transaction_id,recorded_at
+rejection_id,import_id,source_part,source_row,error_code,safe_identifier,message,record_version,record_operation,transaction_id,recorded_at
 ```
 
 Constraints:
 
 - one row is written for every rejected source data row; CSV header rows are
   not counted as source rows;
-- `rejection_id` is UUIDv4 and `source_row` is the one-based physical CSV line
-  on which the logical record begins;
+- `source_part` is `data.csv` for a standalone source or the validated manifest
+  path. `source_row` is the one-based logical data-record number within that
+  part (header excluded), so quoted newlines do not alter it;
+- `rejection_id` follows the deterministic identifier rule in section 4;
 - `safe_identifier` is the canonical article URL when URL normalization
   succeeded, otherwise empty;
 - `error_code` is a stable import code and `message` is safe English text;
 - rejected editorial fields, protected-provider values, and raw malformed input
   are never copied into this ledger;
-- records are paginated by `(source_row,rejection_id)` in the API.
+- records are paginated by manifest part position then
+  `(source_row,rejection_id)` in the API.
+
+### 6.12 `idempotency_keys.csv`
+
+```text
+idempotency_record_id,scope,idempotency_key,request_hash,resource_type,resource_id,status,created_at,expires_at,record_version,record_operation,transaction_id,recorded_at
+```
+
+- `scope` is API version, method, normalized route template, and canonical
+  path-parameter IDs for member routes (for example
+  `v1:POST:/evaluation-jobs` or
+  `v1:POST:/jobs/{job_id}/retry:<job_uuid>`); the same key may be used in
+  another scope.
+- `idempotency_record_id` is SHA-256 of `scope + "\n" + idempotency_key`.
+- Current rows use `status=active`; expiry is a `DELETE` version. `expires_at`
+  is exactly 30 days after `created_at`.
+- JSON request hashes use SHA-256 of RFC 8785 JCS canonical JSON after schema
+  defaults are materialized. URL normalization is not applied before hashing.
+- Multipart upload hashing uses canonical JSON of non-file form fields plus the
+  lowercase transport SHA-256 and byte length of each named file, after complete
+  acquisition. Transport metadata/boundaries and filenames are excluded.
+- A matching active key/hash returns the original job/resource and status; a
+  different hash is `IDEMPOTENCY_CONFLICT` even if the resource is terminal.
+- Records expire 30 days after `created_at`. Expiry is evaluated in UTC; cleanup
+  appends `DELETE` versions. Compaction retains unexpired current records, so
+  restart/compaction do not alter behavior.
+
+### 6.13 `purges.csv`
+
+```text
+purge_id,article_id,canonical_url,live_rows_rewritten,backup_policy,completion_mode,completed_at,record_version,record_operation,transaction_id,recorded_at
+```
+
+`backup_policy` is exactly `manual_deletion_required`. This ledger is the audit
+that live content was removed; it never claims deletion from backups, open file
+descriptors, or external copies. `completion_mode` is `job` or `recovery`.
 
 ## 7. Transaction rules
 
 One atomic subresult that changes several ledgers uses one transaction ID.
 Long jobs may deliberately commit several subresults at safe boundaries:
+
+- Idempotent mutation admission: the new idempotency record and resulting
+  initial job/resource row commit together after any required upload acquisition.
 
 - Explicit content save: publisher/article identity if new plus the saved
   article version. It commits immediately after validation, before inference,
@@ -351,8 +439,10 @@ Long jobs may deliberately commit several subresults at safe boundaries:
   the same transaction; a later multi-article job remains running.
 - Publisher evaluation: evaluation, all evaluation-article rows, and job
   success.
-- Seed/user import: import, publishers, articles, prediction runs, and any
-  import rejections.
+- Seed/user import: after complete projected staging and whole-input conflict
+  validation, one short transaction appends import, publishers, articles,
+  prediction runs, and rejection rows. No authoritative transaction remains
+  open while reading the source and no staged row is visible.
 
 A terminal failed/cancelled job update is its own transaction and reports every
 already committed safe subresult. It never rolls back a content save or run.
@@ -368,13 +458,14 @@ read work concurrently, but their final commits serialize.
 
 Startup performs:
 
-1. exact filename and header verification;
-2. UTF-8 and CSV structure validation;
-3. transaction state validation;
-4. monotonic record-version validation;
-5. type, foreign-key, uniqueness, probability, and method constraints;
-6. index reconstruction from committed latest versions;
-7. referential count checks for evaluations.
+1. detection/recovery of maintenance markers before creating any ledger;
+2. exact filename and header verification;
+3. UTF-8 and CSV structure validation;
+4. transaction state validation;
+5. monotonic record-version validation;
+6. type, foreign-key, uniqueness, probability, and method constraints;
+7. index reconstruction from committed latest versions;
+8. referential count checks for evaluations.
 
 If only the final physical record of a ledger is malformed and its transaction
 is not committed, recovery:
@@ -386,41 +477,89 @@ is not committed, recovery:
 
 Any malformed committed row, invalid middle row, unknown header, duplicate
 committed identity, or broken committed foreign key is `STORAGE_CORRUPT` and
-prevents readiness. The application never guesses a repair.
+closes the reserved socket and prevents HTTP startup. The application never
+guesses a repair.
+
+Evidence such as `maintenance/compaction.json`, `state.compact-new`, or
+`state.compact-old` suppresses fresh-ledger creation. Recovery must resolve the
+documented compaction state first; inconsistent combinations fail closed.
 
 ## 9. Idempotency and duplicate handling
 
-- Seed/user import identity is source SHA-256 plus import schema version.
+- Seed/user import identity is content SHA-256 plus import schema version.
 - Reimporting a successful identical source returns the existing import.
 - Article identity is canonical URL; model identity is exact model ID; run
   identity is never reduced to that pair.
 - `reuse` selects the documented latest run and writes no run row.
 - Within one source import, duplicate canonical rows merge outputs for distinct
   model identities. Two different outputs for the same
-  `(article_id,model_id)` in that source are rejected and counted as
-  `IMPORT_CONFLICT`; discarded editorial fields never participate in equality
-  or conflict checks. A later import with a different source identity creates a
-  distinct immutable imported run and does not overwrite an earlier run.
+  `(article_id,model_id)` mark the key conflicted; all its occurrences are
+  rejected and counted as `IMPORT_CONFLICT`. A source row containing any such
+  key is rejected in full, so `accepted_rows` + `rejected_rows` +
+  `duplicate_rows` equals `source_rows` and no row is partially accepted.
+  Discarded editorial fields
+  never participate in equality or conflict checks. A later import with a
+  different source identity creates a distinct immutable imported run and does
+  not overwrite an earlier run.
 - The bundled release has 19,429 exact released URL rows. Its separately
   documented canonicalization exception imports 19,411 articles, 77,708 unique
   prediction runs, and 20 historical virtual family/fold models.
 
+HTTP mutation idempotency is exclusively the persistent ledger in section
+6.12; an in-memory cache may accelerate it but cannot define behavior.
+
+An upload spool exists from successful acquisition until its job terminal
+transaction. Normal success/failure/cancellation commits
+`retry_available=false`, then deletes the spool immediately after that fsync.
+If the process dies first, startup marks the running job interrupted
+but retains a checksum-matching spool for 24 hours, exposes retry availability,
+and deletes it at expiry. Orphan/mismatching spools are deleted at startup and
+can never be attached by filename guessing.
+
+Upload retry admission claims the spool atomically: the old job becomes
+`retry_available=false` in the same transaction that creates the linked job,
+its idempotency row, and the new job's `source_spool_id`. Concurrent or later
+claims receive `SOURCE_NOT_AVAILABLE`; source ownership is never inferred.
+
 ## 10. Compaction
 
-`publisher-reliability storage compact` requires the writer lock and refuses to
-run while the server owns it. It:
+`publisher-reliability storage compact` is offline only: it requires the writer
+lock and refuses to run while a server owns it. Required free space is the live
+state byte size plus `max(10%, 64 MiB)`. It:
 
-1. verifies the full store;
-2. writes a new temporary `state/` containing committed current entity rows;
-   each retains its record ID, record version, scientific/entity fields, and
-   original `recorded_at`, but points to one new
-   `storage_compact_baseline` transaction with commit sequence `1`;
-3. verifies the temporary store independently;
-4. renames the current state to a timestamped backup;
-5. atomically renames the verified temporary directory to `state/`;
-6. retains the backup until the user explicitly removes it.
+1. recovers any earlier marker, verifies the full store, and writes a verified
+   `state.compact-new` baseline containing each current entity row. Entity IDs,
+   record versions, entity timestamps, and scientific values are preserved;
+   each copied row references one new committed baseline transaction whose
+   operation is `storage_compact_baseline`. Obsolete entity versions and their
+   transactions are omitted. Unexpired idempotency rows and current purge
+   audits are retained;
+2. fsyncs every new ledger and directory;
+3. atomically writes/fsyncs `maintenance/compaction.json` with phase
+   `prepared`, live/new/old names, and their manifest digests;
+4. renames `state` to `state.compact-old`, fsyncs the data directory, updates
+   the marker to `old_renamed`;
+5. renames `state.compact-new` to `state`, fsyncs, updates it to `swapped`;
+6. verifies live state, moves the old directory into the bounded backup set,
+   then removes the marker.
 
-Compaction never changes record IDs, versions, scientific values, or evaluation
+Recovery is based on marker plus directory presence, not on the last marker
+write: if `state` exists and the old directory does not, `prepared` discards or
+archives the uninstalled new generation; if `state` is absent and old+new
+exist, it installs new; if `state` and old exist, it verifies state then archives
+old. Missing/mismatched digests or any other combination is `STORAGE_CORRUPT`.
+These rules cover interruption before either rename, between renames, and after
+swap before cleanup. No empty ledger is created during recovery.
+
+If a crash occurs while building `state.compact-new` before the marker exists,
+the still-present verified live `state` is authoritative and the orphan staging
+directory is archived/removed after verification. An orphan staging directory
+without live `state`, or `state.compact-old` without a valid marker, is
+`STORAGE_CORRUPT`; recovery never guesses from timestamps.
+
+Compaction changes only entity-row `transaction_id` values and the transaction
+ledger needed to establish the new baseline. It never changes entity IDs,
+record versions, entity timestamps, scientific values, or evaluation
 membership. It is optional; normal operation does not compact automatically.
 Startup permits a first visible record version above `1` only when its
 transaction operation is `storage_compact_baseline`; any other missing version
@@ -437,25 +576,42 @@ schemas.
 
 ## 12. Local-content purge
 
-`content_purge` is the sole privacy exception to append-only preservation. With
-the writer mutex held, it rewrites every physical `articles.csv` row for the
-confirmed `article_id`, replacing `title`, `text`, `content_status`, and
-`content_saved_at` with their empty/`none` forms while preserving identifiers,
-versions, transaction links, timestamps, and all non-content fields. It applies
-the same transformation to application-created CSV backups under `<data-dir>`.
-Each file is written to a redacted sibling, verified, fsynced, and atomically
-renamed; no unredacted staging copy is created.
+`content_purge` is the sole privacy exception to append-only preservation. It
+holds a service-wide exclusive maintenance lock, drains readers, and rewrites
+every physical live `articles.csv` row for the confirmed article. A verified,
+fsynced sibling and `maintenance/purge.json` marker precede atomic replacement.
+The marker contains purge/job/article IDs, original/redacted file SHA-256, and
+phase `prepared` or `swapped`; recovery accepts no filename/ID inference.
+Indexes are rebuilt before service resumes and a `purges.csv` row plus terminal
+job state commit together. Recovery rolls forward a replaced file or repeats a
+verified pending swap; it never restores unredacted live content. Recovery
+records `completion_mode=recovery` and marks the interrupted job failed with
+`PROCESS_INTERRUPTED`, even though the privacy operation completed.
 
-The rewrite is idempotent and privacy-monotonic. If interrupted after only some
-files were replaced, startup completes the redaction of all remaining managed
-files before readiness instead of restoring content. It then records a safe
-recovery warning for the interrupted job. Prediction runs and evaluations are
-never changed. External copies are outside application control.
+Application-created and external backups are not rewritten. Confirmation and
+result state `manual_deletion_required`; no promise is made about already open
+file descriptors or copies. Prediction runs/evaluations are unchanged.
 
 ## 13. Backup and portability
 
 A consistent manual backup requires stopping the server and copying the entire
-data directory. Copying individual ledgers while the server runs is not a
-supported backup. Native and Docker deployments use identical bytes and can
-move a stopped data directory between them, provided model paths are
-re-registered when mount paths differ.
+data directory. Application-created recovery/compaction backups are limited to
+the newest 3 and 20 GiB total; after a successful operation cleanup removes the
+oldest complete backup until both limits hold. A backup needed by an active
+marker is never removed. User-created external backups have user-defined
+retention. An operation whose single required backup exceeds the configured byte
+cap fails before mutation with `STORAGE_SPACE_INSUFFICIENT`; users may raise the
+cap explicitly.
+
+Upload acquisition requires free bytes of at least the declared compressed
+length (or configured upload maximum when absent) plus the configured maximum
+extracted/staged bytes plus 64 MiB; streaming/staging recheck actual free space.
+This is 4 GiB + 64 MiB for the default dataset limits and 20 GiB + 64 MiB for
+the default model limits. Purge and compaction require current live
+file/state size plus `max(64 MiB, 10%)`. Any `ENOSPC` before the final fsync is
+`STORAGE_SPACE_INSUFFICIENT`; temporary work is retained only when required for
+deterministic recovery, and no commit/success is reported.
+
+Native and Docker deployments use identical scientific/entity bytes. The
+deployment-specific `artifact_locator` may be relinked when mount paths differ
+without changing model IDs or historical query results.

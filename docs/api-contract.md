@@ -16,8 +16,18 @@
 - API versioning occurs in the path. Breaking changes require `/api/v2`.
 - `X-Request-ID` accepts a client UUID; otherwise the server creates one. Every
   response returns it.
-- Mutation requests accept `Idempotency-Key`, 8–128 visible ASCII characters.
-  Reusing a key with a different body returns `409 IDEMPOTENCY_CONFLICT`.
+- Every job/resource-creating POST requires `Idempotency-Key`, 8–128 visible
+  ASCII characters: content purge; model scan/upload/validate;
+  evaluation jobs/stored selection; job retry; and import upload. Missing is a
+  `422` field error. Cancel and read-only POST preflight/availability accept no
+  key and follow their documented current-state semantics. Scope is API
+  version, method, normalized route template, and canonical path-parameter IDs
+  for member routes. JSON hashes use RFC 8785
+  JCS after schema defaults; upload hashes use canonical form fields plus each
+  acquired file's transport SHA-256 and length. The persistent CSV ledger
+  retains keys for 30 days across restart/compaction. Same scope/key/hash
+  returns the original resource before current-state/queue/source checks;
+  another hash returns `IDEMPOTENCY_CONFLICT`.
 - Requests larger than 1 MiB are rejected except documented streaming uploads.
 - Responses set `Cache-Control: no-store` unless serving fingerprinted assets.
 - Every `q` filter applies Unicode NFC normalization followed by Python
@@ -28,23 +38,23 @@
   dedicated local-content read endpoint in section 6, which returns only a
   title/body that this user explicitly chose to save. Authors and raw HTML are
   never returned or persisted under any option.
+- Every member route validates its path ID before performing work. An absent
+  article, publisher, prediction run, evaluation, model, job, or import returns
+  the corresponding section-3 `*_NOT_FOUND` code. A job-creating route also
+  validates referenced persisted IDs synchronously before admission, except
+  URL identities that can only be established by the accepted background job.
 
 OpenAPI is served at `/api/openapi.json`; local interactive documentation is at
 `/api/docs`.
 
-## 2. Authentication
+## 2. Loopback request security
 
-Effective loopback mode means either native loopback binding or the exact
-loopback-published container exception in the architecture contract; it
-requires no authorization. Every other non-loopback binding requires every
-`/api/v1` endpoint except health to receive:
-
-```http
-Authorization: Bearer <configured-api-key>
-```
-
-Missing or invalid credentials return `401 AUTHENTICATION_REQUIRED`. The key is
-never returned by the API, logged, or stored in CSV.
+Authentication and non-loopback service are outside the MVP. Middleware checks
+every request's `Host`/absolute-form authority against the single configured loopback
+origin; mismatch returns `421 INVALID_HOST`. Browser mutations with a present
+`Origin` require its exact scheme/host/port, and `Sec-Fetch-Site: cross-site` is
+rejected with `403 ORIGIN_NOT_ALLOWED`. Missing `Origin` is accepted for
+non-browser clients. No CORS allow-origin header is emitted.
 
 ## 3. Error envelope
 
@@ -68,15 +78,21 @@ Every non-2xx JSON error uses:
   to a list of messages.
 - Unhandled failures return `500 INTERNAL_ERROR` without a stack trace.
 
-The following transport and resource codes are exhaustive for this API
-version. Domain/job codes are the exhaustive list in Product Specification
-section 13.
+This is the single exhaustive code registry for API version 1. The status is
+normative whenever a code is returned synchronously. A job accepted with `202`
+is subsequently read with `200` even when terminal; its `error.code` contains
+the domain code and does not change the job-read HTTP status.
 
 | Code | HTTP status | Meaning |
 | --- | ---: | --- |
 | `INVALID_CURSOR` | 400 | Cursor is malformed or does not match the filters |
-| `AUTHENTICATION_REQUIRED` | 401 | Bearer credential is absent or invalid |
-| `FORBIDDEN` | 403 | Authenticated request cannot use the path, origin, or action |
+| `INVALID_HOST` | 421 | Host/absolute authority is not the configured loopback origin |
+| `ORIGIN_NOT_ALLOWED` | 403 | Browser mutation is cross-origin |
+| `INVALID_URL` | 422 | URL syntax/encoding is invalid |
+| `UNSUPPORTED_SCHEME` | 422 | URL is not HTTP(S) |
+| `CANONICAL_IDENTITY_CHANGED` | 409 | Content-only fetch resolved to another article |
+| `DUPLICATE_URL_INPUT` | 422 | Input URLs collide after normalization |
+| `MIXED_PUBLISHERS` | 422 | Explicit selection spans publisher identities |
 | `ARTICLE_NOT_FOUND` | 404 | Article ID is absent |
 | `PUBLISHER_NOT_FOUND` | 404 | Publisher ID is absent |
 | `PREDICTION_RUN_NOT_FOUND` | 404 | Prediction-run ID is absent |
@@ -87,9 +103,35 @@ section 13.
 | `IMPORT_NOT_FOUND` | 404 | Import ID is absent |
 | `IDEMPOTENCY_CONFLICT` | 409 | One key was reused with a different request body |
 | `JOB_NOT_CANCELLABLE` | 409 | Job is already terminal |
+| `SOURCE_NOT_AVAILABLE` | 409 | Retry requires an acquired source that no longer exists |
+| `JOB_QUEUE_FULL` | 503 | Persisted queued-job limit is reached |
 | `PAYLOAD_TOO_LARGE` | 413 | Request or upload exceeds its configured byte limit |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Body or archive type is not accepted |
 | `RATE_LIMITED` | 429 | Local client exceeded a documented rate limit |
+| `NETWORK_REQUIRED` | 409 | Operation cannot complete in strict offline/local state |
+| `NETWORK_TIMEOUT` | 504 | Synchronous network operation timed out |
+| `ROBOTS_DENIED` | 403 | Robots policy denies retrieval |
+| `HTTP_ERROR` | 502 | Upstream HTTP retrieval failed |
+| `CONTENT_TOO_LARGE` | 413 | Decompressed page/field exceeds its limit |
+| `EXTRACTION_FAILED` | 422 | Article extraction failed |
+| `TEXT_EMPTY` | 422 | Extracted text is empty |
+| `TEXT_TOO_SHORT` | 422 | Text misses deterministic length limits |
+| `LANGUAGE_DETECTION_FAILED` | 422 | Detector could not classify frozen input |
+| `NON_ENGLISH` | 422 | Detected language is not English |
+| `MODEL_NOT_RUNNABLE` | 409 | Historical/missing artifact cannot infer |
+| `MODEL_INCOMPATIBLE` | 422 | Artifact/manifest violates a supported recipe |
+| `MODEL_DEPENDENCY_MISSING` | 409 | Immutable base/tokenizer/runtime is absent |
+| `MODEL_RESOURCE_INSUFFICIENT` | 409 | Required device/memory is unavailable |
+| `PROBABILITIES_REQUIRED` | 409 | Selected runs cannot support probability mean |
+| `INSUFFICIENT_ARTICLES` | 422 | Fewer than two compatible runs are available |
+| `REQUESTED_COUNT_UNMET` | 422 | Partial result is forbidden and count is unmet |
+| `IMPORT_SCHEMA_INVALID` | 422 | Dataset structure/schema is invalid |
+| `IMPORT_CONFLICT` | 409 | One import contains conflicting article/model output |
+| `PROCESS_INTERRUPTED` | 409 | Persisted running job was interrupted by restart |
+| `STORAGE_LOCKED` | 409 | Another process owns the writer lock |
+| `STORAGE_CORRUPT` | 503 | Committed state fails verification |
+| `STORAGE_SPACE_INSUFFICIENT` | 507 | Required acquisition/maintenance headroom is absent |
+| `SERVICE_UNAVAILABLE` | 503 | Exclusive maintenance temporarily blocks operation |
 | `INTERNAL_ERROR` | 500 | Unexpected failure hidden behind a safe message |
 | `SERVICE_NOT_READY` | 503 | Startup/recovery is incomplete or storage unavailable |
 
@@ -130,8 +172,14 @@ loop is responsive. It does not imply storage readiness.
 
 ### `GET /health/ready`
 
-Outside `/api/v1`. Returns `200 {"status":"ready"}` only after CSV verification,
-index build, and job executor startup. Otherwise `503` with a safe reason.
+Outside `/api/v1`. Returns `200 {"status":"ready"}` after CSV verification,
+index build, and executor startup, provided exclusive maintenance is not active.
+During exclusive maintenance it returns
+`503 {"status":"not_ready","reason":"maintenance"}`; this health response is
+outside the API error envelope.
+It does not inspect hypothetical future URLs, saved bodies, models, or network
+availability; those belong to per-request preflight. Startup storage corruption
+starts no HTTP server at all.
 
 ### `GET /api/v1/status`
 
@@ -221,9 +269,10 @@ Starts the physical purge defined by the CSV contract. Body:
 
 The confirmation value must exactly equal the stored canonical URL. The call
 requires `Idempotency-Key` and returns `202` with a `content_purge` job. A
-successful job removes title/body from all application-managed CSV versions
-and backups without deleting runs or evaluations. It cannot affect external
-copies. A mismatched confirmation is `422`; an article with no saved content is
+successful job removes title/body from every live CSV version, rebuilds indexes,
+and records `backup_policy=manual_deletion_required` without deleting runs or
+evaluations. Application-created and external backups are not changed. A
+mismatched confirmation is `422`; an article with no saved content is
 `404 ARTICLE_CONTENT_NOT_FOUND` and creates no job. Repeating the original
 successful request/key still returns its original job after content is gone.
 
@@ -250,7 +299,8 @@ Filters: `q` over normalized hostname, `article_count_min`,
 `updated_desc` or `hostname_asc`. Count bounds are non-negative integers and
 minimum cannot exceed maximum.
 
-Each summary returns publisher ID, normalized hostname, homepage URL, stored
+Each summary returns publisher ID, normalized hostname, nullable homepage
+candidate/resolved URLs, stored
 article count, prediction-run count, evaluation count, and last
 evaluation timestamp. Its `updated_at` is the maximum current `recorded_at`
 across the publisher, its articles, their prediction runs, and its evaluations;
@@ -285,7 +335,7 @@ embedded. It uses the same `X-Exported-At` and `Content-Disposition` response
 headers as article export. CSV header order is exact:
 
 ```text
-publisher_id,normalized_hostname,homepage_url,stored_article_count,prediction_run_count,evaluation_count,last_evaluation_at,updated_at
+publisher_id,normalized_hostname,homepage_candidate_url,homepage_resolved_url,stored_article_count,prediction_run_count,evaluation_count,last_evaluation_at,updated_at
 ```
 
 ## 8. Models
@@ -293,8 +343,10 @@ publisher_id,normalized_hostname,homepage_url,stored_article_count,prediction_ru
 ### `GET /api/v1/models`
 
 Filters: `family`, `status`, and `q` over safe display name. Returns compatibility
-state, fold, artifact kind, redacted path, checksum, recipe/base/tokenizer
-identity, max tokens, registration time, validation time, and safe status detail.
+state, `artifact_available`, `runnable`, fold, artifact kind, redacted locator,
+checksum, official-manifest/recipe/base/tokenizer identity, class order, max
+tokens, padding/runtime scientific options, registration/validation time, and
+safe status detail.
 
 ### `GET /api/v1/models/{model_id}`
 
@@ -307,48 +359,33 @@ Body:
 
 ```json
 {
-  "paths": ["/models"],
   "recursive": true
 }
 ```
 
-Paths are server-local. In Docker they must be inside mounted roots. Returns
-`202` with a `model_scan` job.
-
-### `POST /api/v1/models/register`
-
-Body:
-
-```json
-{
-  "path": "/models/bert_fold_1.pt",
-  "family": "bert",
-  "fold_id": 1,
-  "custom_manifest": null
-}
-```
-
-The resolved path must remain inside a configured model root and must not
-traverse through a symlink outside it. `family` and `fold_id` can be `null` only
-when an unambiguous official artifact name/config supplies them. The backend
-never guesses among multiple recipes. Returns `202` with a `model_register`
-job.
+All configured roots are scanned with the same no-symlink policy. Arbitrary
+paths are not accepted. Returns `202` with a `model_scan` job. Each recognized
+official artifact is registered directly under its scientific `model_id` and a
+deployment-only locator; ambiguous/unknown artifacts are reported unsupported.
+There is no separate path-based register endpoint.
 
 ### `POST /api/v1/models/upload`
 
 Consumes `multipart/form-data` with:
 
 - `file`: one `.pt`, `.safetensors`, `.zip`, or `.tar.gz` stream;
-- `family`: required string unless a bundled custom manifest is present;
+- `family`: required unless an official manifest entry is unambiguous;
 - `fold_id`: optional integer;
 - `expected_upload_sha256`: optional lowercase digest of the received file or
   archive bytes, checked before extraction; it is distinct from the normalized
   artifact digest used in model identity.
 
-The server streams to `<data-dir>/uploads`, limits total bytes using
-`PRT_MODEL_UPLOAD_MAX_BYTES` (default 10 GiB), rejects archive traversal and
-links, checks free disk space, validates before moving to managed model storage,
-and deletes failed temporary uploads. A model archive has at most 10,000
+The server streams to `<data-dir>/uploads/models`, limits total bytes using
+`PRT_MODEL_UPLOAD_MAX_BYTES` (default 10 GiB), rejects archive traversal/links,
+checks free space, computes the transport hash, fsyncs, and atomically acquires
+the spool before committing idempotency/job rows and returning `202`;
+pre-acquisition failure creates neither. The worker then validates before an
+atomic move to managed storage and deletes failed spools. A model archive has at most 10,000
 entries and its total extracted regular-file bytes cannot exceed the upload
 limit. Nested archives are treated as ordinary model files and are never
 recursively extracted. Returns `202` with a `model_upload` job.
@@ -357,8 +394,9 @@ recursively extracted. Returns `202` with a `model_upload` job.
 
 Revalidates artifact, dependencies, and resources. Returns `202` with a job.
 
-Model deletion is outside the MVP. Users remove unmanaged artifacts manually;
-missing artifacts become invalid on the next scan without deleting provenance.
+Model deletion is outside the MVP. Missing artifacts become
+`artifact_missing`, `artifact_available=false`, and `runnable=false`; the model
+record and every historical run/evaluation remain queryable and aggregable.
 
 ## 9. Evaluation preflight and jobs
 
@@ -402,9 +440,9 @@ Creates one job from a discriminated request. Returns `202`:
 }
 ```
 
-`model_id` can identify a runnable `compatible` model or a
-`historical_only` virtual model. The latter rejects
-`prediction_action=recompute`. A publisher input additionally requires
+`model_id` can identify a runnable `compatible` model or a non-runnable
+`historical_only`/`artifact_missing` identity with stored runs. Non-runnable
+models reject `prediction_action=recompute`. A publisher input additionally requires
 `stored_only + reuse + discard`. Single-article, explicit-list, and stored-
 selection inputs may use `save_local` with a reusable historical run; this
 performs content retrieval only, never inference. If an explicit URL lacks the
@@ -500,6 +538,11 @@ it never overwrites the earlier run.
 
 ## 10. Jobs
 
+`job_type` is exactly one of `article_evaluation`,
+`article_list_evaluation`, `publisher_evaluation`, `dataset_import`,
+`model_scan`, `model_upload`, `model_validate`, or `content_purge`, matching the
+product and CSV contracts.
+
 ### `GET /api/v1/jobs`
 
 Filters: `status`, `job_type`, `created_from`, `created_to`; newest first.
@@ -508,19 +551,24 @@ Filters: `status`, `job_type`, `created_from`, `created_to`; newest first.
 
 Returns ID, type, state, phase, progress, safe normalized request, counters,
 result links, warnings, error envelope, cancellation state, retry relationship,
-and timestamps.
+`retry_available`, nullable `retry_unavailable_code`, and timestamps. A failed
+job resource itself returns HTTP `200`.
 
 Evaluation results include ordered `selected_prediction_run_ids` and
 per-article safe subresults (`reused`, `inferred`, `recomputed`,
 `content_saved`, `failed`). They never contain title/body. A content-purge job
-returns the article ID and counts of rewritten managed files/rows.
+returns article ID, live rows rewritten, purge audit ID, and
+`backup_policy=manual_deletion_required`.
 
 ### `GET /api/v1/jobs/{job_id}/events`
 
 Returns `text/event-stream`. Events are `snapshot`, `progress`, `warning`, and
-`terminal`. Each event contains the current job version and can be resumed with
-`Last-Event-ID`. A heartbeat comment is sent every 15 seconds. Disconnecting
-does not cancel the job.
+`terminal`. IDs are `<process_stream_id>:<counter>` and are retained in a
+bounded current-process ring. A retained current-stream `Last-Event-ID` resumes
+after that event. An unknown/old stream—including after restart—receives one
+fresh snapshot of persisted current job state and new IDs; intermediate old
+progress is not reconstructed. A heartbeat comment is sent every 15 seconds.
+Disconnecting does not cancel the job.
 
 ### `POST /api/v1/jobs/{job_id}/cancel`
 
@@ -529,9 +577,12 @@ Valid only for `queued` or `running`. Returns `202` with
 
 ### `POST /api/v1/jobs/{job_id}/retry`
 
-Valid only for `failed` or `cancelled`. Creates a new job from the safe stored
-request and links `retry_of_job_id`. It revalidates current model and network
-conditions. Returns `202`.
+Valid only for a failed/cancelled job with `retry_available=true`. It creates a
+linked job and revalidates roots/model/network conditions. Dataset/model upload
+requires the exact acquired spool; absent source returns
+`409 SOURCE_NOT_AVAILABLE` and creates no job. A successful admission
+atomically transfers the spool capability to the new job, so concurrent retries
+cannot share it. Returns `202` otherwise.
 
 ## 11. Imports
 
@@ -541,21 +592,10 @@ Paginated newest-first import history.
 
 ### `GET /api/v1/imports/{import_id}`
 
-Returns source kind/name/checksum, schema, status, counters, protected column
-names, warnings, and timestamps. No protected values or unrestricted path.
-
-### `POST /api/v1/imports/from-path`
-
-Body:
-
-```json
-{
-  "path": "/data/imports/predictions.csv.gz"
-}
-```
-
-Path must be inside configured import roots. Returns `202` with a dataset-import
-job.
+Returns source kind/name, format-independent content SHA-256, optional transport
+SHA-256, schema, status, counters, protected column names, warnings, and
+timestamps. No protected values or unrestricted path. Server-local path import
+is CLI-only in the MVP; there is no corresponding API route.
 
 ### `POST /api/v1/imports/upload`
 
@@ -566,16 +606,20 @@ bytes no greater than the dataset upload limit. A ZIP contains either exactly
 one CSV or one top-level `manifest.json` plus exactly its listed CSV parts; no
 other entries or nested archives are accepted. For `.csv.gz`, decompression is
 streamed and stops when uncompressed bytes exceed the same dataset limit.
-Dataset uploads are parsed and hashed directly from the request stream; unlike
-model uploads, their original bytes are never written under `<data-dir>` or a
-system temporary directory. Only projected URL/domain/model-output rows and the
-source checksum commit. Returns `202`.
+The request stream is hashed into a private mode-`0600` spool with continuous
+size/free-space checks. It is fsynced and atomically acquired before the job and
+idempotency rows commit; failure/disconnect/ENOSPC before that point returns an
+error and creates no job. Parsing computes the `prt-dataset-content-v1` digest
+and stages only projected rows. The acquired source/staging data is removed
+after a durable terminal transaction (or retained for 24 hours only after a
+process interruption). Returns `202` only after acquisition.
 
 ### `GET /api/v1/imports/{import_id}/rejections`
 
-Returns safe rejection records in ascending `(source_row,rejection_id)` order
-using the standard cursor pagination contract. It never returns raw rejected
-rows, editorial values, or protected-provider values.
+Returns safe rejection records in ascending manifest-part position then
+`(source_row,rejection_id)` using standard cursor pagination. Each record names
+the safe logical part; it never returns raw rows, editorial values, or protected
+provider values.
 
 ## 12. Aggregation metadata
 
@@ -587,50 +631,46 @@ scientific warnings. Availability for a concrete selection is returned by:
 
 ### `POST /api/v1/aggregation-methods/availability`
 
-Body contains `article_ids` and `model_id`. Response reports each method as
-enabled or disabled with a stable reason. It performs no inference or mutation.
+Body contains ordered `prediction_run_ids` (2–50). Each run must exist and all
+must share one exact model and publisher. Response reports each method enabled
+or disabled with a stable reason and echoes those exact IDs. It performs no run
+selection, inference, or mutation. Evaluation workflows that start from article
+IDs select the latest reusable exact-model run using the single reuse ordering
+rule before calling the same availability service. An absent run is
+`PREDICTION_RUN_NOT_FOUND`, mixed publishers are `MIXED_PUBLISHERS`, and mixed
+model IDs are a `422 details.fields` validation error.
 
 ## 13. Configuration exposure
 
 ### `GET /api/v1/config/public`
 
-Returns only safe UI configuration: offline state, article-count limits,
+Returns only safe UI configuration: offline state, article/queue limits,
 upload-enabled flags and limits, allowed page sizes, enabled model families,
-and OSF URL. It excludes API keys, filesystem roots, proxy credentials, and
-environment values.
+and OSF URL. It excludes filesystem roots, proxy credentials, and environment
+values.
 
 ## 14. HTTP status mapping
 
-| Status | Use |
-| --- | --- |
-| `200` | Successful synchronous read/action |
-| `202` | Background job accepted |
-| `400` | Invalid cursor or syntactically invalid operation |
-| `401` | Authentication required/invalid |
-| `403` | Valid authentication but forbidden path/origin/action |
-| `404` | Resource absent |
-| `409` | Current-state conflict, duplicate idempotency key, unavailable method, locked storage |
-| `413` | Upload/request exceeds configured byte limit |
-| `415` | Unsupported content or archive type |
-| `422` | Field validation failure |
-| `429` | Local API request rate limit exceeded |
-| `500` | Unexpected internal failure |
-| `503` | Application not ready or storage unavailable |
-
-Network retrieval failures occur inside accepted jobs and therefore appear as
-terminal job error codes rather than changing the original `202` response.
+Section 3 is the complete normative mapping. Success semantics are: `200` for a
+synchronous success/resource read and `202` only after a durable job is
+admitted (and, for uploads, after acquisition). Schema field errors are `422`
+with `details.fields` and no separate code. Failures after acceptance appear in
+a terminal job resource whose read remains HTTP `200`.
 
 ## 15. Rate and resource limits
 
 Loopback API limits each client to 120 requests/minute with a burst of 30;
-health and SSE heartbeat traffic are excluded. Non-loopback mode limits to 60
-requests/minute. Job creation is limited to 10/minute and uploads to one active
-upload per instance. Exceeding a limit returns `429` with `Retry-After`.
+health and SSE heartbeat traffic are excluded. Job creation is limited to
+10/minute and uploads to one active upload per instance. Rate excess returns
+`429` with `Retry-After`. The default maximum of 100 queued jobs is separate;
+overflow returns `503 JOB_QUEUE_FULL` and creates no job/idempotency row.
+An existing matching idempotency key is resolved before queue admission and
+still returns its original resource when the queue is full.
 
 ## 16. API compatibility tests
 
 The committed OpenAPI document generated in CI must be diffed against an
 approved snapshot. Every endpoint requires tests for success, validation,
-authentication when enabled, stable error code, and CSV persistence effects.
+Host/Origin security, stable error code, and CSV persistence effects.
 Frontend end-to-end tests use the public API; no test-only backend route may
 bypass the contract.
