@@ -31,6 +31,11 @@ over prediction runs. Uploads, staging files, managed model artifact bytes,
 indexes, logs, and the writer lock are operational; losing managed artifact
 bytes disables new inference but does not lose historical scientific records.
 
+A fresh store exists only when `state/` is absent. The application then creates
+the directory and all seven header files as one initialization step. If
+`state/` already exists, every ledger must exist with its exact header; missing
+or extra state CSV files are `STORAGE_ERROR` and are never auto-created.
+
 ## 2. Physical rules
 
 - UTF-8 without BOM; application writes LF line endings.
@@ -74,6 +79,12 @@ final physical record can therefore be backed up and removed at startup. A
 malformed middle record, duplicate immutable ID, invalid reference, or invalid
 scientific value is `STORAGE_ERROR` and is not guessed or repaired.
 
+Tail recovery is planned read-only: the verifier first confirms that every
+other complete record/file is valid and that the malformed bytes are only the
+last logical record. It mutates nothing if another error exists. Likewise, a
+pending-import marker and every available target/prepared digest are validated
+as one recovery plan before the first roll-forward rename.
+
 Small mutable ledgers (`models.csv`, `jobs.csv`, `local_content.csv`) are loaded
 as keyed maps. An update writes the complete new ledger to `<name>.tmp`, verifies
 it, flushes/fsyncs it, and replaces the live file atomically. A leftover valid
@@ -90,6 +101,28 @@ has its recorded digest is complete; otherwise its still-present prepared file
 must match and is installed. If neither copy matches, startup fails closed.
 This small, import-specific roll-forward rule replaces a generic transaction
 system.
+
+During the three normal replacements the process write mutex is held and API
+reads continue using the previous immutable in-memory index generation. Only
+after all replacements and fsyncs succeed does one pointer swap expose the new
+runs/import/models together. A crash exposes no HTTP process; startup completes
+marker recovery before rebuilding indexes.
+
+Minimum commit units are deliberately explicit:
+
+- import: the marker-controlled replacement of runs, imports, and historical
+  models;
+- new prediction: one append-only prediction-run row;
+- publisher evaluation: one append-only evaluation row referencing already
+  committed runs;
+- content save/delete: one complete `local_content.csv` replacement;
+- model registration/status: one complete `models.csv` replacement;
+- job admission/status/result: one complete `jobs.csv` replacement.
+
+These units are independent. If the process stops after a run/evaluation/import
+commits but before its job-success rewrite, the scientific record remains valid
+and the recovered job is `PROCESS_INTERRUPTED`. Already committed article runs
+or content from a failed multi-article evaluation are not rolled back.
 
 No compaction, record versions, tombstones, transaction ledger, commit
 sequence, or pagination snapshot is part of schema version 1.
@@ -110,10 +143,12 @@ Exactly one data row. Unknown schema versions fail startup.
 model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha256,official_manifest_entry_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,class_order_json,max_tokens,padding_policy,adapter_config_sha256,runtime_scientific_json,status,artifact_available,runnable,status_detail,registered_at,last_validated_at
 ```
 
-- `family`: `bert`, `roberta`, `llama`, `mistral`, or the imported historical
-  family name allowed by the scientific contract.
+- `family`: exactly `bert`, `roberta`, `llama`, or `mistral`; user imports use
+  the same four recognized prefixes for historical virtual identities.
 - `status`: `compatible`, `historical_only`, `artifact_missing`,
   `dependency_missing`, `resource_unavailable`, or `invalid`.
+- `artifact_kind`: `state_dict`, `peft_directory`, or `historical_virtual`.
+- `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.
 - `artifact_locator` is deployment metadata and excluded from identity; API
   output reduces it to a root label and relative path.
 - Historical virtual models have no locator/artifact and are not runnable.
@@ -152,6 +187,9 @@ evaluation_id,publisher_id,normalized_hostname,model_id,method,method_version,in
   and evaluation model.
 - `method`: `majority_vote`, `ordinal_mean`, or `mean_probabilities`.
 - `partial=true` exactly when `used_count < requested_count`.
+- Article-list `requested_count` equals `used_count` and `partial=false`.
+  Publisher `requested_count` is the submitted `2..50`; `used_count` is
+  `2..requested_count`.
 
 Keeping ordered membership in this row avoids a separate join ledger and makes
 the scientific provenance directly inspectable.
@@ -167,7 +205,13 @@ import_id,source_kind,source_name,content_sha256,transport_sha256,schema_version
 - `source_name` is a basename/logical release name, never an absolute path.
 - Warnings may contain safe row number/error-category summaries but never raw
   rows, title/text/author values, or protected values.
-- A successful `(content_sha256,schema_version)` is unique and reused.
+- Every parse-complete `(content_sha256,schema_version)` is unique and reused,
+  regardless of whether its immutable result succeeded, had rejections, or
+  failed deterministically.
+- Any parse-complete digest/schema has one immutable import record, including a
+  deterministic failed result; repeating it returns that record. A structurally
+  unreadable source without a complete digest uses UUIDv4 and may be attempted
+  again. `transport_sha256` is exact upload bytes or exact CLI source-file bytes.
 
 `content_sha256` uses `prt-dataset-content-v1`: parse logical records in source
 order, project the supported public columns, serialize each projected record
@@ -187,11 +231,24 @@ The persisted job-type registry is: `evaluation`, `dataset_import`,
 - `job_type`: `evaluation`, `dataset_import`, or `model_validation`.
 - `status`: `queued`, `running`, `succeeded`, or `failed`.
 - `request_json` contains normalized URLs/IDs/options, never editorial content,
-  credentials, or unrestricted server paths.
+  credentials, or unrestricted server paths. An upload-backed queued job stores
+  its opaque `source_upload_id` filename token here; the application resolves it
+  only below `uploads/`. It is application-issued, not a client-supplied path.
 - `result_json` contains safe IDs, counters, and warnings.
-- Progress is approximate and macro-phase-only.
+- Progress is approximate and uses only the applicable macro phases defined by
+  the product specification for that job type.
 - A job left running at startup is rewritten failed with
-  `PROCESS_INTERRUPTED`; queued jobs remain queued.
+  `PROCESS_INTERRUPTED`. A queued evaluation remains queued. A queued upload-
+  based import/model validation remains queued only while its opaque relative
+  acquired-source identifier resolves to the expected private file; otherwise
+  it also fails `PROCESS_INTERRUPTED`. Running-job and orphan upload files are
+  deleted after pending-import recovery.
+
+A validated model upload is first atomically moved below `managed-models/` and
+then registered by a complete `models.csv` replacement. A stop between these
+independent commits can leave an unregistered managed artifact. It is harmless
+operational data, is ignored by startup, and becomes eligible for registration
+only through a later explicit scan and full validation.
 
 ### 5.7 `local_content.csv`
 
@@ -220,6 +277,14 @@ Within one import, identical outputs for an article/model are deduplicated.
 Different outputs for that same pair mark the pair conflicted and exclude every
 occurrence before publish. Other valid pairs remain accepted. One warning stores
 safe row numbers and `IMPORT_INVALID`; no rejection ledger is maintained.
+
+Logical source row numbers are one-based data-record positions within the CSV
+(header excluded), so quoted newlines do not change them. Structurally invalid
+input or zero accepted rows creates one `failed` import and publishes no runs or
+models. Valid rows plus rejected rows produce `succeeded_with_rejections`; only
+valid rows publish. A fully valid nonempty source is `succeeded`. Conflict
+resolution finishes over the complete staged source before the three-file
+publish, so a late conflict cannot leave an earlier occurrence visible.
 
 The default user upload limit is 512 MiB and 300,000 source rows. Parsing is
 incremental, but the demo may use disk staging and bounded in-memory conflict

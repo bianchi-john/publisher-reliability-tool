@@ -11,6 +11,9 @@ Copy files here and start a scan from the Models page or:
 publisher-reliability models scan
 ```
 
+Restart alone does not discover a newly copied file; it only refreshes the
+availability of identities already in `models.csv`.
+
 The application does not download weights/base models, manage Hugging Face
 credentials/caches, or interpret custom manifests.
 
@@ -45,11 +48,12 @@ mistral/fold_N/
 
 ## Safety and extension
 
-Configured roots must be real readable directories. Hidden/temp directories are
-skipped; any symlink in an artifact candidate rejects that candidate. API scan
-accepts no filesystem path. Upload safely accepts only recognized official
-file/optional PEFT layouts and rejects traversal, links, ambiguity, and unknown
-code.
+Missing configured roots are skipped; existing configured roots and the
+internal managed-upload root must be real readable directories. Hidden/temp
+directories are skipped; any symlink in an artifact
+candidate rejects that candidate. API scan accepts no filesystem path. Upload
+safely accepts only recognized official file/optional PEFT layouts and rejects
+traversal, links, ambiguity, and unknown code.
 
 Scientific identity includes artifact digest, official manifest-entry digest,
 fold, recipe, immutable base/tokenizer revisions, class order, input/padding,

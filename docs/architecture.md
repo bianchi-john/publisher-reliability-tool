@@ -93,10 +93,19 @@ macrophase boundaries. The browser polls every two seconds.
 
 No persistent event stream, cancellation, retry endpoint, priority queue, lane,
 or job-level parallelism exists. Publisher candidates are sequential. On
-restart, queued jobs are admitted again only while any acquired source they
-need still exists; otherwise they fail. A running job becomes failed with
+restart, queued jobs are admitted again when every acquired source they require
+still exists; otherwise they fail. A running job becomes failed with
 `PROCESS_INTERRUPTED` and its temporary source is cleaned up. The user uploads
 again rather than resuming or retrying it.
+
+Shutdown stops admission, requests the worker to stop, waits five seconds, then
+lets the process exit at its current boundary. It does not claim to cancel
+model/kernel/filesystem calls safely; the ordinary append/rename recovery rules
+handle the same state as an abrupt process stop.
+
+The complete startup order and the per-job macro phases are owned by the
+product specification. This architecture does not insert an HTTP-serving or
+background-worker phase before storage recovery and verification complete.
 
 ## 7. URL and publisher identity
 
@@ -116,7 +125,8 @@ Online resolution follows at most five safe redirects and uses the first
 same-publisher canonical link from the already downloaded HTML; it does not
 request that link. Article identity is the normalized canonical URL and its
 persisted ID is UUIDv5. Publisher identity is the normalized hostname with one
-leading `www.` removed; registrable-domain guessing is not used.
+leading `www.` removed; the URL port is not part of publisher identity and
+registrable-domain guessing is not used.
 
 ## 8. Retrieval boundary
 
@@ -130,14 +140,28 @@ second per hostname, and 10 MiB decompressed page size.
 network calls. HTML, authors, and extracted content stay in job memory. Only
 validated title/body may cross into `local_content.csv` after `save_local`;
 authors and raw HTML are always released. Offline mode injects a deny-all HTTP
-transport before application services are created.
+transport before application services are created, configures Transformers/
+tokenizers with local-files-only behavior, and never delegates retrieval to
+`newspaper3k`.
 
 ## 9. Model lifecycle
 
-Configured model roots must be real readable directories. Scanning never
+Missing configured model roots are skipped. Existing roots must be real
+readable directories. Scanning never
 follows symlinks; a candidate containing a symlink is rejected. API clients can
 scan configured roots or upload an artifact but cannot submit arbitrary server
 paths.
+
+The internal `<data-dir>/managed-models` directory is always an additional scan
+root for successful uploads. Startup does not discover new candidates or rerun
+fixtures; it only checks existence of already registered locators and marks a
+missing one `artifact_missing`. Full discovery/validation is explicit through
+the UI/API job or synchronous CLI scan.
+
+Upload validation moves a successful artifact into that root before the
+atomic model-ledger registration. A crash in between may leave an unregistered
+candidate. Startup ignores it; the next explicit scan may validate and register
+it. No separate upload transaction or orphan ledger is introduced.
 
 Built-in official recipes determine scientific model identity independently of
 filesystem location. States are `compatible`, `historical_only`,
@@ -176,6 +200,7 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Second process | Exit with `STORAGE_ERROR` |
 | Malformed incomplete final append | Back up that file and remove only the tail |
 | Other storage corruption | Exit without serving HTTP |
+| Queued upload job whose acquired source is missing | Mark `PROCESS_INTERRUPTED` |
 | Running job at restart | Mark `PROCESS_INTERRUPTED` |
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |
 | Missing artifact | Preserve historical model identity and runs |

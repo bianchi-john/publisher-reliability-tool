@@ -32,6 +32,7 @@ def main() -> int:
     traceability = (DOCS / "traceability.md").read_text(encoding="utf-8")
     api = (DOCS / "api-contract.md").read_text(encoding="utf-8")
     storage = (DOCS / "csv-storage-contract.md").read_text(encoding="utf-8")
+    deployment = (DOCS / "deployment.md").read_text(encoding="utf-8")
     normative = {
         path: path.read_text(encoding="utf-8")
         for path in [ROOT / "README.md", *sorted(DOCS.glob("*.md"))]
@@ -51,6 +52,31 @@ def main() -> int:
             "requirement/traceability mismatch: "
             f"untraced={sorted(requirements - traced_requirements)}, "
             f"unknown={sorted(traced_requirements - requirements)}"
+        )
+
+    expected_owners = {
+        "scientific-contract.md",
+        "csv-storage-contract.md",
+        "api-contract.md",
+        "deployment.md",
+        "product-specification.md",
+        "architecture.md",
+    }
+    ownership_block = re.search(
+        r"## Contract ownership and precedence\n\n(.*?)(?:\n\nFor an owner-specific)",
+        traceability,
+        re.DOTALL,
+    )
+    owners = (
+        set(re.findall(r"`([^`]+\.md)`", ownership_block.group(1)))
+        if ownership_block
+        else set()
+    )
+    if owners != expected_owners:
+        errors.append(
+            "normative owner mismatch: "
+            f"missing={sorted(expected_owners - owners)}, "
+            f"unknown={sorted(owners - expected_owners)}"
         )
 
     tests = set(at_ids)
@@ -126,6 +152,36 @@ def main() -> int:
         jobs = set(re.findall(r"`([a-z]+(?:_[a-z]+)*)`", section.group(1))) if section else set()
         if jobs != expected_jobs:
             errors.append(f"{label} job registry differs: {sorted(jobs)}")
+
+    expected_config = {
+        "PRT_PORT",
+        "PRT_DATA_DIR",
+        "PRT_MODELS_DIR",
+        "PRT_SEED_DATASET",
+        "PRT_OFFLINE",
+        "PRT_DEVICE",
+        "PRT_LOG_LEVEL",
+        "PRT_DATASET_UPLOAD_MAX_BYTES",
+        "PRT_MODEL_UPLOAD_MAX_BYTES",
+    }
+    config_rows = set(
+        re.findall(r"^\| `(PRT_[A-Z0-9_]+)` \|", deployment, re.MULTILINE)
+    )
+    if config_rows != expected_config:
+        errors.append(
+            "deployment configuration registry mismatch: "
+            f"missing={sorted(expected_config - config_rows)}, "
+            f"unknown={sorted(config_rows - expected_config)}"
+        )
+    referenced_config = set(
+        re.findall(r"\bPRT_[A-Z0-9_]+\b", "\n".join(normative.values()))
+    ) - {"PRT_VERSION"}
+    if referenced_config != config_rows:
+        errors.append(
+            "configuration reference mismatch: "
+            f"undocumented={sorted(referenced_config - config_rows)}, "
+            f"unreferenced={sorted(config_rows - referenced_config)}"
+        )
 
     removed_routes = ("/events", "/retry", "/cancel")
     for route in removed_routes:

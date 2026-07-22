@@ -63,7 +63,7 @@ contains one of these codes in its `error_code` field.
 | `INSUFFICIENT_ARTICLES` | 422 | Fewer than two compatible successful runs or requested count unmet |
 | `IMPORT_INVALID` | 422 | Dataset schema/container/row conflict prevents requested import result |
 | `STORAGE_ERROR` | 503 | Lock, structure, reference, write, fsync, or space failure |
-| `PROCESS_INTERRUPTED` | 409 | A running job ended with the process |
+| `PROCESS_INTERRUPTED` | 409 | A queued job lost its acquired source or a running job ended with the process |
 | `INTERNAL_ERROR` | 500 | Unexpected failure hidden behind a safe message |
 
 Synchronous status is exactly the table value. Job creation returns `202` once
@@ -91,9 +91,9 @@ Returns `200 {"status":"alive"}` when the event loop responds.
 ### `GET /health/ready`
 
 Returns `200 {"status":"ready"}` after CSV verification, indexes, frontend,
-and worker startup. It does not predict whether a future request has a model,
-saved body, or network. Before readiness it returns
-`503 {"status":"not_ready"}` outside the API error envelope.
+worker startup, and HTTP acceptance. Startup exposes no HTTP socket before that
+point, so there is no supported live-but-not-ready startup phase. Readiness does
+not predict whether a future request has a model, saved body, or network.
 
 ### `GET /api/v1/status`
 
@@ -200,22 +200,26 @@ filters are supported. This endpoint is also the model detail source.
 
 ### `POST /api/v1/models/scan`
 
-Body is `{}`. Creates a `model_validation` job that scans configured roots only,
-validates recognized official artifacts, and runs required fixtures. It accepts
-no path. Returns `202 {"job_id":"uuid"}`.
+Body is `{}`. Creates a `model_validation` job that scans configured roots and
+the internal managed-model root, validates recognized official artifacts, and
+runs required fixtures. It accepts no path. Returns
+`202 {"job_id":"uuid"}`.
 
 ### `POST /api/v1/models/upload`
 
-Multipart with one `file` (`.pt`, `.safetensors`, or `.tar.gz` only for the
-official optional PEFT directory layout), optional `family`, and optional
+Multipart with one `file` (`.pt`, or `.tar.gz` only for the official optional
+PEFT directory layout), optional `family`, and optional
 `fold_id`. The request is streamed to a private file, limited by
 `PRT_MODEL_UPLOAD_MAX_BYTES` (default 4 GiB), checksum-verified, and safely
 extracted without traversal or links. Optional PEFT archives are limited to
 10,000 regular entries and 4 GiB total extracted bytes. It then creates a
 `model_validation` job. Failed acquisition creates no job. Generic
 archives/manifests are unsupported. Successful validation atomically moves the
-artifact under `<data-dir>/managed-models`; failed validation deletes the
-temporary upload.
+artifact under `<data-dir>/managed-models`, then atomically registers it in
+`models.csv`; failed validation deletes the temporary upload. A crash between
+those two commits can leave an unregistered artifact in the managed root. It is
+not a model until a later explicit scan recognizes, validates, and registers
+it; startup does not discover it.
 
 ## 8. Evaluation
 
@@ -253,6 +257,15 @@ does not infer; if retrieval resolves to another article, the job returns
 local state is synchronous; network/canonical/extraction failures appear on the
 accepted job.
 
+Explicit lists run in submitted order, require distinct submitted and resolved
+canonical article IDs, and require every item to succeed before an evaluation
+row is written. Publisher stored-run candidates use effective
+latest-run time descending then canonical URL ascending; known URLs lacking the
+selected-model run use last-seen time descending then URL ascending; discovered
+links use normalized deduplicated homepage document order. If either workflow
+fails, any prediction run/content already committed remains an article-level
+result and is not presented as a publisher evaluation.
+
 ## 9. Jobs
 
 The persisted job-type registry is: `evaluation`, `dataset_import`,
@@ -285,8 +298,9 @@ status, counts, protected column names, safe warning summaries, and timestamps.
 Streams one `.csv` or `.csv.gz`, maximum 512 MiB and 300,000 logical data rows.
 It saves a private temporary source, computes transport SHA-256, then creates a
 `dataset_import` job. CSV.GZ decompression stops at 512 MiB uncompressed. An
-identical successful content digest resolves to the existing import during the
-job and creates no runs. ZIP and manifest upload are unsupported; the bundled
+identical parse-complete content digest/schema resolves to its existing
+successful, partial, or deterministic failed import during the job and creates
+no runs. ZIP and manifest upload are unsupported; the bundled
 manifest is startup/CLI-only. Terminal success/failure deletes the acquired
 source; an interrupted running job is failed and cleaned at startup.
 

@@ -14,7 +14,9 @@ classes or implementation call graphs.
 ### AT-001 — Native startup
 
 On clean Ubuntu 24.04 with locked dependencies, `publisher-reliability serve`
-starts the UI/API/docs on `127.0.0.1:8000` and readiness becomes ready.
+validates paths, reserves the port, initializes/verifies state, imports the seed,
+loads indexes, then starts UI/API/docs on `127.0.0.1:8000`; the first accepted
+readiness request is ready and no startup live-but-not-ready phase is exposed.
 
 ### AT-002 — Compose startup
 
@@ -34,13 +36,17 @@ the official model link, and actionable import/model instructions.
 ### AT-005 — Single writer and corrupt storage
 
 A second process using the data directory fails `STORAGE_ERROR`. A malformed
-middle row or broken reference also fails startup and serves no HTTP endpoint.
+middle row, broken reference, or existing partial/misnamed seven-ledger state
+also fails startup, creates no missing ledger, and serves no HTTP endpoint.
 
 ### AT-006 — Restarted jobs
 
-After a forced process restart, persisted queued jobs are queued again and jobs
-left running become failed with `PROCESS_INTERRUPTED`; committed runs and
-evaluations remain visible.
+On shutdown, admission stops and the process exits within five seconds even if
+non-cancellable work remains. After restart, queued evaluations and queued
+upload jobs with intact acquired sources are queued again; queued upload jobs
+without source and all jobs left running become failed with
+`PROCESS_INTERRUPTED`. Pending import recovery runs before temp cleanup, and
+committed runs/evaluations/imports remain visible even if their job is failed.
 
 ### AT-007 — Seven exact ledgers
 
@@ -63,7 +69,9 @@ file is not treated as committed state.
 
 Killing import between its three prepared-file replacements causes startup to
 roll forward the exact digest-matching run/import/model files once; mismatched
-marker data fails `STORAGE_ERROR` rather than guessing.
+marker data fails `STORAGE_ERROR` rather than guessing. Concurrent API reads see
+the complete old in-memory generation until one complete new generation is
+published.
 
 ## B. Dataset and import
 
@@ -185,12 +193,15 @@ inference and stores nothing if canonical identity changes.
 
 Two to fifty distinct same-publisher URLs create one evaluation containing the
 exact ordered article/run IDs. Duplicate normalized URLs or mixed publishers
-return `INVALID_INPUT` and create no evaluation.
+return `INVALID_INPUT` and create no evaluation. Candidates run in submitted
+order; URLs converging to one canonical article also fail. Any later failure
+leaves earlier article-level runs/content valid but creates no evaluation.
 
 ### AT-030 — Publisher evaluation
 
 A publisher request uses eligible stored runs first, then sequential known/new
-candidates, stops at requested count, and never creates extra run/content.
+candidates under the documented timestamp/URL/document-order rules, stops at
+requested count, and never creates extra run/content.
 With at least two but fewer than requested, `allow_partial=true` records a
 partial evaluation; false returns `INSUFFICIENT_ARTICLES`.
 
@@ -226,7 +237,10 @@ CPU float32 tolerance before status `compatible`.
 
 Unknown, renamed, symlinked, traversal-containing, mismatching, or executable-
 code-dependent artifacts never load or create a runnable model. Scans accept no
-API path outside configured roots.
+API path outside configured roots. Killing a validated upload after its atomic
+move but before model-ledger registration leaves a non-runnable, unregistered
+candidate; restart ignores it and only a later explicit full scan may register
+it.
 
 ### AT-037 — Missing dependency or resource
 
@@ -237,7 +251,8 @@ with safe guidance; browsing remains usable and no automatic download starts.
 
 Removing a registered artifact changes availability/runnability only. Its exact
 historical runs/evaluations remain browseable and aggregable; restoring identical
-bytes restores the same model ID.
+bytes restores the same model ID. Restart refreshes availability of that known
+locator but does not discover an unrelated newly copied artifact until scan.
 
 ### AT-039 — Scientific identity portability
 
@@ -270,7 +285,8 @@ path.
 
 Evaluation, dataset import, and model validation jobs move through only their
 documented macro phases and terminal state. The UI observes them by polling;
-there is no event, cancel, or retry route.
+there is no event, cancel, or retry route. Equivalent CLI verify/import/scan
+commands execute synchronously and create no job requiring a server worker.
 
 ### AT-044 — Restart persistence
 
@@ -308,7 +324,7 @@ demo-scale observation, not a larger-input guarantee.
 
 ### AT-049 — Filesystem interruption matrix
 
-Fault injection around immutable append, mutable rename, and the two import
+Fault injection around immutable append, mutable rename, and the three import
 marker replacements yields either the old or documented rolled-forward state,
 never silent malformed success.
 

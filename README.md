@@ -61,7 +61,13 @@ observability or fault recovery.
 ## Quick start
 
 The normative native reference platform is Ubuntu 24.04, x86-64, Python 3.12.
-Once the implementation and locked dependencies are present:
+This repository revision contains the normative contracts, dataset, and dataset
+preparation/verification scripts, but not yet the backend, frontend, package,
+Compose file, OpenAPI snapshot, dependency lock, or official model manifest.
+The commands below are the target application contract and become executable
+once those implementation artifacts are added.
+
+With the implementation and locked dependencies present:
 
 ```bash
 uv sync --frozen
@@ -84,8 +90,9 @@ Model artifacts are downloaded manually from:
 <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
 Copy supported files under `./models`, then run a scan from the Models page or
-restart the application. The application does not manage downloads, Hugging
-Face credentials, or dependency caches.
+the `models scan` CLI command. Restart only refreshes availability of already
+registered models; it does not discover new files. The application does not
+manage downloads, Hugging Face credentials, or dependency caches.
 
 Strict offline mode is:
 

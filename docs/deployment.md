@@ -39,6 +39,7 @@ services:
     image: publisher-reliability-tool:${PRT_VERSION:-dev}
     restart: "no"
     init: true
+    stop_grace_period: 7s
     user: "10001:10001"
     ports:
       - "127.0.0.1:8000:8000"
@@ -49,6 +50,9 @@ services:
       PRT_SEED_DATASET: "/app/dataset/predictions"
       PRT_OFFLINE: "${PRT_OFFLINE:-false}"
       PRT_DEVICE: "${PRT_DEVICE:-auto}"
+      PRT_LOG_LEVEL: "${PRT_LOG_LEVEL:-info}"
+      PRT_DATASET_UPLOAD_MAX_BYTES: "${PRT_DATASET_UPLOAD_MAX_BYTES:-536870912}"
+      PRT_MODEL_UPLOAD_MAX_BYTES: "${PRT_MODEL_UPLOAD_MAX_BYTES:-4294967296}"
     volumes:
       - ./data:/data
       - ./models:/models:ro
@@ -83,7 +87,7 @@ Precedence is CLI, environment, default. No configuration file is loaded.
 | Variable | Default | Rule |
 | --- | --- | --- |
 | `PRT_PORT` | `8000` | Integer `1..65535` |
-| `PRT_DATA_DIR` | `./data` | Writable directory, one process lock |
+| `PRT_DATA_DIR` | `./data` | Created after port reservation if absent; existing directory or parent must be writable; one process lock |
 | `PRT_MODELS_DIR` | `./models` | `:`-separated readable roots; missing allowed |
 | `PRT_SEED_DATASET` | `./dataset/predictions` | Official manifest directory; missing allowed |
 | `PRT_OFFLINE` | `false` | Lowercase boolean |

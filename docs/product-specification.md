@@ -93,9 +93,15 @@ publisher-reliability storage verify
 The host is fixed to `127.0.0.1`. `dataset verify` accepts CSV, CSV.GZ, or the
 official manifest directory and changes no state. `dataset import` accepts CSV
 or CSV.GZ and uses the same importer as the UI. `models scan` scans configured
-roots only. `storage verify` checks headers, row types, identifiers, references,
+roots plus the internal managed-upload root. `storage verify` checks headers,
+row types, identifiers, references,
 and malformed final rows. There is no compaction or migration command in schema
 version 1.
+
+The non-server commands perform their work synchronously and print macro
+progress. They call the same verification/import/model-scan service functions
+as the server, but do not create a persisted job that would require a running
+worker.
 
 Exit codes are `0` success, `2` invalid configuration/input, `3` invalid
 dataset/storage, and `1` unexpected runtime failure.
@@ -105,26 +111,40 @@ dataset/storage, and `1` unexpected runtime failure.
 Startup order is:
 
 1. parse configuration;
-2. bind and retain the loopback socket without accepting requests, proving the
+2. validate existing data/model/seed path types and permissions without
+   creating them; missing seed/model roots remain allowed;
+3. bind and retain the loopback socket without accepting requests, proving the
    port is available before data-directory mutation;
-3. acquire the exclusive data-directory lock;
-4. create a fresh seven-ledger store or verify the existing one;
-5. remove an incomplete final physical row only from an append-only ledger;
-   any other structural corruption fails startup;
-6. verify/import the optional bundled release by content digest;
-7. load lightweight indexes and model records;
-8. requeue `queued` jobs and mark jobs left `running` as
-   `PROCESS_INTERRUPTED`;
-9. start the single long-job worker and HTTP serving.
+4. create the data directory and operational subdirectories if absent, then
+   acquire its exclusive lock; creation occurs only after port reservation;
+5. create all seven ledgers only when `state/` is absent; an existing partial
+   state directory is `STORAGE_ERROR`, not a fresh store;
+6. recover a checksum-valid pending import or remove one incomplete final
+   physical record from an append-only ledger;
+7. verify the complete store before any seed/model mutation;
+8. verify/import the optional bundled release by content digest;
+9. refresh only availability of registered artifact locators; discovering or
+   fully validating model files remains an explicit scan;
+10. load lightweight indexes;
+11. leave source-free queued jobs queued; leave upload-backed queued jobs
+    queued only when every acquired source they require still exists; mark an
+    upload-backed queued job with a missing source and every `running` job
+    failed with `PROCESS_INTERRUPTED`;
+12. start the FIFO worker and accept HTTP requests; readiness is then `ready`.
+
+Recovery performs only the two actions in step 6. Any other structural
+corruption fails startup without completing, migrating, or guessing state.
 
 Missing seed/models are valid empty/history-only modes. An occupied port causes
 no data mutation. Corrupt storage closes the reserved socket and starts no HTTP
 server.
 
-On `SIGINT`/`SIGTERM`, new jobs stop being accepted. The current macro-step is
-allowed up to 30 seconds to finish; the process never exits during an atomic
-file replacement or CSV row fsync. A still-running job is marked interrupted on
-the next startup. No attempt is made to resume partially executed inference.
+On `SIGINT`/`SIGTERM`, new jobs stop being accepted and the worker receives a
+stop request. The process waits at most five seconds, then exits even if a
+non-cancellable retrieval, model call, or filesystem call remains. Atomic
+replacement and append-tail recovery make this equivalent to a crash at that
+boundary. On next startup the job is failed as interrupted; already committed
+runs, evaluations, and imports remain valid. No inference/upload is resumed.
 
 ## 7. Main research workflow
 
@@ -173,6 +193,16 @@ aggregate with 2..requested successful runs; otherwise an unmet count fails.
 Every evaluation stores the ordered article and prediction-run IDs actually
 used. A later run cannot change an earlier evaluation.
 
+Explicit-list candidates run in submitted order and all must succeed. Submitted
+and online-resolved canonical article IDs must remain distinct; otherwise the
+job fails `INVALID_INPUT`. On any failure no evaluation is written, while
+already committed individual runs/content stay valid. Publisher stored
+candidates are ordered by effective latest-run time
+descending then canonical URL ascending. Known URLs without the selected-model
+run use last-seen time descending then URL ascending. Newly discovered links
+use homepage document order after normalization and deduplication. Publisher
+failure or partial success does not roll back individual runs/content.
+
 ### 7.4 Import
 
 The API accepts one CSV or CSV.GZ upload. It writes a private temporary file,
@@ -185,7 +215,8 @@ The user schema requires `url` and at least one model family's predicted class
 and fold. `title`, `text`, `authors`, source-local ID, and domain are optional;
 editorial values are discarded and domain is recomputed. Conflicting outputs
 for the same canonical article/model in one source reject that pair before
-publication. A repeated successful content digest returns the existing import.
+publication. A repeated parse-complete content digest/schema returns its
+existing successful, partial, or deterministic failed import.
 The selected source file is never modified.
 
 ### 7.5 Saved content and purge
@@ -211,7 +242,9 @@ integer `0..100` updated at these macro phases only:
 
 One FIFO worker executes jobs. The frontend polls the job endpoint every two
 seconds; SSE, cancellation, and retry are absent. After restart, queued jobs run
-again from their persisted request; running jobs fail as interrupted.
+again only when every acquired source they require still exists. A queued job
+with a missing source and every running job fail as `PROCESS_INTERRUPTED`;
+temporary files are cleaned after pending-import recovery.
 
 The UI has Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs.
 It favors provenance and scientific explanation over administration. Charts
@@ -239,7 +272,7 @@ and error states use clear English text.
 | FR-015 | New web inference shall use safe retrieval, unchanged extracted text, and deterministic English validation. |
 | FR-016 | Strict offline mode shall prevent every application-initiated outbound HTTP request. |
 | FR-017 | Essential state shall survive restart in the seven documented CSV ledgers. |
-| FR-018 | Long operations shall use the three simple persisted job types and polling. |
+| FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
 | FR-020 | UI and API shall expose model, fold, run, contributing articles, method, and scientific limitations. |
 

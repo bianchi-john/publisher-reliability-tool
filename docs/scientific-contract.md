@@ -57,6 +57,8 @@ prefixes are `bert`, `roberta`, `llama`, and `mistral`.
 Projection rules:
 
 - normalize URL, derive UUIDv5 article ID, recompute publisher hostname/ID;
+- exclude any URL port from publisher hostname/ID while retaining a valid
+  non-default port in canonical article URL;
 - discard editorial/blocked values before staging or error formatting;
 - reject a non-empty source domain that disagrees after normalization;
 - validate class `0..4`, fold `1..5`, and complete probability vector;
