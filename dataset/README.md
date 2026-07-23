@@ -1,52 +1,73 @@
-# Prediction-only dataset
+# Prediction dataset
 
-The only dataset tracked in this repository is the public paper-associated
-prediction release: `predictions/manifest.json` plus its listed CSV parts. The
-manifest contains integrity and release metadata; the listed prediction CSV
-parts contain the dataset records. Private source data and separate sample
-datasets are never tracked.
+> This directory contains the project’s only dataset: public model predictions,
+> without ground-truth labels or article content.
 
-Generate the public release from a private `.csv`, `.csv.gz`, or single-CSV ZIP
-using the repository preparation script (ZIP is a build-time input only, not a
-runtime import format):
+## Contents
 
-```bash
-python3 scripts/prepare_public_dataset.py \
-  /path/to/fullDataset.csv.gz \
-  dataset/predictions \
-  --duplicate-policy first
+```text
+predictions/
+├── manifest.json      # schema, counts and SHA-256 checksums
+└── predictions.csv    # URLs, model classes, folds and probabilities
 ```
 
-The generator retains URL, recomputed domain, model class, fold, and available
-probabilities. It writes empty `title`, `text`, and `authors` compatibility
-fields and excludes protected provider columns/values. The first exact URL in
-source order wins; the manifest records source, duplicate, skipped, part-size,
-part-SHA-256, and `prt-dataset-content-v1` counts/digests.
+| Measure | Value |
+| --- | ---: |
+| Source rows | 19,476 |
+| Released URLs | 19,429 |
+| Derived articles | 19,411 |
+| Prediction runs | 77,708 |
+| Model/fold identities | 20 |
 
-Verify before commit:
+`title`, `text` and `authors` are empty compatibility columns. Protected
+provider labels, scores and metadata are not included.
+
+## Verify
+
+```bash
+publisher-reliability dataset verify ./dataset/predictions
+```
+
+Or use the standalone script:
 
 ```bash
 python3 scripts/verify_public_dataset.py dataset/predictions
 ```
 
-With the private source available, add `--source PATH` for field-by-field
-projection verification.
+Verification checks the schema, row counts, part size, SHA-256 and content
+digest without changing application state.
 
-The current release has 19,476 source rows, 19,429 released exact URLs, 42
-duplicate groups, and 47 skipped later rows. Runtime canonicalization derives
-19,411 articles, 77,708 runs, and 20 historical family/fold identities.
+## Import format
 
-Runtime user import intentionally supports only CSV and CSV.GZ. The browser/API
-spools one local upload; CLI accepts one path. Default supported limits are
-512 MiB and 300,000 logical rows. ZIP, generic manifests, arbitrary directories,
-and multi-gigabyte inputs are outside the demo. The official bundled manifest
-directory remains a startup/verification input.
+User imports may be `.csv` or `.csv.gz` and require:
 
-User schema needs `url` and at least one family label/fold pair. Source ID,
-domain, title, text, and authors are optional compatibility fields. Editorial
-and protected values are discarded before staging. CSV and CSV.GZ with the same
-projected record sequence share an import digest and are not duplicated.
+- `url`;
+- at least one `<family>_predicted_label`;
+- the matching `<family>_fold_id`.
 
-Generated outputs/database arrangement are covered only by the limited CC0
-dedication in `../MODEL-OUTPUT-LICENSE.md`; URLs, publishers, source pages,
-trademarks, models, and weights are not.
+Supported families are `bert`, `roberta`, `llama` and `mistral`. Probability
+columns are optional, but a vector must contain all five classes.
+
+Titles, text, authors and protected values are discarded before persistence.
+Equivalent CSV and CSV.GZ contents share one import identity.
+
+## Rebuild the public release
+
+This is needed only when preparing a new release from an authorized private
+source:
+
+```bash
+python3 scripts/prepare_public_dataset.py \
+  /path/to/source.csv.gz \
+  dataset/predictions \
+  --duplicate-policy first
+```
+
+The generator never modifies the source file.
+
+## License
+
+The limited CC0 dedication for generated outputs and database arrangement is
+described in [MODEL-OUTPUT-LICENSE.md](../MODEL-OUTPUT-LICENSE.md). URLs,
+publishers, source pages, trademarks, models and weights remain third-party
+material.

@@ -1,71 +1,20 @@
 # Publisher Reliability Tool
 
-Publisher Reliability Tool (PRT) is the local research demo associated with
-*From Articles to Publishers: Aggregating Language Model Predictions for News
-Source Reliability Inference*. It is a reference implementation for inspecting
-released predictions, running compatible article classifiers, and reproducing
-publisher-level aggregation. It is not a hosted service or a production data
-platform.
+> A local research application for exploring article predictions and
+> aggregating them at publisher level.
 
-The supported path is intentionally short:
+**Local only** · **Prediction-only data** · **Inspectable CSV storage**
 
-```text
-install -> start locally -> inspect bundled predictions -> copy model files
--> scan models -> evaluate articles or a publisher -> inspect provenance
-```
+PRT turns the bundled model outputs into browsable articles, publishers and
+reproducible evaluations. It serves a web interface and REST API at
+`http://127.0.0.1:8000`.
 
-The application serves one local web UI and REST API at
-`http://127.0.0.1:8000`. Docker Compose publishes the same loopback address.
-There are no users, authentication, remote deployment mode, reverse proxy
-configuration, telemetry, or cloud services.
+> [!IMPORTANT]
+> Results are model predictions—not facts, fact checks or ground-truth ratings.
 
-## Research-demo scope
+## Start
 
-The core demo provides:
-
-- verification and automatic import of the bundled public prediction release;
-- CSV and CSV.GZ user imports through the CLI or local browser;
-- browsing of articles, publishers, immutable prediction runs, imports, jobs,
-  and publisher evaluations;
-- manual placement and scanning of official local model artifacts;
-- BERT and RoBERTa CPU inference as the core reproducibility target;
-- optional experimental Llama and Mistral loaders when suitable GPU hardware
-  and dependencies are already available;
-- single-article, explicit article-list, and publisher evaluation;
-- `majority_vote`, `ordinal_mean`, and `mean_probabilities` with exact
-  contributing prediction-run IDs;
-- strict offline mode and persistent essential results in inspectable CSV.
-
-The demo deliberately omits general idempotency keys, SSE, job retry and
-cancellation, online compaction, ZIP imports, custom model manifests, automatic
-model downloads, public-network binding, accounts, and production-grade
-observability or fault recovery.
-
-## Scientific and privacy boundaries
-
-- Results are model predictions, not facts or ground-truth ratings.
-- Every run records the exact model/fold and every publisher evaluation records
-  the exact immutable runs it used.
-- Protected reference-provider labels, scores, ranges, and metadata never enter
-  the repository or runtime store.
-- Authors and raw HTML are never persisted.
-- Extracted title/body are discarded by default and persist only after explicit
-  `save_local` consent. They are excluded from ordinary API responses, jobs,
-  logs, and exports.
-- `reuse` returns the latest exact-model run without creating another run.
-  `recompute` always creates a new immutable run.
-- Missing historical probabilities remain missing.
-- Model artifacts are loaded only by built-in recipes; artifact code is never
-  executed.
-
-## Quick start
-
-The normative native reference platform is Ubuntu 24.04, x86-64, Python 3.12.
-This repository now contains an executable Python package, local web
-application, REST API/OpenAPI document, prediction importer, CSV persistence,
-FIFO job worker, browser UI, locked dependencies, and Compose service.
-
-Install `uv` 0.8.3, then:
+Requires Ubuntu/Linux, Python 3.12 and [`uv` 0.8.3](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --frozen
@@ -74,108 +23,103 @@ publisher-reliability dataset verify ./dataset/predictions
 publisher-reliability serve
 ```
 
-Then open `http://127.0.0.1:8000/`. A missing seed directory or model directory
-is allowed; the UI explains how to import data or place official model files.
-On first startup the bundled release is converted into 77,708 immutable
-prediction runs, 20 historical model/fold identities, and 19,411 derived
-articles. Restarting with the same data directory reuses that import.
+Open **<http://127.0.0.1:8000>**. API documentation is available at
+**<http://127.0.0.1:8000/api/docs>**.
 
-Docker Compose is an equivalent convenience path:
+### Docker
 
 ```bash
+mkdir -p data models
+sudo chown -R 10001:10001 data
 docker compose up --build
 ```
 
-Run the automated suite with:
+The service is published only on `127.0.0.1:8000`.
+
+## What works
+
+| Area | Available |
+| --- | --- |
+| Dataset | Verified automatic import of the bundled predictions |
+| Exploration | Articles, publishers, runs, models, imports and jobs |
+| Evaluation | Single-article reuse and publisher aggregation |
+| Methods | Majority vote, ordinal mean and mean probabilities |
+| Import | Privacy-preserving CSV and CSV.GZ import |
+| Persistence | Seven readable CSV ledgers under `data/state` |
+| Access | Browser UI, REST API, OpenAPI and CLI |
+| Offline | Browsing, reuse and stored aggregation |
+
+The bundled release produces:
+
+- **19,411** derived articles;
+- **77,708** immutable prediction runs;
+- **20** historical model/fold identities.
+
+Imports are identified by content digest, so restarting or importing the same
+dataset again does not duplicate data.
+
+## Current limit
+
+The repository does not distribute model weights. This version works with
+stored predictions, but does not yet retrieve new pages or run BERT/RoBERTa
+inference. Operations requiring a new prediction fail explicitly instead of
+creating synthetic results.
+
+Official artifacts are available separately from
+[OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)
+and remain outside version control.
+
+## Privacy and reproducibility
+
+- Protected labels, scores and provider metadata are never persisted.
+- Imported titles, article text and authors are discarded.
+- Authors and raw HTML have no storage field.
+- Every publisher evaluation records the exact model, articles and runs used.
+- Missing historical probabilities remain missing.
+- The only tracked dataset is the prediction release in `dataset/predictions`.
+
+See [dataset/README.md](dataset/README.md) for the dataset format.
+
+## Useful commands
 
 ```bash
+# Verify a dataset without changing application state
+publisher-reliability dataset verify PATH
+
+# Import predictions into the configured data directory
+publisher-reliability dataset import PATH
+
+# Verify the seven CSV ledgers
+publisher-reliability storage verify
+
+# Run in strict offline mode
+publisher-reliability serve --offline
+
+# Run the test suite
 uv run --frozen python -m unittest discover -s tests -v
 ```
 
-### Implementation status
+## Project guide
 
-The current executable milestone covers the complete prediction-only browsing
-and stored-aggregation path: manifest verification, privacy-preserving CSV/
-CSV.GZ import, deterministic URL and UUID identity, the seven CSV ledgers,
-single-writer locking, article/publisher/model/import/job views, all three
-aggregation formulas, persisted evaluations, article export, Host validation,
-offline mode, CLI, API, and UI.
-
-Official neural artifacts are not distributed by this repository. Historical
-predictions can be reused and aggregated immediately. New page retrieval,
-artifact validation, and BERT/RoBERTa inference remain unavailable until the
-official model manifest, weights, and optional model dependencies are supplied;
-requests that need them fail explicitly instead of fabricating a prediction.
-
-Model artifacts are downloaded manually from:
-
-<https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
-
-Keep manually downloaded artifacts under `./models`; they are intentionally
-outside version control. The current milestone does not load them yet and does
-not manage downloads, Hugging Face credentials, or dependency caches.
-
-Strict offline mode is:
-
-```bash
-publisher-reliability serve --offline
-```
-
-Browsing, reuse, and aggregation of stored results continue to work. Retrieval
-or recomputation that requires the network fails with `NETWORK_REQUIRED`.
-
-## Data and extension points
-
-Runtime state lives under `./data/state` in seven CSV ledgers. Prediction runs
-and evaluations are immutable append-only records; small mutable ledgers are
-rewritten through a temporary file and atomic rename. Articles and publishers
-are derived views over prediction runs rather than a second transactional data
-model. See `docs/csv-storage-contract.md`.
-
-The implementation is organized around five concrete boundaries:
-
-- `Storage` — CSV loading and atomic writes;
-- `ModelLoader` — one explicit loader per supported family;
-- `ArticleRetriever` — safe retrieval and extraction;
-- `InferenceService` — exact model input and prediction provenance;
-- `AggregationMethod` — deterministic publisher formulas.
-
-A researcher extends the demo by adding a Python implementation and fixture at
-one of these boundaries, then updating the relevant contract and acceptance
-test. There is no plugin framework or universal manifest language.
-
-## Normative documents
-
-| Document | Owns |
+| Path | Purpose |
 | --- | --- |
-| `docs/product-specification.md` | Demo scope, workflows, UI, jobs, requirements |
-| `docs/architecture.md` | Modules, local process, data flow, extension points |
-| `docs/api-contract.md` | Local REST endpoints, schemas, pagination, errors |
-| `docs/csv-storage-contract.md` | Seven CSV ledgers, identifiers, write/recovery rules |
-| `docs/scientific-contract.md` | Model/input identity, formulas, provenance, warnings |
-| `docs/deployment.md` | Native and simple Compose operation |
-| `docs/acceptance-tests.md` | Core, optional GPU, and optional stress/fault tests |
-| `docs/traceability.md` | Requirement-to-test mapping and precedence |
+| `src/publisher_reliability/` | Application, API, services and storage |
+| `dataset/predictions/` | Public prediction-only release |
+| `models/` | Local, untracked model artifacts |
+| `docs/` | Scientific, API, storage and deployment contracts |
+| `tests/` | Automated tests |
 
-Owner precedence for an overlapping subject is scientific, storage, API,
-deployment, then product. Architecture constrains cross-cutting boundaries but
-does not redefine an owner-specific schema or formula. Acceptance tests verify
-requirements and do not create new ones.
+Start with:
 
-## Repository data boundary
+- [Product specification](docs/product-specification.md)
+- [API contract](docs/api-contract.md)
+- [Scientific contract](docs/scientific-contract.md)
+- [CSV storage contract](docs/csv-storage-contract.md)
+- [Deployment guide](docs/deployment.md)
 
-The only dataset tracked in this repository is the public, prediction-only
-release under `dataset/predictions`. Its CSV contains URLs and model outputs,
-with empty `title`, `text`, and `authors` compatibility columns; the accompanying
-manifest provides integrity and release metadata. Private source data,
-source-page content, sample datasets, and model weights are not tracked.
+## License
 
-Software and documentation use Apache-2.0. Project-owned model outputs and
-database arrangement are dedicated under CC0-1.0 by
-`MODEL-OUTPUT-LICENSE.md`; third-party URLs, pages, names, trademarks, models,
-and weights are excluded from that dedication.
-
-The demo is releasable when the core CPU acceptance suite passes natively and
-with Compose, the bundled dataset verifies, OpenAPI matches the API contract,
-and the offline smoke test observes no outbound connection. Optional GPU and
-stress/fault suites report separately.
+Software and documentation are Apache-2.0. Project-owned prediction outputs and
+database arrangement use the limited CC0 dedication described in
+[MODEL-OUTPUT-LICENSE.md](MODEL-OUTPUT-LICENSE.md). Third-party URLs, pages,
+names, trademarks, models and weights are excluded.
