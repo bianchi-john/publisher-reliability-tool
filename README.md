@@ -143,10 +143,11 @@ requirements and do not create new ones.
 
 ## Repository data boundary
 
-`dataset/sampleDataset.csv` is synthetic. The public prediction release under
-`dataset/predictions` contains URLs and model outputs, with empty `title`,
-`text`, and `authors` compatibility columns. Private source data, source-page
-content, and model weights are not tracked.
+The only dataset tracked in this repository is the public, prediction-only
+release under `dataset/predictions`. Its CSV contains URLs and model outputs,
+with empty `title`, `text`, and `authors` compatibility columns; the accompanying
+manifest provides integrity and release metadata. Private source data,
+source-page content, sample datasets, and model weights are not tracked.
 
 Software and documentation use Apache-2.0. Project-owned model outputs and
 database arrangement are dedicated under CC0-1.0 by

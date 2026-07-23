@@ -51,7 +51,7 @@
   "content_digest_sha256": "731c5661d6b6f8cfa75076dc8ef22af49d92ed11250a6b684b0b6af0de390b71",
   "parts": [
     {
-      "file": "predictions-part-0001.csv",
+      "file": "predictions.csv",
       "rows": 19429,
       "bytes": 7089160,
       "sha256": "db7400d9e507cc3ac1a6b3f14011f1cd0f1fe4a7713e3008b7cf3e9f03ae89ea"

@@ -1,3 +1,0 @@
-article_id,url,title,text,authors,domain,bert_predicted_label,bert_fold_id,roberta_predicted_label,roberta_fold_id,llama_predicted_label,llama_fold_id,mistral_predicted_label,mistral_fold_id,bert_prob_class_0,bert_prob_class_1,bert_prob_class_2,bert_prob_class_3,bert_prob_class_4,roberta_prob_class_0,roberta_prob_class_1,roberta_prob_class_2,roberta_prob_class_3,roberta_prob_class_4
-1,https://example.com/news/synthetic-article-one,,,,example.com,3,1,2,1,3,1,2,1,0.10,0.15,0.25,0.30,0.20,0.12,0.18,0.31,0.24,0.15
-2,https://example.com/news/synthetic-article-two,,,,example.com,2,4,2,4,2,4,3,4,0.08,0.12,0.45,0.25,0.10,0.06,0.14,0.48,0.22,0.10

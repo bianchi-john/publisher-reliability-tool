@@ -1,8 +1,10 @@
-# Dataset input and public release
+# Prediction-only dataset
 
-`sampleDataset.csv` is synthetic. The public paper-associated prediction
-release is `predictions/manifest.json` plus its listed CSV parts. Private source
-data is never tracked.
+The only dataset tracked in this repository is the public paper-associated
+prediction release: `predictions/manifest.json` plus its listed CSV parts. The
+manifest contains integrity and release metadata; the listed prediction CSV
+parts contain the dataset records. Private source data and separate sample
+datasets are never tracked.
 
 Generate the public release from a private `.csv`, `.csv.gz`, or single-CSV ZIP
 using the repository preparation script (ZIP is a build-time input only, not a
