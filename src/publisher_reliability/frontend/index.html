@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Inspect prediction provenance and publisher aggregation locally.">
+  <title>Publisher Reliability Tool</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="#dashboard" aria-label="Publisher Reliability Tool home">
+      <span class="brand-mark">PR</span>
+      <span><strong>Publisher Reliability</strong><small>Research workspace</small></span>
+    </a>
+    <div id="system-state" class="system-state" aria-live="polite">Connecting…</div>
+  </header>
+  <div class="shell">
+    <nav aria-label="Primary">
+      <a href="#dashboard" data-page="dashboard">Dashboard</a>
+      <a href="#evaluate" data-page="evaluate">Evaluate</a>
+      <a href="#articles" data-page="articles">Articles</a>
+      <a href="#publishers" data-page="publishers">Publishers</a>
+      <a href="#models" data-page="models">Models</a>
+      <a href="#imports" data-page="imports">Imports</a>
+      <a href="#jobs" data-page="jobs">Jobs</a>
+      <a href="/api/docs">API docs <span aria-hidden="true">↗</span></a>
+    </nav>
+    <main id="content" tabindex="-1">
+      <div class="loading">Loading research workspace…</div>
+    </main>
+  </div>
+  <footer>
+    Predictions are estimates, not facts or ground-truth ratings.
+  </footer>
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

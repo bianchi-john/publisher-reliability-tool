@@ -32,7 +32,6 @@ cache/
 models/*
 !models/README.md
 dataset/*
-!dataset/sampleDataset.csv
 !dataset/README.md
 !dataset/predictions/
 !dataset/predictions/*.csv

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "publisher-reliability-tool"
+version = "0.1.0"
+description = "Local research demo for inspecting article predictions and publisher aggregation"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+dependencies = [
+  "fastapi==0.116.1",
+  "httpx==0.28.1",
+  "idna==3.10",
+  "langdetect==1.0.9",
+  "pydantic==2.11.7",
+  "python-multipart==0.0.20",
+  "uvicorn==0.35.0",
+]
+
+[project.optional-dependencies]
+models = [
+  "newspaper3k==0.2.8",
+  "torch==2.7.1",
+  "transformers==4.53.2",
+]
+test = [
+  "pytest==8.4.1",
+]
+
+[project.scripts]
+publisher-reliability = "publisher_reliability.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+publisher_reliability = ["frontend/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

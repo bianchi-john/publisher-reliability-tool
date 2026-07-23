@@ -14,8 +14,8 @@ outside scope.
 
 ## 2. Native start
 
-Reference platform: Ubuntu 24.04 LTS x86-64. Use the committed `uv.lock` and
-documented `uv` version:
+Reference platform: Ubuntu 24.04 LTS x86-64. Use `uv` 0.8.3 with the committed
+`uv.lock`:
 
 ```bash
 uv sync --frozen

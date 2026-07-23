@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    image: publisher-reliability-tool:${PRT_VERSION:-dev}
+    restart: "no"
+    init: true
+    stop_grace_period: 7s
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PRT_PORT: "8000"
+      PRT_DATA_DIR: "/data"
+      PRT_MODELS_DIR: "/models"
+      PRT_SEED_DATASET: "/app/dataset/predictions"
+      PRT_OFFLINE: "${PRT_OFFLINE:-false}"
+      PRT_DEVICE: "${PRT_DEVICE:-auto}"
+      PRT_LOG_LEVEL: "${PRT_LOG_LEVEL:-info}"
+      PRT_CONTAINER_INTERNAL: "true"
+      PRT_DATASET_UPLOAD_MAX_BYTES: "${PRT_DATASET_UPLOAD_MAX_BYTES:-536870912}"
+      PRT_MODEL_UPLOAD_MAX_BYTES: "${PRT_MODEL_UPLOAD_MAX_BYTES:-4294967296}"
+    volumes:
+      - ./data:/data
+      - ./models:/models:ro
+      - ./dataset:/app/dataset:ro

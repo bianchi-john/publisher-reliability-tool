@@ -61,13 +61,11 @@ observability or fault recovery.
 ## Quick start
 
 The normative native reference platform is Ubuntu 24.04, x86-64, Python 3.12.
-This repository revision contains the normative contracts, dataset, and dataset
-preparation/verification scripts, but not yet the backend, frontend, package,
-Compose file, OpenAPI snapshot, dependency lock, or official model manifest.
-The commands below are the target application contract and become executable
-once those implementation artifacts are added.
+This repository now contains an executable Python package, local web
+application, REST API/OpenAPI document, prediction importer, CSV persistence,
+FIFO job worker, browser UI, locked dependencies, and Compose service.
 
-With the implementation and locked dependencies present:
+Install `uv` 0.8.3, then:
 
 ```bash
 uv sync --frozen
@@ -78,6 +76,9 @@ publisher-reliability serve
 
 Then open `http://127.0.0.1:8000/`. A missing seed directory or model directory
 is allowed; the UI explains how to import data or place official model files.
+On first startup the bundled release is converted into 77,708 immutable
+prediction runs, 20 historical model/fold identities, and 19,411 derived
+articles. Restarting with the same data directory reuses that import.
 
 Docker Compose is an equivalent convenience path:
 
@@ -85,14 +86,34 @@ Docker Compose is an equivalent convenience path:
 docker compose up --build
 ```
 
+Run the automated suite with:
+
+```bash
+uv run --frozen python -m unittest discover -s tests -v
+```
+
+### Implementation status
+
+The current executable milestone covers the complete prediction-only browsing
+and stored-aggregation path: manifest verification, privacy-preserving CSV/
+CSV.GZ import, deterministic URL and UUID identity, the seven CSV ledgers,
+single-writer locking, article/publisher/model/import/job views, all three
+aggregation formulas, persisted evaluations, article export, Host validation,
+offline mode, CLI, API, and UI.
+
+Official neural artifacts are not distributed by this repository. Historical
+predictions can be reused and aggregated immediately. New page retrieval,
+artifact validation, and BERT/RoBERTa inference remain unavailable until the
+official model manifest, weights, and optional model dependencies are supplied;
+requests that need them fail explicitly instead of fabricating a prediction.
+
 Model artifacts are downloaded manually from:
 
 <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
-Copy supported files under `./models`, then run a scan from the Models page or
-the `models scan` CLI command. Restart only refreshes availability of already
-registered models; it does not discover new files. The application does not
-manage downloads, Hugging Face credentials, or dependency caches.
+Keep manually downloaded artifacts under `./models`; they are intentionally
+outside version control. The current milestone does not load them yet and does
+not manage downloads, Hugging Face credentials, or dependency caches.
 
 Strict offline mode is:
 
