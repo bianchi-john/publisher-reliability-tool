@@ -11,14 +11,22 @@ from typing import Callable
 
 from .errors import AppError
 from .importer import import_csv
+from .model_scanner import scan_model_roots
 from .services import ResearchService
 from .storage import Storage, json_field, utc_now
 
 
 class JobManager:
-    def __init__(self, storage: Storage, service: ResearchService):
+    def __init__(
+        self,
+        storage: Storage,
+        service: ResearchService,
+        *,
+        model_roots: tuple[Path, ...] = (),
+    ):
         self.storage = storage
         self.service = service
+        self.model_roots = model_roots
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -134,10 +142,7 @@ class JobManager:
                 )
                 source.unlink(missing_ok=True)
             else:
-                result = {
-                    "registered": 0,
-                    "message": "No supported official artifacts were found.",
-                }
+                result = scan_model_roots(self.storage, self.model_roots)
             self._update(
                 row,
                 status="succeeded",
@@ -186,4 +191,3 @@ class JobManager:
         token = request.get("source_upload_id")
         if isinstance(token, str) and Path(token).name == token:
             (self.storage.data_dir / "uploads" / token).unlink(missing_ok=True)
-

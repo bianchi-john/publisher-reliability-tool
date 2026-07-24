@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import Config
 from .errors import AppError
 from .importer import import_bundled_release, import_csv, verify_manifest
+from .model_scanner import scan_model_roots
 from .storage import Storage
 
 
@@ -172,16 +173,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "models":
             config = Config.from_env()
-            with Storage(args.data_dir or config.data_dir):
-                print(
-                    json.dumps(
-                        {
-                            "registered": 0,
-                            "message": "No supported official artifacts were found.",
-                        },
-                        indent=2,
-                    )
+            with Storage(args.data_dir or config.data_dir) as storage:
+                result = scan_model_roots(
+                    storage,
+                    (
+                        *config.models_dirs,
+                        storage.data_dir / "managed-models",
+                    ),
                 )
+                print(json.dumps(result, indent=2))
             return 0
     except AppError as exc:
         print(f"{exc.code}: {exc.message}", file=sys.stderr)

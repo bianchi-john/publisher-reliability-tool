@@ -59,6 +59,7 @@ contains one of these codes in its `error_code` field.
 | `NON_ENGLISH` | 422 | Language validation is non-English or indeterminate |
 | `MODEL_NOT_AVAILABLE` | 404 | Requested model identity is absent |
 | `MODEL_NOT_RUNNABLE` | 409 | Historical, missing, incompatible, dependency, or resource state cannot infer |
+| `TRAINING_DATA_LEAKAGE` | 409 | Selected checkpoint was trained on the known fold-indexed dataset article |
 | `PROBABILITIES_REQUIRED` | 409 | Selected exact runs lack complete probabilities |
 | `INSUFFICIENT_ARTICLES` | 422 | Fewer than two compatible successful runs or requested count unmet |
 | `IMPORT_INVALID` | 422 | Dataset schema/container/row conflict prevents requested import result |
@@ -205,6 +206,33 @@ the internal managed-model root, validates recognized official artifacts, and
 runs required fixtures. It accepts no path. Returns
 `202 {"job_id":"uuid"}`.
 
+### `GET /api/v1/models/available`
+
+Explains model availability for one proposed evaluation input. Query parameters
+are `input_type=article|publisher`, `url`, `requested_count=2..50`, and
+`allow_partial=true|false`.
+
+`items` contains only stored historical model/fold identities for which a local
+checkpoint with the same family/fold is currently present. Each item includes
+the separate `local_model_id`, local status/runnable flag, safe held-out article
+count, run count, probability count and `eligible`.
+
+`availability` always explains the result with this separate, non-HTTP status
+registry:
+
+| Availability code | Meaning |
+| --- | --- |
+| `AVAILABLE` | At least one locally present family/fold has sufficient safe stored coverage |
+| `NO_LOCAL_CHECKPOINTS` | No validated local artifact is currently present |
+| `NEW_ARTICLE_REQUIRES_INFERENCE` | URL has no stored prediction and therefore needs a new run |
+| `TRAINING_DATA_LEAKAGE` | Present local folds were trained on this known dataset article |
+| `INSUFFICIENT_SAFE_ARTICLES` | Matching publisher coverage is below the required safe count |
+| `NO_MATCHING_LOCAL_MODEL` | Stored history has no family/fold present in the local inventory |
+
+The object also returns `input_known`, local/eligible counts, and family/fold
+entries blocked because the checkpoint was trained on the article. This
+endpoint makes no network request and creates no job or prediction.
+
 ### `POST /api/v1/models/upload`
 
 Multipart with one `file` (`.pt`, or `.tar.gz` only for the official optional
@@ -247,6 +275,12 @@ Publisher:
 {"input":{"type":"publisher","url":"https://example.org/","requested_article_count":10,"allow_partial":true},"model_id":"sha256","aggregation_method":"majority_vote","prediction_action":"reuse","content_retention":"discard"}
 ```
 
+For single-article input, `aggregation_method`, `requested_article_count` and
+`allow_partial` do not apply and the frontend hides them. For publisher input,
+`allow_partial=true` means that a result may be created from the available
+leakage-safe subset when it contains at least two articles; `false` requires the
+full requested count.
+
 Lists contain 2–50 distinct same-publisher URLs. Publisher evaluation always
 uses stored eligible runs first and sequentially retrieves/discovers only the
 remaining count; there are no separate discovery modes. A historical or missing
@@ -256,6 +290,12 @@ does not infer; if retrieval resolves to another article, the job returns
 `INVALID_INPUT` and stores nothing. Validation that depends only on submitted/
 local state is synchronous; network/canonical/extraction failures appear on the
 accepted job.
+
+Before model execution, the service enforces the cross-validation leakage rule
+from the scientific contract for single articles, explicit lists and publisher
+candidates. A known article outside the selected checkpoint's held-out fold
+fails with `TRAINING_DATA_LEAKAGE`; publisher selection excludes unsafe known
+candidates.
 
 Explicit lists run in submitted order, require distinct submitted and resolved
 canonical article IDs, and require every item to succeed before an evaluation
@@ -310,8 +350,9 @@ source; an interrupted running job is failed and cleaned at startup.
 
 Returns the three method identifiers, versions, formula text, minimum count,
 probability requirement, tie rule, and scientific warning. Concrete
-availability is included in article/publisher selection responses and checked
-again by the evaluation service; there is no separate availability endpoint.
+method availability is included in aggregation metadata and checked again by
+the evaluation service. Concrete input/model/fold availability is provided by
+`GET /api/v1/models/available`.
 
 ## 12. Endpoint and frontend contract
 

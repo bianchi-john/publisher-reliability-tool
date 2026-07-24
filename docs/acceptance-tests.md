@@ -2,7 +2,7 @@
 
 **Status:** Normative verification contract
 
-AT-001–AT-045 form the core release gate on a normal CPU workstation.
+AT-001–AT-045 and AT-051–AT-053 form the core release gate on a normal CPU workstation.
 AT-046–AT-047 are optional GPU tests. AT-048–AT-050 are optional stress/fault
 tests. Optional failures are reported but do not block the core demo.
 
@@ -333,3 +333,29 @@ never silent malformed success.
 Representative ENOSPC injection during upload acquisition and atomic
 replacement returns `STORAGE_ERROR`, reports no success, and leaves a store that
 passes verification after documented temp cleanup/marker recovery.
+
+## J. Fold-safe evaluation availability
+
+### AT-051 — Local inventory intersection
+
+Given only local BERT fold 1 and RoBERTa fold 1 checkpoints, availability never
+offers Llama, Mistral or folds 2–5. A held-out fold-1 dataset article offers the
+two matching stored identities while preserving separate local and historical
+model IDs.
+
+### AT-052 — Training-data leakage guard
+
+Given a known article assigned to test fold 2, local BERT/RoBERTa fold 1 are
+hidden with `TRAINING_DATA_LEAKAGE`. Direct service/API attempts to infer with
+those checkpoints also fail with that code. Publisher and explicit-list
+workflows exclude or reject the same unsafe article; fold-1 held-out articles
+remain eligible.
+
+### AT-053 — Availability explanation and conditional controls
+
+A new URL absent from stored history returns
+`NEW_ARTICLE_REQUIRES_INFERENCE` and explains whether a runnable local pipeline
+exists. Other empty states distinguish no local checkpoints, no matching
+family/fold and insufficient safe articles. Single-article mode hides publisher
+count, aggregation and partial controls. Publisher mode explains that partial
+means using at least two but fewer than the requested safe articles.

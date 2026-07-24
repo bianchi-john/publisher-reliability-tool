@@ -42,6 +42,7 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(openapi.status_code, 200)
         self.assertIn("/api/v1/articles", openapi.json()["paths"])
         self.assertIn("/api/v1/evaluation-jobs", openapi.json()["paths"])
+        self.assertIn("/api/v1/models/available", openapi.json()["paths"])
 
         missing = await self.client.get(
             "/api/v1/articles/00000000-0000-0000-0000-000000000000"
@@ -56,6 +57,20 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invalid_host.status_code, 421)
         self.assertEqual(invalid_host.json()["error"]["code"], "INVALID_HOST")
 
+        availability = await self.client.get(
+            "/api/v1/models/available",
+            params={
+                "input_type": "article",
+                "url": "https://example.com/article",
+            },
+        )
+        self.assertEqual(availability.status_code, 200)
+        self.assertEqual(availability.json()["items"], [])
+        self.assertEqual(
+            availability.json()["availability"]["code"],
+            "NO_LOCAL_CHECKPOINTS",
+        )
+
     async def test_pagination_validation_uses_stable_error(self) -> None:
         response = await self.client.get("/api/v1/articles?limit=10")
         self.assertEqual(response.status_code, 422)
@@ -64,4 +79,3 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

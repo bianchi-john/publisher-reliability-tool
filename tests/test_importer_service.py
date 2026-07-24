@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from publisher_reliability.errors import AppError
 from publisher_reliability.importer import import_csv
 from publisher_reliability.services import ResearchService
 from publisher_reliability.storage import Storage
@@ -57,8 +58,86 @@ class ImporterServiceTest(unittest.TestCase):
                     ["score"],
                 )
 
-                service = ResearchService(storage, offline=True)
                 model_id = storage.rows["models"][0]["model_id"]
+                local_model = dict(storage.rows["models"][0])
+                local_model.update(
+                    model_id="local-bert-fold-1",
+                    display_name="BERT fold 1 (local checkpoint)",
+                    artifact_kind="pytorch_state_dict",
+                    artifact_locator="root-1/bert_fold_1.pt",
+                    artifact_sha256="a" * 64,
+                    loader_recipe="bert_state_dict",
+                    status="validated_not_runnable",
+                    artifact_available=True,
+                    runnable=False,
+                )
+                storage.upsert("models", "model_id", local_model)
+                service = ResearchService(storage, offline=True)
+                article = service.article(storage.rows["prediction_runs"][0]["article_id"])
+                self.assertEqual(article["run_count"], 1)
+                self.assertEqual(article["runs"][0]["probabilities"], [0, 1, 0, 0, 0])
+
+                article_availability = service.available_models(
+                    input_type="article",
+                    url="https://example.com/article-1",
+                )
+                available_for_article = article_availability["items"]
+                self.assertEqual(
+                    [(row["model_id"], row["eligible"]) for row in available_for_article],
+                    [(model_id, True)],
+                )
+                self.assertEqual(
+                    article_availability["availability"]["code"], "AVAILABLE"
+                )
+                available_for_publisher = service.available_models(
+                    input_type="publisher",
+                    url="https://example.com/",
+                    requested_count=2,
+                )["items"]
+                self.assertEqual(available_for_publisher[0]["article_count"], 2)
+                self.assertEqual(available_for_publisher[0]["probability_count"], 2)
+                self.assertTrue(available_for_publisher[0]["eligible"])
+
+                publisher = service.publisher_summaries()[0]
+                self.assertEqual(publisher["run_count"], 2)
+                self.assertEqual(publisher["probability_run_count"], 2)
+                self.assertEqual(publisher["evaluation_count"], 0)
+
+                unknown = service.available_models(
+                    input_type="article",
+                    url="https://example.com/new-article",
+                )
+                self.assertEqual(
+                    unknown["availability"]["code"],
+                    "NEW_ARTICLE_REQUIRES_INFERENCE",
+                )
+
+                trained_model = dict(local_model)
+                trained_model["model_id"] = "local-bert-fold-2"
+                trained_model["fold_id"] = "2"
+                with self.assertRaises(AppError) as raised:
+                    service.assert_not_training_article(
+                        trained_model,
+                        storage.rows["prediction_runs"][0]["article_id"],
+                    )
+                self.assertEqual(raised.exception.code, "TRAINING_DATA_LEAKAGE")
+                storage.upsert("models", "model_id", trained_model)
+                with self.assertRaises(AppError) as evaluated:
+                    service.evaluate(
+                        {
+                            "input": {
+                                "type": "article",
+                                "url": "https://example.com/article-1",
+                            },
+                            "model_id": trained_model["model_id"],
+                        },
+                        "leakage-test-job",
+                    )
+                self.assertEqual(
+                    evaluated.exception.code,
+                    "TRAINING_DATA_LEAKAGE",
+                )
+
                 result = service.evaluate(
                     {
                         "input": {
@@ -81,4 +160,3 @@ class ImporterServiceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

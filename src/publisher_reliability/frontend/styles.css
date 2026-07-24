@@ -12,6 +12,7 @@
   --shadow: 0 14px 40px rgba(27, 44, 35, .07);
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -59,6 +60,7 @@ p { max-width: 760px; }
 .warning { padding: 16px 18px; border-left: 4px solid var(--amber); border-radius: 8px; background: #fff5e8; color: #6d3d17; }
 .toolbar, form .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 label { display: grid; gap: 5px; color: #4d5b52; font-size: 13px; font-weight: 600; }
+label small { max-width: 330px; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
 input, select, textarea, button {
   min-height: 40px; border: 1px solid #bdc7c0; border-radius: 8px;
   background: white; color: var(--ink); padding: 8px 11px; font: inherit;
@@ -80,6 +82,15 @@ tr:last-child td { border-bottom: 0; }
 .pill.running, .pill.queued { background: #fff0dc; color: #945011; }
 .class-chip { display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; border-radius: 8px; background: #e6ece8; font-weight: 750; }
 .notice { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
+.section-block { margin-top: 30px; }
+.section-block > summary { cursor: pointer; margin-bottom: 16px; font-size: 18px; font-weight: 700; }
+.detail-link { color: var(--green); font-weight: 650; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.probability { white-space: nowrap; text-align: right; }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+.pager .button { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 11px; border: 1px solid var(--green); border-radius: 8px; }
+.grow { flex: 1 1 420px; }
+.grow input { width: 100%; }
+.detail-metrics { margin-bottom: 30px; }
 .error { color: var(--red); }
 .loading { color: var(--muted); animation: pulse 1.2s ease-in-out infinite alternate; }
 footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface); font-size: 12px; }

@@ -60,10 +60,22 @@ dataset again does not duplicate data.
 
 ## Current limit
 
-The repository does not distribute model weights. This version works with
-stored predictions, but does not yet retrieve new pages or run BERT/RoBERTa
-inference. Operations requiring a new prediction fail explicitly instead of
-creating synthetic results.
+The repository does not distribute model weights. The Models page safely scans
+configured roots, validates recognized BERT/RoBERTa state dictionaries and
+keeps local checkpoints separate from historical dataset identities. This
+version does not yet retrieve new pages or run inference; operations requiring
+a new prediction fail explicitly instead of creating synthetic results.
+
+Stored dataset predictions remain fully browseable by article, publisher,
+model/fold and class probability. Publisher aggregations created in the
+workspace are tracked separately.
+
+Evaluate derives its choices from both the local Models inventory and the
+stored prediction coverage for the submitted URL. For fold-indexed dataset
+articles, checkpoint fold `N` is offered only for articles assigned to held-out
+test fold `N`; checkpoints trained on that article are hidden and rejected.
+New URLs with no stored run report that inference is required instead of
+appearing as a generic compatibility failure.
 
 Official artifacts are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)

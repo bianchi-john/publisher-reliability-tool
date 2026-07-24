@@ -88,7 +88,14 @@ def create_app(config: Config | None = None) -> FastAPI:
     storage = Storage(settings.data_dir)
     bundled_import = import_bundled_release(storage, settings.seed_dataset)
     service = ResearchService(storage, offline=settings.offline)
-    jobs = JobManager(storage, service)
+    jobs = JobManager(
+        storage,
+        service,
+        model_roots=(
+            *settings.models_dirs,
+            storage.data_dir / "managed-models",
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -177,6 +184,28 @@ def create_app(config: Config | None = None) -> FastAPI:
             "device": settings.device,
             "bundled_import": bundled_import,
             "ledger_counts": counts,
+            "derived_counts": {
+                "articles": len(
+                    {
+                        row["article_id"]
+                        for row in storage.rows["prediction_runs"]
+                    }
+                ),
+                "publishers": len(
+                    {
+                        row["publisher_id"]
+                        for row in storage.rows["prediction_runs"]
+                    }
+                ),
+                "historical_predictions": sum(
+                    row["origin"] in {"bundled_import", "user_import"}
+                    for row in storage.rows["prediction_runs"]
+                ),
+                "predictions_with_probabilities": sum(
+                    bool(row["prob_class_0"])
+                    for row in storage.rows["prediction_runs"]
+                ),
+            },
             "model_state_counts": model_states,
             "current_job": active,
         }
@@ -306,6 +335,20 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.get("/api/v1/models")
     async def models(family: str | None = None, status: str | None = None):
         return {"items": service.models(family=family, status=status)}
+
+    @app.get("/api/v1/models/available")
+    async def available_models(
+        input_type: Literal["article", "publisher"],
+        url: str,
+        requested_count: int = Query(default=2, ge=2, le=50),
+        allow_partial: bool = False,
+    ):
+        return service.available_models(
+            input_type=input_type,
+            url=url,
+            requested_count=requested_count,
+            allow_partial=allow_partial,
+        )
 
     @app.post("/api/v1/models/scan", status_code=202)
     async def model_scan(_body: EmptyRequest):

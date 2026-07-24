@@ -96,6 +96,18 @@ def main() -> int:
         r"^\| `([A-Z][A-Z0-9_]*)` \| (\d{3}) \|", api, re.MULTILINE
     )
     error_codes = [code for code, _ in error_rows]
+    availability_section = re.search(
+        r"### `GET /api/v1/models/available`\n\n(.*?)(?=\n### |\n## )",
+        api,
+        re.DOTALL,
+    )
+    availability_codes = set(
+        re.findall(
+            r"^\| `([A-Z][A-Z0-9_]*)` \|",
+            availability_section.group(1) if availability_section else "",
+            re.MULTILINE,
+        )
+    )
     duplicate_errors = sorted(
         code for code, count in Counter(error_codes).items() if count > 1
     )
@@ -109,7 +121,9 @@ def main() -> int:
         for code in code_like
         if not code.startswith("PRT_") and code not in {"SEQ_CLS"}
     }
-    undocumented = sorted(referenced_errors - set(error_codes))
+    undocumented = sorted(
+        referenced_errors - set(error_codes) - availability_codes
+    )
     if undocumented:
         errors.append(f"code-like errors absent from API registry: {undocumented}")
 

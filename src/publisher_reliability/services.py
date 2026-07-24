@@ -124,7 +124,7 @@ class ResearchService:
             row
             for row in self.storage.rows["prediction_runs"]
             if row["article_id"] == identifier
-        )[:20]
+        )
         return {
             **summary,
             "runs": [self.run_summary(run) for run in runs],
@@ -209,6 +209,10 @@ class ResearchService:
                     "normalized_hostname": rows[0]["normalized_hostname"],
                     "article_count": len({row["article_id"] for row in rows}),
                     "run_count": len(rows),
+                    "model_count": len({row["model_id"] for row in rows}),
+                    "probability_run_count": sum(
+                        bool(row["prob_class_0"]) for row in rows
+                    ),
                     "evaluation_count": len(evaluations.get(pub_id, [])),
                     "latest_evaluation_at": latest_evaluation or None,
                 }
@@ -322,6 +326,11 @@ class ResearchService:
                 "fold_id": int(row["fold_id"]),
                 "artifact_available": row["artifact_available"] == "true",
                 "runnable": row["runnable"] == "true",
+                "identity_kind": (
+                    "historical"
+                    if row["artifact_kind"] == "historical_virtual"
+                    else "local"
+                ),
                 "support_level": (
                     "core" if row["family"] in {"bert", "roberta"} else "optional"
                 ),
@@ -332,6 +341,181 @@ class ResearchService:
         ]
         rows.sort(key=lambda row: (str(row["family"]), int(row["fold_id"])))
         return rows
+
+    def available_models(
+        self,
+        *,
+        input_type: str,
+        url: str,
+        requested_count: int = 2,
+        allow_partial: bool = False,
+    ) -> dict[str, object]:
+        """Explain availability and return locally present, leakage-safe stored models."""
+
+        canonical = normalize_url(url)
+        if input_type == "article":
+            matching = [
+                row
+                for row in self.storage.rows["prediction_runs"]
+                if row["article_id"] == article_id(canonical)
+            ]
+            required = 1
+        elif input_type == "publisher":
+            hostname = normalized_hostname(canonical)
+            matching = [
+                row
+                for row in self.storage.rows["prediction_runs"]
+                if row["normalized_hostname"] == hostname
+            ]
+            required = 2 if allow_partial else max(2, requested_count)
+        else:
+            raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
+
+        local_models = [
+            model
+            for model in self.storage.rows["models"]
+            if model["artifact_kind"] != "historical_virtual"
+            and model["artifact_available"] == "true"
+        ]
+        local_by_family_fold: dict[tuple[str, int], list[dict[str, str]]] = defaultdict(list)
+        for model in local_models:
+            local_by_family_fold[(model["family"], int(model["fold_id"]))].append(model)
+
+        grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for run in matching:
+            grouped[run["model_id"]].append(run)
+        models = self.models_by_id
+        result: list[dict[str, object]] = []
+        represented_family_folds: set[tuple[str, int]] = set()
+        for model_identifier, runs in grouped.items():
+            model = models.get(model_identifier)
+            if model is None:
+                continue
+            family_fold = (model["family"], int(model["fold_id"]))
+            represented_family_folds.add(family_fold)
+            local_matches = local_by_family_fold.get(family_fold, [])
+            if not local_matches:
+                continue
+            article_count = len({run["article_id"] for run in runs})
+            probability_count = sum(bool(run["prob_class_0"]) for run in runs)
+            local_model = sorted(
+                local_matches,
+                key=lambda row: (row["status"] != "compatible", row["model_id"]),
+            )[0]
+            result.append(
+                {
+                    "model_id": model_identifier,
+                    "local_model_id": local_model["model_id"],
+                    "family": model["family"],
+                    "fold_id": int(model["fold_id"]),
+                    "display_name": model["display_name"],
+                    "local_status": local_model["status"],
+                    "local_runnable": local_model["runnable"] == "true",
+                    "article_count": article_count,
+                    "run_count": len(runs),
+                    "probability_count": probability_count,
+                    "eligible": article_count >= required,
+                }
+            )
+        result.sort(
+            key=lambda row: (
+                not bool(row["eligible"]),
+                str(row["family"]),
+                int(row["fold_id"]),
+            )
+        )
+
+        blocked = [
+            {
+                "family": family,
+                "fold_id": fold_id,
+                "reason": "The article belongs to another held-out fold, so this checkpoint was trained on it.",
+            }
+            for family, fold_id in sorted(local_by_family_fold)
+            if input_type == "article"
+            and any(key[0] == family for key in represented_family_folds)
+            and (family, fold_id) not in represented_family_folds
+        ]
+        eligible_count = sum(bool(row["eligible"]) for row in result)
+        if not local_models:
+            code = "NO_LOCAL_CHECKPOINTS"
+            message = (
+                "No validated local checkpoint is available. Add a supported model "
+                "under Models and scan the configured directories."
+            )
+        elif result and eligible_count:
+            code = "AVAILABLE"
+            message = (
+                f"{eligible_count} local checkpoint(s) have enough leakage-safe stored "
+                "predictions for this request."
+            )
+        elif result:
+            code = "INSUFFICIENT_SAFE_ARTICLES"
+            message = (
+                "Matching local checkpoints exist, but the publisher has fewer safe "
+                "held-out predictions than the requested article count."
+            )
+        elif input_type == "article" and not matching:
+            runnable = any(model["runnable"] == "true" for model in local_models)
+            code = "NEW_ARTICLE_REQUIRES_INFERENCE"
+            message = (
+                "This URL is not present in the imported prediction dataset. It requires "
+                + (
+                    "a new inference run."
+                    if runnable
+                    else "a new inference run, but the local checkpoints are validated "
+                    "for storage only and the inference pipeline is not runnable yet."
+                )
+            )
+        elif blocked:
+            code = "TRAINING_DATA_LEAKAGE"
+            message = (
+                "The available local checkpoint fold was trained on this dataset article. "
+                "Evaluation is blocked to prevent training-data leakage."
+            )
+        else:
+            code = "NO_MATCHING_LOCAL_MODEL"
+            message = (
+                "Stored predictions exist, but none matches a family and fold currently "
+                "available as a local checkpoint under Models."
+            )
+        return {
+            "items": result,
+            "availability": {
+                "code": code,
+                "message": message,
+                "input_known": bool(matching),
+                "local_checkpoint_count": len(local_models),
+                "eligible_model_count": eligible_count,
+                "blocked_training_models": blocked,
+            },
+        }
+
+    def assert_not_training_article(
+        self, model: dict[str, str], article_identifier: str
+    ) -> None:
+        """Block a local fold from inferring over dataset rows used for its training."""
+
+        if model["artifact_kind"] == "historical_virtual":
+            return
+        family = model["family"]
+        assigned_folds = {
+            int(candidate["fold_id"])
+            for run in self.storage.rows["prediction_runs"]
+            if run["article_id"] == article_identifier
+            for candidate in [self.models_by_id.get(run["model_id"], {})]
+            if candidate.get("family") == family and candidate.get("fold_id")
+        }
+        if assigned_folds and int(model["fold_id"]) not in assigned_folds:
+            raise AppError(
+                "TRAINING_DATA_LEAKAGE",
+                "The selected checkpoint was trained on this dataset article.",
+                {
+                    "model_family": family,
+                    "model_fold": int(model["fold_id"]),
+                    "article_test_folds": sorted(assigned_folds),
+                },
+            )
 
     def imports(self) -> list[dict[str, object]]:
         rows = sorted(
@@ -425,6 +609,7 @@ class ResearchService:
         input_type = input_value.get("type")
         if input_type == "article":
             canonical = normalize_url(str(input_value.get("url", "")))
+            self.assert_not_training_article(model, article_id(canonical))
             run = self._latest_run(article_id(canonical), model_identifier)
             if run is None:
                 raise AppError(
@@ -453,6 +638,7 @@ class ResearchService:
                 raise AppError("INVALID_INPUT", "All articles must share one publisher.")
             selected = []
             for canonical in canonical_urls:
+                self.assert_not_training_article(model, article_id(canonical))
                 run = self._latest_run(article_id(canonical), model_identifier)
                 if run is None:
                     raise AppError(
@@ -480,6 +666,7 @@ class ResearchService:
                     run["normalized_hostname"] == hostname
                     and run["model_id"] == model_identifier
                 ):
+                    self.assert_not_training_article(model, run["article_id"])
                     current = candidates.get(run["article_id"])
                     if current is None or newest_runs([current, run])[0] is run:
                         candidates[run["article_id"]] = run
@@ -540,4 +727,3 @@ class ResearchService:
             and row["model_id"] == model_identifier
         ]
         return newest_runs(matching)[0] if matching else None
-

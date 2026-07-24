@@ -164,8 +164,9 @@ candidate. Startup ignores it; the next explicit scan may validate and register
 it. No separate upload transaction or orphan ledger is introduced.
 
 Built-in official recipes determine scientific model identity independently of
-filesystem location. States are `compatible`, `historical_only`,
-`artifact_missing`, `dependency_missing`, `resource_unavailable`, and `invalid`.
+filesystem location. States are `compatible`, `validated_not_runnable`,
+`historical_only`, `artifact_missing`, `dependency_missing`,
+`resource_unavailable`, and `invalid`.
 Historical runs remain browseable and aggregable when an artifact disappears.
 
 BERT and RoBERTa loaders and fixtures are core. Llama and Mistral loaders are
@@ -220,3 +221,7 @@ recovery UI, and high-availability behavior are outside the demo.
 6. Offline mode makes no application HTTP connection.
 7. CSV is sufficient to reconstruct every persisted API resource.
 8. UI and API call the same services and formulas.
+9. A known fold-indexed article is never sent to a checkpoint trained on its
+   fold; only its held-out checkpoint fold is eligible.
+10. Matching a local checkpoint to stored coverage by family/fold never changes
+    either the local model ID or the historical prediction model ID.

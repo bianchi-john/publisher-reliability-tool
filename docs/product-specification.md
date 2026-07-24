@@ -45,6 +45,10 @@ The MVP shall:
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
 - aggregate exact compatible runs with the three scientific methods;
+- constrain Evaluate choices to locally present model family/fold combinations
+  with sufficient safe stored coverage;
+- prevent a checkpoint from evaluating known imported articles outside its
+  held-out test fold;
 - display exact model/fold/run/article provenance and scientific warnings;
 - work offline for browsing, reuse, and stored aggregation;
 - optionally retain extracted title/body with explicit per-request consent.
@@ -165,6 +169,10 @@ artifact-missing, and historical-only identities. It never downloads anything.
 BERT/RoBERTa CPU behavior is part of the core gate. Llama/Mistral are optional
 and may remain unavailable without failing the demo.
 
+Evaluate never presents all historical identities as if they were installed
+checkpoints. It intersects stored prediction identities with locally available
+artifacts by family/fold, while retaining their separate scientific IDs.
+
 ### 7.3 Evaluation controls
 
 Every evaluation has:
@@ -189,6 +197,20 @@ uses stored compatible runs first, then known URLs requiring inference, then
 simple homepage discovery until the requested count is reached or candidates
 end. Candidates are processed sequentially. `allow_partial=true` permits an
 aggregate with 2..requested successful runs; otherwise an unmet count fails.
+
+For single-article input, publisher count, aggregation method and partial-result
+controls are hidden because they do not apply. Before submission, Evaluate
+reports whether the URL is known, requires new inference, lacks a matching local
+checkpoint, has insufficient safe publisher coverage, or is blocked for
+training-data leakage. `allow_partial=true` is explained as using 2..requested
+safe articles when the requested count cannot be met; false requires the full
+count.
+
+For a five-fold imported corpus, checkpoint fold `N` may evaluate known
+articles assigned to held-out test fold `N` and must not evaluate known articles
+assigned to any other fold. The same rule filters publisher candidates and is
+enforced again by the backend. Unknown external URLs have no registered fold
+membership; their absence is not represented as proof of training exclusion.
 
 Every evaluation stores the ordered article and prediction-run IDs actually
 used. A later run cannot change an earlier evaluation.
@@ -275,6 +297,8 @@ and error states use clear English text.
 | FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
 | FR-020 | UI and API shall expose model, fold, run, contributing articles, method, and scientific limitations. |
+| FR-021 | Evaluate shall offer only locally present family/fold combinations with sufficient stored coverage and shall explain every empty availability result. |
+| FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 
 ## 10. Non-functional requirements
 

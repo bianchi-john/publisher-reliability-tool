@@ -145,8 +145,9 @@ model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha
 
 - `family`: exactly `bert`, `roberta`, `llama`, or `mistral`; user imports use
   the same four recognized prefixes for historical virtual identities.
-- `status`: `compatible`, `historical_only`, `artifact_missing`,
-  `dependency_missing`, `resource_unavailable`, or `invalid`.
+- `status`: `compatible`, `validated_not_runnable`, `historical_only`,
+  `artifact_missing`, `dependency_missing`, `resource_unavailable`, or
+  `invalid`.
 - `artifact_kind`: `state_dict`, `peft_directory`, or `historical_virtual`.
 - `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.
 - `artifact_locator` is deployment metadata and excluded from identity; API

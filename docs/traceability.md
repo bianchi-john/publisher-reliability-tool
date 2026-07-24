@@ -30,6 +30,8 @@ optional stress/fault.
 | FR-018 | AT-006, AT-016, AT-027, AT-030, AT-043 |
 | FR-019 | AT-003, AT-018, AT-024 |
 | FR-020 | AT-017, AT-040, AT-041, AT-042 |
+| FR-021 | AT-040, AT-051, AT-053 |
+| FR-022 | AT-026, AT-029, AT-030, AT-051, AT-052 |
 
 ## Non-functional requirements
 

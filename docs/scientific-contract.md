@@ -223,6 +223,35 @@ No method silently substitutes another. Fewer than two compatible runs is
 `PROBABILITIES_REQUIRED`. Input order does not change formulas but is stored for
 provenance.
 
+## 8.1 Cross-validation leakage guard
+
+For the imported five-fold corpus, `<family>_fold_id=N` means that the stored
+prediction was produced for held-out test fold `N`. The corresponding local
+checkpoint fold `N` was trained on the other four folds.
+
+Before any new inference, the service compares the normalized article identity
+with the imported fold registry for the selected family:
+
+- checkpoint fold `N` may evaluate a known article assigned to test fold `N`;
+- checkpoint fold `N` must reject a known article assigned to any other fold
+  with `TRAINING_DATA_LEAKAGE`;
+- publisher evaluation excludes every known article that is not in the
+  checkpoint's held-out fold;
+- the guard is checked by the service for single articles, explicit lists and
+  publisher candidates, not only by frontend filtering.
+
+Stored historical predictions retain their original fold provenance and are
+already held-out outputs for that family/fold. Evaluate exposes such a stored
+identity only when a local checkpoint with the same family and fold is present.
+This inventory match does not relabel the historical run or claim that the
+local artifact digest produced it.
+
+Absence from the imported URL/fold registry is not proof that an arbitrary
+external article was absent from every possible training corpus. Such an input
+is reported as requiring new inference, with leakage membership unknown outside
+the registered corpus. The application never infers training membership from
+publication date, hostname or text similarity.
+
 ## 9. Required result warnings
 
 Article/publisher details state that:

@@ -22,9 +22,10 @@ Optional research artifacts use `llama_fold_N.pt` or an official Mistral PEFT
 fold directory.
 
 > [!NOTE]
-> The current software version browses and aggregates historical predictions,
-> but does not yet validate or execute these artifacts. Model loading and new
-> inference are the next implementation milestone.
+> The Models page scans these filenames and safely validates BERT/RoBERTa
+> checkpoint structure, shapes and finite tensor values. A validated checkpoint
+> is not treated as the identity that produced historical dataset predictions.
+> New inference remains a separate implementation milestone.
 
 The application never downloads weights, manages Hugging Face credentials or
 executes code supplied by an artifact.
