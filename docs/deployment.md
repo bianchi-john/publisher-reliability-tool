@@ -139,9 +139,10 @@ English content explicitly and Newspaper3k is the only body extractor, parsing
 with `language="en"`. Deterministic language detection still rejects extracted
 text that is not English.
 
-Albert Sans and its SIL Open Font License are included in the packaged frontend.
-The light/dark theme needs no remote asset or CDN; only an explicit user choice
-is retained in browser local storage.
+Gloock, Instrument Sans and both SIL Open Font License files are included in the
+packaged frontend. The warm orange/terracotta light and dark themes need no
+remote asset or CDN; only an explicit user choice is retained in browser local
+storage.
 
 ## 7. Backup and restore
 

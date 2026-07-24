@@ -95,10 +95,11 @@ created by a user evaluation, while retaining both badges when a dataset
 article is also evaluated locally. Evaluate keeps both the completed result card
 and a refresh-safe table of recent local article predictions.
 
-The bundled interface uses the locally distributed open-source Albert Sans
-font. Its light/dark theme follows the operating-system preference initially
-and can be overridden from the persistent top bar; the choice is saved in the
-browser.
+The bundled interface uses locally distributed open-source Gloock for display
+headings and Instrument Sans for paragraphs, navigation and controls. Its warm
+orange/terracotta light and dark themes follow the operating-system preference
+initially and can be overridden from the persistent top bar; the choice is
+saved in the browser.
 
 The Models page also accepts a constrained custom Transformers `.zip` bundle
 using `safetensors` and a local tokenizer. It validates and registers supported

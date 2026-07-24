@@ -16,7 +16,7 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 | Runtime | Python 3.12 |
 | API | FastAPI, Pydantic v2, generated OpenAPI 3.1 |
 | Server | Uvicorn, one worker, fixed loopback binding |
-| Frontend | Bundled static HTML, CSS and browser JavaScript; local Albert Sans |
+| Frontend | Bundled static HTML, CSS and browser JavaScript; local Gloock and Instrument Sans |
 | Persistence | Python `csv`, small in-memory indexes, filesystem lock |
 | Retrieval | `httpx` and English Newspaper3k extraction |
 | Language | `langdetect`, seed zero |
@@ -153,8 +153,9 @@ the main content with scroll prevention, so the sticky bar cannot cover the
 first navigation item.
 The top bar contains a light/dark theme control. The initial theme follows
 `prefers-color-scheme`, an explicit choice is stored in browser local storage,
-and both palettes use the locally bundled variable Albert Sans font under the
-SIL Open Font License.
+and both warm orange/terracotta palettes use locally bundled Gloock for display
+headings and Instrument Sans for body text, navigation and controls. Both font
+families retain their SIL Open Font License files in the frontend package.
 
 ## 9. Model lifecycle
 

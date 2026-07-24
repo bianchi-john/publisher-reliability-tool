@@ -290,8 +290,9 @@ have adjacent semantic tables. Loading, empty, offline, missing-model, partial,
 and error states use clear English text. The persistent top bar provides a
 keyboard-accessible light/dark theme control, initially follows the operating
 system, stores an explicit browser-local preference, and does not remount or
-shift during route changes. The locally bundled Albert Sans variable font is
-used without a CDN.
+shift during route changes. Both palettes use a warm orange/terracotta visual
+system. Locally bundled Gloock is used for display headings and Instrument Sans
+for paragraphs, navigation and controls, without a CDN.
 
 ## 9. Functional requirements
 
@@ -331,7 +332,7 @@ used without a CDN.
 | NFR-003 | Dependency locks, dataset checksums, and core model fixtures shall make the demo reproducible. |
 | NFR-004 | CSV writes shall use one writer, fsync, and atomic replacement or append-tail recovery as documented. |
 | NFR-005 | Logs and errors shall exclude editorial content, protected data, credentials, and unrestricted paths. |
-| NFR-006 | Frontend assets, the open font and API documentation shall be bundled locally without telemetry or CDN dependencies. |
+| NFR-006 | Frontend assets, both open font families and API documentation shall be bundled locally without telemetry or CDN dependencies. |
 | NFR-007 | User-visible text, errors, exports and the persistent light/dark theme control shall be English and accessible. |
 | NFR-008 | API and frontend shall share the same service and validation functions. |
 

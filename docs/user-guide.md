@@ -179,7 +179,9 @@ Use the button in the top bar to switch between light and dark mode. Without an
 explicit choice the interface follows the operating-system preference. A manual
 choice is saved only in browser local storage and restored on later visits.
 
-The application bundles the open-source variable Albert Sans font and its SIL
-Open Font License locally. It does not contact a font CDN. The top bar remains
-mounted while navigating; the current page is retained until the next page is
-ready so the header and scrollbar do not flicker between tabs.
+The application bundles open-source Gloock for titles/headings and Instrument
+Sans for paragraphs, navigation, forms and buttons, together with both SIL Open
+Font License files. The paired light/dark palettes use cream, terracotta,
+burnt-orange and cocoa tones and do not contact a font or style CDN. The top bar
+remains mounted while navigating; the current page is retained until the next
+page is ready so the header and scrollbar do not flicker between tabs.
