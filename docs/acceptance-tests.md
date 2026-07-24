@@ -77,9 +77,11 @@ published.
 
 ### AT-011 — Bundled release verification
 
-The committed manifest verifies part size/SHA-256, content digest, empty
-editorial fields, 19,429 released URLs, BERT/RoBERTa-only columns, and complete
-five-class probability vectors for both families.
+The committed schema-2 manifest verifies part size/SHA-256, the stable
+original-row content digest, empty editorial fields, 19,429
+`dataset_original` rows, BERT/RoBERTa-only original columns, complete
+five-class probability vectors for both families, and the exact count and
+shape of any `user_evaluation` rows.
 
 ### AT-012 — Bundled import identity
 
@@ -180,7 +182,10 @@ makes no network/model call, creates no run/evaluation, and reports provenance.
 ### AT-027 — Explicit recomputation
 
 Two accepted recompute requests freshly retrieve and create two different
-immutable UUIDv4 runs. Earlier runs remain queryable.
+immutable UUIDv4 runs. Earlier runs remain queryable. Each new run appears
+exactly once in `dataset/predictions/predictions.csv` with
+`prediction_origin=user_evaluation`, matching run/model/fold/label and all five
+probabilities; restarting adds no duplicate.
 
 ### AT-028 — Saved local content lifecycle
 
@@ -307,6 +312,9 @@ commands execute synchronously and create no job requiring a server worker.
 
 After a clean restart, models, runs, evaluations, imports, jobs, and explicitly
 saved content reproduce the same public resources from the seven CSV ledgers.
+Mirrored `user_evaluation` dataset rows restore a missing local run and are then
+resynchronized idempotently; original rows and their stable content digest are
+unchanged.
 
 ### AT-045 — Repository and CPU equivalence
 

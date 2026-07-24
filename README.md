@@ -33,8 +33,8 @@ Open **<http://127.0.0.1:8000>**. API documentation is available at
 ### Docker
 
 ```bash
-mkdir -p data models
-sudo chown -R 10001:10001 data
+mkdir -p data models dataset/predictions
+sudo chown -R 10001:10001 data dataset/predictions
 docker compose up --build
 ```
 
@@ -49,7 +49,7 @@ The service is published only on `127.0.0.1:8000`.
 | Evaluation | Stored reuse, new single-article inference and publisher aggregation |
 | Methods | Majority vote, ordinal mean and mean probabilities |
 | Import | Privacy-preserving CSV and CSV.GZ import |
-| Persistence | Seven readable CSV ledgers under `data/state` |
+| Persistence | Seven CSV ledgers plus a user-prediction mirror in the dataset |
 | Access | Browser UI, REST API, OpenAPI and CLI |
 | Offline | Browsing, reuse and stored aggregation |
 
@@ -61,6 +61,13 @@ The bundled release produces:
 
 Imports are identified by content digest, so restarting or importing the same
 dataset again does not duplicate data.
+
+Every newly inferred article run is first committed to
+`data/state/prediction_runs.csv`, then mirrored as one `user_evaluation` row in
+`dataset/predictions/predictions.csv`. Original rows are explicitly marked
+`dataset_original`. The mirror includes the exact model/fold, predicted label,
+all five probabilities and run provenance, and is synchronized without
+duplicating an existing `prediction_run_id`.
 
 ## Models and new article inference
 
@@ -118,6 +125,8 @@ and remain outside version control.
 - Authors and raw HTML have no storage field.
 - Every publisher evaluation records the exact model, articles and runs used.
 - Every bundled historical run includes all five class probabilities.
+- Every local article inference is mirrored in the tracked prediction CSV with
+  `prediction_origin=user_evaluation`.
 - The only tracked dataset is the prediction release in `dataset/predictions`.
 
 See [dataset/README.md](dataset/README.md) for the dataset format.

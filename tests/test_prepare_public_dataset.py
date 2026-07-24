@@ -57,8 +57,11 @@ class PreparePublicDatasetTest(unittest.TestCase):
             prepare_release(source, output, 24.0, "first")
 
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 2)
             self.assertEqual(manifest["source_records"], 2)
             self.assertEqual(manifest["records"], 1)
+            self.assertEqual(manifest["dataset_original_records"], 1)
+            self.assertEqual(manifest["user_evaluation_records"], 0)
             self.assertEqual(manifest["unique_urls"], 1)
             self.assertEqual(manifest["duplicate_url_rows"], 0)
             self.assertEqual(manifest["duplicate_source_url_groups"], 1)
@@ -75,6 +78,8 @@ class PreparePublicDatasetTest(unittest.TestCase):
             self.assertEqual(list(rows[0]), PUBLIC_COLUMNS)
             self.assertEqual([row["article_id"] for row in rows], ["0"])
             self.assertEqual(rows[0]["domain"], "example.com")
+            self.assertEqual(rows[0]["prediction_origin"], "dataset_original")
+            self.assertEqual(rows[0]["prediction_run_id"], "")
             for column in REDACTED_EDITORIAL_COLUMNS:
                 self.assertEqual(rows[0][column], "")
             for excluded in EXCLUDED_NEWSGUARD_COLUMNS:
@@ -84,6 +89,8 @@ class PreparePublicDatasetTest(unittest.TestCase):
             self.assertEqual(result["records"], 1)
             self.assertEqual(result["parts"], 1)
             self.assertEqual(result["skipped_duplicate_rows"], 1)
+            self.assertEqual(result["dataset_original_records"], 1)
+            self.assertEqual(result["user_evaluation_records"], 0)
 
 
 if __name__ == "__main__":

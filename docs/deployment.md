@@ -60,7 +60,7 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models:ro
-      - ./dataset:/app/dataset:ro
+      - ./dataset:/app/dataset
 ```
 
 The image's fixed entry point may listen on container `0.0.0.0:8000`; this is
@@ -69,16 +69,19 @@ host loopback only. The actual file contains no privileged mode, host network,
 Docker socket, source-code mount, replica, restart loop, or production health
 orchestration.
 
-Prepare writable state once:
+Prepare writable state and prediction mirror once:
 
 ```bash
-mkdir -p data models
-sudo chown -R 10001:10001 data
+mkdir -p data models dataset/predictions
+sudo chown -R 10001:10001 data dataset/predictions
 docker compose up --build
 ```
 
 The read-only models directory may remain owned by the user if UID 10001 can
-read it. `docker compose down` preserves bind-mounted state.
+read it. The dataset mount is intentionally writable: local inference rows are
+mirrored to `dataset/predictions/predictions.csv`, and its manifest checksum and
+origin counts are refreshed. `docker compose down` preserves both bind-mounted
+locations.
 
 GPU examples may be documented in a separate optional
 `compose.gpu.example.yaml`; they are not part of the required Compose path or
@@ -93,7 +96,7 @@ Precedence is CLI, environment, default. No configuration file is loaded.
 | `PRT_PORT` | `8000` | Integer `1..65535` |
 | `PRT_DATA_DIR` | `./data` | Created after port reservation if absent; existing directory or parent must be writable; one process lock |
 | `PRT_MODELS_DIR` | `./models` | `:`-separated readable roots; missing allowed |
-| `PRT_SEED_DATASET` | `./dataset/predictions` | Official manifest directory; missing allowed |
+| `PRT_SEED_DATASET` | `./dataset/predictions` | Official manifest plus writable user-prediction mirror; missing allowed |
 | `PRT_OFFLINE` | `false` | Lowercase boolean |
 | `PRT_DEVICE` | `auto` | `auto`, `cpu`, `cuda` |
 | `PRT_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
@@ -146,9 +149,12 @@ storage.
 
 ## 7. Backup and restore
 
-For backup, stop the application, run `publisher-reliability storage verify`,
-and copy or archive the complete data directory. Restore that copy into an empty
-directory and verify before startup.
+For backup, stop the application, run `publisher-reliability storage verify`
+and `publisher-reliability dataset verify ./dataset/predictions`, then copy or
+archive both the complete data directory and `dataset/predictions`. Restore
+both copies and verify before startup. The state ledger is authoritative; the
+dataset copy preserves the additional inspectable/recoverable
+`user_evaluation` rows.
 
 The application has no backup scheduler, retention policy, compaction, or
 automatic backup purge. A backup containing `state/local_content.csv` may

@@ -15,6 +15,7 @@ from .aggregation import WARNING, aggregate
 from .errors import AppError
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
+from .prediction_dataset import sync_user_predictions
 from .storage import Storage, json_field, utc_now
 
 
@@ -51,9 +52,11 @@ class ResearchService:
         model_roots: tuple[Path, ...] = (),
         device: str = "auto",
         inference_engine: InferenceEngine | None = None,
+        prediction_dataset_dir: Path | None = None,
     ):
         self.storage = storage
         self.offline = offline
+        self.prediction_dataset_dir = prediction_dataset_dir
         self.inference = inference_engine or InferenceEngine(
             storage,
             model_roots=model_roots,
@@ -899,6 +902,11 @@ class ResearchService:
             "recorded_at": completed,
         }
         self.storage.append("prediction_runs", run)
+        sync_user_predictions(
+            self.prediction_dataset_dir,
+            self.storage.rows["prediction_runs"],
+            self.models_by_id,
+        )
         if retention == "save_local":
             self._save_content(retrieved)
         return {key: str(value) for key, value in run.items()}

@@ -26,7 +26,7 @@ from typing import Iterator, TextIO
 from urllib.parse import urlsplit
 
 
-PUBLIC_COLUMNS = [
+BASE_PUBLIC_COLUMNS = [
     "article_id",
     "url",
     "title",
@@ -48,6 +48,28 @@ PUBLIC_COLUMNS = [
     "roberta_prob_class_3",
     "roberta_prob_class_4",
 ]
+
+USER_PREDICTION_COLUMNS = [
+    "prediction_origin",
+    "prediction_run_id",
+    "model_id",
+    "prediction_family",
+    "prediction_fold_id",
+    "predicted_label",
+    *[f"prob_class_{index}" for index in range(5)],
+    "prediction_action",
+    "input_source",
+    "content_retention",
+    "job_id",
+    "inference_started_at",
+    "inference_completed_at",
+    "duration_ms",
+    "device",
+    "software_versions_json",
+    "recorded_at",
+]
+
+PUBLIC_COLUMNS = [*BASE_PUBLIC_COLUMNS, *USER_PREDICTION_COLUMNS]
 
 # These compatibility columns remain in the public schema, but their source
 # values are deliberately never redistributed.
@@ -136,6 +158,17 @@ def serialize_csv_row(values: dict[str, object], *, include_header: bool = False
         writer.writeheader()
     else:
         writer.writerow(values)
+    return buffer.getvalue().encode("utf-8")
+
+
+def serialize_original_row(values: dict[str, object]) -> bytes:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=BASE_PUBLIC_COLUMNS,
+        lineterminator="\n",
+    )
+    writer.writerow({column: values.get(column, "") for column in BASE_PUBLIC_COLUMNS})
     return buffer.getvalue().encode("utf-8")
 
 
@@ -238,7 +271,7 @@ def prepare_release(
             if reader.fieldnames is None:
                 raise ValueError("source CSV has no header")
 
-            missing = sorted(set(PUBLIC_COLUMNS) - set(reader.fieldnames))
+            missing = sorted(set(BASE_PUBLIC_COLUMNS) - set(reader.fieldnames))
             if missing:
                 raise ValueError(f"source CSV is missing required columns: {missing}")
 
@@ -271,8 +304,15 @@ def prepare_release(
                     seen_urls.add(url)
 
                 public_row: dict[str, object] = {
-                    column: row[column] for column in PUBLIC_COLUMNS
+                    column: row[column] for column in BASE_PUBLIC_COLUMNS
                 }
+                public_row.update(
+                    {
+                        column: ""
+                        for column in USER_PREDICTION_COLUMNS
+                    }
+                )
+                public_row["prediction_origin"] = "dataset_original"
                 public_row["article_id"] = total_rows
                 public_row["url"] = url
                 public_row["domain"] = normalized_domain(url)
@@ -297,15 +337,21 @@ def prepare_release(
                 current_rows += 1
                 total_rows += 1
                 url_counts[url] += 1
-                source_digest.update(row_bytes)
+                source_digest.update(serialize_original_row(public_row))
 
         close_part()
 
         if total_rows == 0:
             raise ValueError("source CSV contains no data rows")
 
+        if len(part_metadata) == 1:
+            old_path = temp_dir / str(part_metadata[0]["file"])
+            new_path = temp_dir / "predictions.csv"
+            os.replace(old_path, new_path)
+            part_metadata[0]["file"] = "predictions.csv"
+
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_records": source_rows,
             "records": total_rows,
             "unique_urls": len(url_counts),
@@ -314,6 +360,8 @@ def prepare_release(
             "duplicate_source_url_groups": len(duplicate_urls),
             "skipped_duplicate_rows": skipped_duplicate_rows,
             "columns": PUBLIC_COLUMNS,
+            "dataset_original_records": total_rows,
+            "user_evaluation_records": 0,
             "redacted_editorial_columns": REDACTED_EDITORIAL_COLUMNS,
             "excluded_newsguard_columns": EXCLUDED_NEWSGUARD_COLUMNS,
             "max_part_bytes": max_bytes,

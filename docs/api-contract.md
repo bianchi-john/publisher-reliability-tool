@@ -325,6 +325,12 @@ A successful single-article job exposes the following `result` through
 states whether an existing exact run was selected. The probability array always
 uses class order `[0,1,2,3,4]`.
 
+When `origin=local_inference`, the committed authoritative run is also mirrored
+to `dataset/predictions/predictions.csv` as one
+`prediction_origin=user_evaluation` row keyed by the same
+`prediction_run_id`. This storage side effect adds no API field and repeated
+synchronization does not create another row.
+
 Before model execution, the service enforces the cross-validation leakage rule
 from the scientific contract for single articles, explicit lists and publisher
 candidates. A known article outside the selected checkpoint's held-out fold

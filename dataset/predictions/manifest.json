@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_records": 19429,
   "records": 19429,
   "unique_urls": 19429,
@@ -27,7 +27,28 @@
     "roberta_prob_class_1",
     "roberta_prob_class_2",
     "roberta_prob_class_3",
-    "roberta_prob_class_4"
+    "roberta_prob_class_4",
+    "prediction_origin",
+    "prediction_run_id",
+    "model_id",
+    "prediction_family",
+    "prediction_fold_id",
+    "predicted_label",
+    "prob_class_0",
+    "prob_class_1",
+    "prob_class_2",
+    "prob_class_3",
+    "prob_class_4",
+    "prediction_action",
+    "input_source",
+    "content_retention",
+    "job_id",
+    "inference_started_at",
+    "inference_completed_at",
+    "duration_ms",
+    "device",
+    "software_versions_json",
+    "recorded_at"
   ],
   "redacted_editorial_columns": [
     "title",
@@ -49,8 +70,10 @@
     {
       "file": "predictions.csv",
       "rows": 19429,
-      "bytes": 6933652,
-      "sha256": "0b8e1039644289d271b10c31630ae4cf53cb4b2fb801dbc7dc58a452b1b6c586"
+      "bytes": 7652842,
+      "sha256": "2cadefe93385299418a42b0e2397fff254a4743bc170e9816f84d8d284458128"
     }
-  ]
+  ],
+  "dataset_original_records": 19429,
+  "user_evaluation_records": 0
 }
