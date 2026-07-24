@@ -235,19 +235,23 @@ endpoint makes no network request and creates no job or prediction.
 
 ### `POST /api/v1/models/upload`
 
-Multipart with one `file` (`.pt`, or `.tar.gz` only for the official optional
-PEFT directory layout), optional `family`, and optional
-`fold_id`. The request is streamed to a private file, limited by
-`PRT_MODEL_UPLOAD_MAX_BYTES` (default 4 GiB), checksum-verified, and safely
-extracted without traversal or links. Optional PEFT archives are limited to
-10,000 regular entries and 4 GiB total extracted bytes. It then creates a
-`model_validation` job. Failed acquisition creates no job. Generic
-archives/manifests are unsupported. Successful validation atomically moves the
-artifact under `<data-dir>/managed-models`, then atomically registers it in
-`models.csv`; failed validation deletes the temporary upload. A crash between
-those two commits can leave an unregistered artifact in the managed root. It is
-not a model until a later explicit scan recognizes, validates, and registers
-it; startup does not discover it.
+Multipart with one `file`, which must be a self-contained `.zip` satisfying
+`custom-model-bundle.md`. Family, fold, input policy and five-class order come
+only from the constrained `prt-model.json`; they are not independent request
+fields.
+
+The request is streamed to a private file and limited by
+`PRT_MODEL_UPLOAD_MAX_BYTES` (default 4 GiB), then creates a
+`model_validation` job. Validation permits at most 256 regular entries and the
+same uncompressed-byte limit. It rejects traversal, links, executable/native or
+pickle/PyTorch files, `auto_map`, `trust_remote_code`, non-local tokenizer
+requirements, non-five-label configuration, non-finite tensors, and strict
+state-dictionary key/shape mismatch.
+
+Successful validation atomically moves the extracted bundle under
+`<data-dir>/managed-models/<model_id>` and registers it in `models.csv` as
+`custom_transformer_bundle`. Terminal success/failure deletes the acquired ZIP.
+The returned job result includes model ID, family, fold and validation status.
 
 ## 8. Evaluation
 
@@ -343,6 +347,10 @@ successful, partial, or deterministic failed import during the job and creates
 no runs. ZIP and manifest upload are unsupported; the bundled
 manifest is startup/CLI-only. Terminal success/failure deletes the acquired
 source; an interrupted running job is failed and cleaned at startup.
+
+Supported prediction prefixes are `bert` and `roberta`. Each represented
+label/fold pair requires all five probability columns; missing or incomplete
+vectors fail `IMPORT_INVALID`.
 
 ## 11. Aggregation metadata
 

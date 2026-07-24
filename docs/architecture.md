@@ -152,10 +152,10 @@ follows symlinks; a candidate containing a symlink is rejected. API clients can
 scan configured roots or upload an artifact but cannot submit arbitrary server
 paths.
 
-The internal `<data-dir>/managed-models` directory is always an additional scan
-root for successful uploads. Startup does not discover new candidates or rerun
-fixtures; it only checks existence of already registered locators and marks a
-missing one `artifact_missing`. Full discovery/validation is explicit through
+The internal `<data-dir>/managed-models` directory stores successful custom
+bundle uploads. Startup does not rerun their full Transformers validation; a
+scan checks the registered managed directory still exists and marks a missing
+one `artifact_missing`. Built-in BERT/RoBERTa discovery remains explicit through
 the UI/API job or synchronous CLI scan.
 
 Upload validation moves a successful artifact into that root before the
@@ -169,10 +169,11 @@ filesystem location. States are `compatible`, `validated_not_runnable`,
 `resource_unavailable`, and `invalid`.
 Historical runs remain browseable and aggregable when an artifact disappears.
 
-BERT and RoBERTa loaders and fixtures are core. Llama and Mistral loaders are
-optional modules activated only when installed dependencies/hardware allow.
-Unknown artifacts are reported and ignored; no manifest or code from an
-artifact changes loader behavior.
+BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
+fixed PRT manifest vocabulary and architectures already registered in the
+locked Transformers dependency. `auto_map`, `trust_remote_code`, Python/native
+files and pickle weights are rejected. Unknown artifacts are reported and
+ignored; no artifact changes loader behavior.
 
 ## 10. Local HTTP boundary
 

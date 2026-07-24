@@ -13,11 +13,12 @@ predictions/
 
 | Measure | Value |
 | --- | ---: |
-| Source rows | 19,476 |
+| Source rows | 19,429 |
 | Released URLs | 19,429 |
 | Derived articles | 19,411 |
-| Prediction runs | 77,708 |
-| Model/fold identities | 20 |
+| Prediction runs | 38,854 |
+| Runs with five probabilities | 38,854 |
+| Model/fold identities | 10 |
 
 `title`, `text` and `authors` are empty compatibility columns. Protected
 provider labels, scores and metadata are not included.
@@ -45,8 +46,9 @@ User imports may be `.csv` or `.csv.gz` and require:
 - at least one `<family>_predicted_label`;
 - the matching `<family>_fold_id`.
 
-Supported families are `bert`, `roberta`, `llama` and `mistral`. Probability
-columns are optional, but a vector must contain all five classes.
+Supported prediction families are `bert` and `roberta`. Every represented
+prediction must include all five probability columns; incomplete or absent
+vectors are rejected.
 
 Titles, text, authors and protected values are discarded before persistence.
 Equivalent CSV and CSV.GZ contents share one import identity.

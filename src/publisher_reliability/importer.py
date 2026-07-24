@@ -25,13 +25,11 @@ from .identity import (
 from .storage import Storage, json_field, utc_now
 
 
-FAMILIES = ("bert", "roberta", "llama", "mistral")
+FAMILIES = ("bert", "roberta")
 PUBLIC_COLUMNS = [
     "article_id", "url", "title", "text", "authors", "domain",
     "bert_predicted_label", "bert_fold_id",
     "roberta_predicted_label", "roberta_fold_id",
-    "llama_predicted_label", "llama_fold_id",
-    "mistral_predicted_label", "mistral_fold_id",
     *[f"bert_prob_class_{index}" for index in range(5)],
     *[f"roberta_prob_class_{index}" for index in range(5)],
 ]
@@ -52,7 +50,7 @@ class Candidate:
     family: str
     fold_id: int
     predicted_class: int
-    probabilities: tuple[float, ...] | None
+    probabilities: tuple[float, ...]
 
     @property
     def output(self) -> tuple[object, ...]:
@@ -248,28 +246,24 @@ def _parse_candidates(
 
             probability_names = [f"{family}_prob_class_{index}" for index in range(5)]
             probability_values = [(raw.get(name) or "").strip() for name in probability_names]
-            probabilities: tuple[float, ...] | None = None
-            if any(probability_values):
-                if not all(probability_values):
-                    raise AppError(
-                        "IMPORT_INVALID",
-                        f"Row {source_rows} has an incomplete {family} probability vector.",
-                    )
-                try:
-                    probabilities = tuple(float(value) for value in probability_values)
-                except ValueError as exc:
-                    raise AppError(
-                        "IMPORT_INVALID",
-                        f"Row {source_rows} has invalid probabilities.",
-                    ) from exc
-                if (
-                    any(value < 0 or value > 1 for value in probabilities)
-                    or abs(sum(probabilities) - 1) > 1e-5
-                ):
-                    raise AppError(
-                        "IMPORT_INVALID",
-                        f"Row {source_rows} has an invalid probability vector.",
-                    )
+            if not all(probability_values):
+                raise AppError(
+                    "IMPORT_INVALID",
+                    f"Row {source_rows} requires all five {family} probabilities.",
+                )
+            try:
+                probabilities = tuple(float(value) for value in probability_values)
+            except ValueError as exc:
+                raise AppError(
+                    "IMPORT_INVALID", f"Row {source_rows} has invalid probabilities."
+                ) from exc
+            if (
+                any(value < 0 or value > 1 for value in probabilities)
+                or abs(sum(probabilities) - 1) > 1e-5
+            ):
+                raise AppError(
+                    "IMPORT_INVALID", f"Row {source_rows} has an invalid probability vector."
+                )
             candidates.append(
                 Candidate(
                     source_rows, canonical, art_id, hostname, pub_id,
@@ -362,7 +356,7 @@ def import_csv(
 
     run_rows: list[dict[str, object]] = []
     for candidate, model_identifier in selected:
-        probabilities = candidate.probabilities or ("", "", "", "", "")
+        probabilities = candidate.probabilities
         run_rows.append(
             {
                 "prediction_run_id": imported_run_id(
@@ -448,6 +442,8 @@ def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str
     if existing is not None:
         return existing
 
+    _remove_previous_bundled_release(storage)
+
     parts = list(manifest["parts"])
     if len(parts) == 1:
         source = release_dir / str(parts[0]["file"])
@@ -482,3 +478,54 @@ def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str
         )
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _remove_previous_bundled_release(storage: Storage) -> None:
+    """Replace an obsolete bundled release without touching user-owned imports."""
+
+    old_import_ids = {
+        row["import_id"]
+        for row in storage.rows["imports"]
+        if row["source_kind"] == "bundled_manifest"
+    }
+    if not old_import_ids:
+        return
+    removed_run_ids = {
+        row["prediction_run_id"]
+        for row in storage.rows["prediction_runs"]
+        if row["origin"] == "bundled_import"
+        and row["source_import_id"] in old_import_ids
+    }
+    kept_evaluations = []
+    for evaluation in storage.rows["evaluations"]:
+        try:
+            run_ids = json.loads(evaluation["prediction_run_ids_json"])
+        except json.JSONDecodeError:
+            run_ids = []
+        if not any(run_id in removed_run_ids for run_id in run_ids):
+            kept_evaluations.append(evaluation)
+    kept_runs = [
+        row
+        for row in storage.rows["prediction_runs"]
+        if row["prediction_run_id"] not in removed_run_ids
+    ]
+    referenced_model_ids = {
+        row["model_id"] for row in kept_runs
+    } | {
+        row["model_id"] for row in kept_evaluations
+    }
+    kept_models = [
+        row
+        for row in storage.rows["models"]
+        if row["artifact_kind"] != "historical_virtual"
+        or row["model_id"] in referenced_model_ids
+    ]
+    kept_imports = [
+        row
+        for row in storage.rows["imports"]
+        if row["import_id"] not in old_import_ids
+    ]
+    storage.replace("evaluations", kept_evaluations)
+    storage.replace("prediction_runs", kept_runs)
+    storage.replace("models", kept_models)
+    storage.replace("imports", kept_imports)

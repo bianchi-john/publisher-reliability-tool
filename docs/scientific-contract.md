@@ -52,7 +52,8 @@ The bundled legacy wide schema contains:
 
 User CSV/CSV.GZ requires `url` and at least one represented family's label/fold
 pair. Source ID, domain, title, text, and authors are optional. Supported family
-prefixes are `bert`, `roberta`, `llama`, and `mistral`.
+prefixes are `bert` and `roberta`; each represented prediction requires all
+five class probabilities.
 
 Projection rules:
 
@@ -66,11 +67,11 @@ Projection rules:
 - if outputs conflict for one article/model in that source, publish none of
   that pair and report safe row numbers under `IMPORT_INVALID`.
 
-The generated bundled release alone uses its documented first-exact-URL policy:
-19,476 source rows become 19,429 released URLs after 47 skipped later
-occurrences in 42 groups. Runtime normalization yields 19,411 article IDs,
-77,708 unique runs, and 20 historical family/fold model identities. A conflict
-at that stage fails seed verification.
+The generated bundled release contains 19,429 released URLs. Runtime
+normalization yields 19,411 article IDs, 38,854 unique runs, and 10 historical
+BERT/RoBERTa family/fold identities. Every run has one complete five-class
+probability vector. Llama/Mistral hard labels are deliberately absent because
+their class probabilities were not available.
 
 The sole content digest is `prt-dataset-content-v1` as defined by the storage
 contract. Equivalent CSV/CSV.GZ projected record sequences share identity;
@@ -94,7 +95,7 @@ Tokenizer subwords, truncation, attention masks, and padding are model encoding,
 not text cleaning. Saved local body is used unchanged for a missing run under
 `reuse`. `recompute` always retrieves a fresh page.
 
-## 5. Core and optional models
+## 5. Core and custom models
 
 Official artifacts are manually obtained from:
 
@@ -104,7 +105,7 @@ The package contains `official-model-manifest-v1.json` with one immutable entry
 per official family/fold: expected artifact digest, built-in loader recipe and
 version, class order, input length/padding, output-relevant runtime options,
 base/tokenizer repositories, and immutable revisions. The application does not
-download dependencies or read a custom manifest from an artifact.
+download dependencies or execute code from an artifact.
 
 ### 5.1 Core CPU demo
 
@@ -117,23 +118,26 @@ Both use `torch.load(..., map_location="cpu", weights_only=True)`, strict tensor
 keys/shapes, `eval()`, and softmax over five logits. Core compatibility requires
 a frozen CPU float32 reference fixture.
 
-### 5.2 Optional GPU examples
+### 5.2 Custom Transformers bundle
 
-| Family | Artifact | Recipe |
-| --- | --- | --- |
-| Llama | `llama_fold_N.pt` | Llama-3-8B five-label base, 4-bit NF4, documented LoRA, 256 tokens |
-| Mistral | official fold PEFT directory | Mistral-Small-24B-Base-2501, 4-bit NF4, saved tokenizer/adapter, 1,024 tokens |
+A user model is accepted only as the constrained PRT bundle documented in
+`custom-model-bundle.md`: ZIP container, declarative `prt-model.json`, local
+Hugging Face `config.json` and tokenizer, and exactly one
+`model.safetensors`. It must resolve through the installed
+`AutoModelForSequenceClassification` registry, declare five labels and use a
+`custom_...` family plus held-out fold `1..5`.
 
-These loaders are experimental examples. They may require CUDA,
-bitsandbytes/PEFT, licensed base access, and substantial memory. Absence or
-failure does not fail the core release. Their exact notebook-derived LoRA
-target modules, quantization, padding, and adapter configuration remain pinned
-in the official manifest and participate in identity.
+Validation is local-only and uses `trust_remote_code=false`. It rejects
+`auto_map`, Python/native modules, pickle/PyTorch checkpoint files, unsafe ZIP
+paths or links, unknown manifest fields, missing tokenizer resources,
+non-finite weights, and any key/shape mismatch against the architecture derived
+from `config.json`.
 
-Adding a family means implementing a new explicit `ModelLoader`, defining its
-complete identity object, and adding frozen tokenizer/output fixtures. A generic
-manifest interpreter, `trust_remote_code`, executable pickle behavior, or
-runtime module path is forbidden.
+The exact bundle file/digest inventory, manifest input policy, family/fold,
+training convention and loader recipe determine identity. A valid bundle is
+installed below `managed-models` and registered as
+`validated_not_runnable`; safe import does not imply that new-web inference is
+implemented.
 
 ## 6. Exact model identity
 
@@ -189,8 +193,8 @@ its separate exact runnable identity; historical outputs are never relabelled.
 ## 7. Prediction runs and reuse
 
 New inference returns one integer `0..4` and five finite probabilities in class
-order, each in `[0,1]`, sum tolerance `1e-5`. Historical probabilities may be
-missing and are never fabricated.
+order, each in `[0,1]`, sum tolerance `1e-5`. Bundled and user-imported
+predictions also require complete vectors; probabilities are never fabricated.
 
 `reuse` chooses the latest run for exact `(article_id,model_id)` using effective
 completion time descending and run ID ascending. It performs no network or
@@ -270,5 +274,6 @@ truncation/padding, strict keys/shapes, frozen English input, predicted class,
 five reference probabilities (CPU float32 absolute `1e-6`, relative `1e-5`),
 fold identity, aggregation, and absence of protected/editorial leakage.
 
-Live pages are never scientific fixtures. Llama/Mistral/GPU fixtures are a
-separate optional suite and do not block the CPU research demo.
+Live pages are never scientific fixtures. Custom bundle safety/shape fixtures
+are separate from output-equivalence fixtures and do not make a custom model
+runnable.

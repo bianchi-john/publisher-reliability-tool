@@ -40,10 +40,6 @@ class PreparePublicDatasetTest(unittest.TestCase):
                     "bert_fold_id": "1",
                     "roberta_predicted_label": "3",
                     "roberta_fold_id": "1",
-                    "llama_predicted_label": "3",
-                    "llama_fold_id": "1",
-                    "mistral_predicted_label": "3",
-                    "mistral_fold_id": "1",
                 }
             )
             for model in ("bert", "roberta"):

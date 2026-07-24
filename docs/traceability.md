@@ -3,16 +3,16 @@
 **Status:** Normative research-demo coverage map
 
 Acceptance tests verify requirements and do not create additional product
-scope. AT-001–AT-045 are core; AT-046–AT-047 optional GPU; AT-048–AT-050
-optional stress/fault.
+scope. AT-001–AT-047 and AT-051–AT-054 are core; AT-048–AT-050 are optional
+stress/fault.
 
 ## Functional requirements
 
 | Requirement | Acceptance tests |
 | --- | --- |
 | FR-001 | AT-001, AT-002, AT-003, AT-004, AT-018 |
-| FR-002 | AT-011, AT-012, AT-015 |
-| FR-003 | AT-013, AT-014, AT-015, AT-016, AT-048 |
+| FR-002 | AT-011, AT-012, AT-015, AT-054 |
+| FR-003 | AT-013, AT-014, AT-015, AT-016, AT-033, AT-048 |
 | FR-004 | AT-013, AT-020, AT-028, AT-042, AT-045 |
 | FR-005 | AT-028, AT-044 |
 | FR-006 | AT-021, AT-022, AT-044 |
@@ -20,10 +20,10 @@ optional stress/fault.
 | FR-008 | AT-027, AT-028 |
 | FR-009 | AT-029, AT-030, AT-034, AT-041, AT-044 |
 | FR-010 | AT-031, AT-032, AT-033, AT-041 |
-| FR-011 | AT-033 |
+| FR-011 | AT-011, AT-012, AT-013, AT-033 |
 | FR-012 | AT-034, AT-035, AT-038, AT-039, AT-046, AT-047 |
 | FR-013 | AT-035, AT-036, AT-046, AT-047 |
-| FR-014 | AT-035, AT-037, AT-046, AT-047 |
+| FR-014 | AT-035, AT-037 |
 | FR-015 | AT-023, AT-024, AT-025, AT-027, AT-030 |
 | FR-016 | AT-021, AT-022 |
 | FR-017 | AT-005, AT-007, AT-008, AT-009, AT-010, AT-043, AT-044, AT-049, AT-050 |
@@ -32,6 +32,8 @@ optional stress/fault.
 | FR-020 | AT-017, AT-040, AT-041, AT-042 |
 | FR-021 | AT-040, AT-051, AT-053 |
 | FR-022 | AT-026, AT-029, AT-030, AT-051, AT-052 |
+| FR-023 | AT-011, AT-012, AT-033, AT-054 |
+| FR-024 | AT-036, AT-046, AT-047 |
 
 ## Non-functional requirements
 

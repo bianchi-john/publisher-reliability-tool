@@ -143,12 +143,13 @@ Exactly one data row. Unknown schema versions fail startup.
 model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha256,official_manifest_entry_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,class_order_json,max_tokens,padding_policy,adapter_config_sha256,runtime_scientific_json,status,artifact_available,runnable,status_detail,registered_at,last_validated_at
 ```
 
-- `family`: exactly `bert`, `roberta`, `llama`, or `mistral`; user imports use
-  the same four recognized prefixes for historical virtual identities.
+- `family`: `bert` or `roberta` for imported historical predictions; custom
+  model bundles use a validated `custom_...` slug.
 - `status`: `compatible`, `validated_not_runnable`, `historical_only`,
   `artifact_missing`, `dependency_missing`, `resource_unavailable`, or
   `invalid`.
-- `artifact_kind`: `state_dict`, `peft_directory`, or `historical_virtual`.
+- `artifact_kind`: `pytorch_state_dict`, `custom_transformer_bundle`, or
+  `historical_virtual`.
 - `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.
 - `artifact_locator` is deployment metadata and excluded from identity; API
   output reduces it to a root label and relative path.
@@ -167,7 +168,7 @@ prediction_run_id,article_id,canonical_url,publisher_id,normalized_hostname,mode
 - `action`: `import`, `missing_run_inference`, or `recompute`.
 - `input_source`: `unavailable`, `saved_local`, or `ephemeral_web`.
 - Imports require `source_import_id`; inference requires `job_id`.
-- New inference requires five probabilities. Historical vectors may be absent.
+- Every imported or inferred run requires all five probabilities.
 - Canonical URL and normalized hostname are intentionally denormalized so the
   complete article/publisher history is understandable in one ledger.
 

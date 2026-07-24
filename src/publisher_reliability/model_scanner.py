@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from .custom_models import directory_identity
 from .identity import sha256_json
 from .storage import Storage, json_field, utc_now
 
@@ -182,6 +183,40 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
     ]
     current_by_id = {str(row["model_id"]): row for row in discovered}
     for row in previous_local:
+        if row["artifact_kind"] == "custom_transformer_bundle":
+            custom_path = storage.data_dir / row["artifact_locator"]
+            current = dict(row)
+            if custom_path.is_dir() and not custom_path.is_symlink():
+                try:
+                    digest = directory_identity(custom_path)[0]
+                except OSError:
+                    digest = ""
+                if digest == row["artifact_sha256"]:
+                    current.update(
+                        artifact_available=True,
+                        last_validated_at=timestamp,
+                    )
+                else:
+                    current.update(
+                        status="artifact_invalid",
+                        artifact_available=False,
+                        runnable=False,
+                        status_detail=(
+                            "The imported custom Transformer bundle failed its "
+                            "integrity check."
+                        ),
+                        last_validated_at=timestamp,
+                    )
+            else:
+                current.update(
+                    status="artifact_missing",
+                    artifact_available=False,
+                    runnable=False,
+                    status_detail="The imported custom Transformer bundle is missing.",
+                    last_validated_at=timestamp,
+                )
+            current_by_id[row["model_id"]] = current
+            continue
         if row["model_id"] in current_by_id:
             current_by_id[row["model_id"]]["registered_at"] = row["registered_at"]
         elif row["artifact_sha256"] not in seen_digests:

@@ -826,6 +826,7 @@ dependencies = [
 [package.optional-dependencies]
 models = [
     { name = "newspaper3k" },
+    { name = "safetensors" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -843,6 +844,7 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.11.7" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.4.1" },
     { name = "python-multipart", specifier = "==0.0.20" },
+    { name = "safetensors", marker = "extra == 'models'", specifier = "==0.8.0" },
     { name = "torch", marker = "extra == 'models'", specifier = "==2.7.1" },
     { name = "transformers", marker = "extra == 'models'", specifier = "==4.53.2" },
     { name = "uvicorn", specifier = "==0.35.0" },

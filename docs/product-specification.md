@@ -40,7 +40,8 @@ The MVP shall:
 - scan configured model roots and accept browser uploads of supported official
   artifacts;
 - provide BERT and RoBERTa as the core CPU demo;
-- expose Llama and Mistral only as optional experimental GPU loaders;
+- import constrained five-class custom Transformers bundles using local
+  configuration, tokenizer and `safetensors`;
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
@@ -63,8 +64,9 @@ The MVP shall:
   database semantics, automatic backup retention, or online maintenance;
 - ZIP import, generic archive manifests, API import from a server path, or
   arbitrary import roots;
-- generic custom-model manifests, plugins, runtime code loading, automatic
-  downloads, credential management, or cache management;
+- generic custom-model manifests outside the documented PRT bundle, plugins,
+  runtime code loading, automatic downloads, credential management, or cache
+  management;
 - model training, tuning, calibration, automatic ensembling, hosted inference,
   telemetry, analytics, or production metrics;
 - automatic deletion from user backups or external copies;
@@ -163,11 +165,14 @@ Articles and publishers are views derived from those runs.
 The researcher manually downloads official artifacts, copies them below a
 configured model root, and starts a scan. Scan/validation is a
 `model_validation` job because checksums and reference fixtures can be slow.
-The Models page reports compatible, dependency-missing, resource-unavailable,
-artifact-missing, and historical-only identities. It never downloads anything.
+The Models page reports compatible, validated-not-runnable,
+dependency-missing, resource-unavailable, artifact-missing, custom and
+historical-only identities. It never downloads anything.
 
-BERT/RoBERTa CPU behavior is part of the core gate. Llama/Mistral are optional
-and may remain unavailable without failing the demo.
+BERT/RoBERTa CPU behavior is part of the core gate. A custom upload is one
+self-contained `.zip` using the exact format in `custom-model-bundle.md`.
+Validation runs as a `model_validation` job, installs a successful bundle under
+`managed-models`, and never imports executable artifact code.
 
 Evaluate never presents all historical identities as if they were installed
 checkpoints. It intersects stored prediction identities with locally available
@@ -287,10 +292,10 @@ and error states use clear English text.
 | FR-008 | `recompute` and missing-run inference shall create new immutable runs with exact provenance. |
 | FR-009 | Every publisher evaluation shall reference the exact ordered runs and articles used. |
 | FR-010 | The three aggregation methods shall implement the scientific formulas and availability rules exactly. |
-| FR-011 | Missing historical probabilities shall remain missing. |
+| FR-011 | Bundled and user-imported predictions shall contain all five finite class probabilities; values shall never be fabricated. |
 | FR-012 | Exact model identity shall include every output-relevant setting and exclude filesystem location. |
 | FR-013 | Only built-in safe loaders shall read artifacts; artifact code shall never execute. |
-| FR-014 | BERT and RoBERTa shall form the core CPU demo; Llama and Mistral shall be optional. |
+| FR-014 | BERT and RoBERTa shall form the built-in core model path. |
 | FR-015 | New web inference shall use safe retrieval, unchanged extracted text, and deterministic English validation. |
 | FR-016 | Strict offline mode shall prevent every application-initiated outbound HTTP request. |
 | FR-017 | Essential state shall survive restart in the seven documented CSV ledgers. |
@@ -299,6 +304,8 @@ and error states use clear English text.
 | FR-020 | UI and API shall expose model, fold, run, contributing articles, method, and scientific limitations. |
 | FR-021 | Evaluate shall offer only locally present family/fold combinations with sufficient stored coverage and shall explain every empty availability result. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
+| FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
+| FR-024 | Custom Transformers import shall accept only the documented local-only ZIP/config/tokenizer/safetensors contract and reject executable code, pickle, unsafe paths, invalid folds and key/shape mismatches. |
 
 ## 10. Non-functional requirements
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .errors import AppError
+from .custom_models import import_custom_transformer_bundle
 from .importer import import_csv
 from .model_scanner import scan_model_roots
 from .services import ResearchService
@@ -23,10 +24,12 @@ class JobManager:
         service: ResearchService,
         *,
         model_roots: tuple[Path, ...] = (),
+        model_upload_max_bytes: int = 4_294_967_296,
     ):
         self.storage = storage
         self.service = service
         self.model_roots = model_roots
+        self.model_upload_max_bytes = model_upload_max_bytes
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -142,7 +145,24 @@ class JobManager:
                 )
                 source.unlink(missing_ok=True)
             else:
-                result = scan_model_roots(self.storage, self.model_roots)
+                token = request.get("source_upload_id")
+                if isinstance(token, str):
+                    if Path(token).name != token:
+                        raise AppError("INVALID_INPUT", "Invalid upload token.")
+                    source = self.storage.data_dir / "uploads" / token
+                    if not source.is_file():
+                        raise AppError(
+                            "PROCESS_INTERRUPTED",
+                            "The acquired custom model source is missing.",
+                        )
+                    result = import_custom_transformer_bundle(
+                        self.storage,
+                        source,
+                        max_uncompressed_bytes=self.model_upload_max_bytes,
+                    )
+                    source.unlink(missing_ok=True)
+                else:
+                    result = scan_model_roots(self.storage, self.model_roots)
             self._update(
                 row,
                 status="succeeded",

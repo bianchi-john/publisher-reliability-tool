@@ -18,14 +18,16 @@ roberta_fold_1.pt
 roberta_fold_5.pt
 ```
 
-Optional research artifacts use `llama_fold_N.pt` or an official Mistral PEFT
-fold directory.
-
 > [!NOTE]
 > The Models page scans these filenames and safely validates BERT/RoBERTa
 > checkpoint structure, shapes and finite tensor values. A validated checkpoint
 > is not treated as the identity that produced historical dataset predictions.
 > New inference remains a separate implementation milestone.
+
+Custom five-class Hugging Face sequence classifiers are imported from the
+Models page as self-contained `.zip` bundles. See
+[`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for the exact
+safe format.
 
 The application never downloads weights, manages Hugging Face credentials or
 executes code supplied by an artifact.

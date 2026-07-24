@@ -43,6 +43,7 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/v1/articles", openapi.json()["paths"])
         self.assertIn("/api/v1/evaluation-jobs", openapi.json()["paths"])
         self.assertIn("/api/v1/models/available", openapi.json()["paths"])
+        self.assertIn("/api/v1/models/upload", openapi.json()["paths"])
 
         missing = await self.client.get(
             "/api/v1/articles/00000000-0000-0000-0000-000000000000"
@@ -70,6 +71,13 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
             availability.json()["availability"]["code"],
             "NO_LOCAL_CHECKPOINTS",
         )
+
+        invalid_model = await self.client.post(
+            "/api/v1/models/upload",
+            files={"file": ("unsafe.pt", b"not-a-bundle", "application/octet-stream")},
+        )
+        self.assertEqual(invalid_model.status_code, 422)
+        self.assertEqual(invalid_model.json()["error"]["code"], "INVALID_INPUT")
 
     async def test_pagination_validation_uses_stable_error(self) -> None:
         response = await self.client.get("/api/v1/articles?limit=10")

@@ -11,6 +11,33 @@ from publisher_reliability.storage import Storage
 
 
 class ImporterServiceTest(unittest.TestCase):
+    def test_import_requires_complete_probability_vector(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "missing-probabilities.csv"
+            with source.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(
+                    stream,
+                    fieldnames=[
+                        "url",
+                        "bert_predicted_label",
+                        "bert_fold_id",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "url": "https://example.com/article",
+                        "bert_predicted_label": "1",
+                        "bert_fold_id": "1",
+                    }
+                )
+            with Storage(root / "data") as storage:
+                with self.assertRaises(AppError) as raised:
+                    import_csv(storage, source)
+                self.assertEqual(raised.exception.code, "IMPORT_INVALID")
+                self.assertEqual(storage.rows["prediction_runs"], [])
+
     def test_import_projects_private_fields_and_supports_aggregation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

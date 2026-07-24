@@ -332,7 +332,11 @@ class ResearchService:
                     else "local"
                 ),
                 "support_level": (
-                    "core" if row["family"] in {"bert", "roberta"} else "optional"
+                    "core"
+                    if row["family"] in {"bert", "roberta"}
+                    else "custom"
+                    if row["family"].startswith("custom_")
+                    else "optional"
                 ),
             }
             for row in self.storage.rows["models"]

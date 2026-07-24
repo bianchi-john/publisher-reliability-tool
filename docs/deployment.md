@@ -18,11 +18,15 @@ Reference platform: Ubuntu 24.04 LTS x86-64. Use `uv` 0.8.3 with the committed
 `uv.lock`:
 
 ```bash
-uv sync --frozen
+uv sync --frozen --extra models
 source .venv/bin/activate
 publisher-reliability dataset verify ./dataset/predictions
 publisher-reliability serve
 ```
+
+The `models` extra is required for local checkpoint scanning and custom
+Transformer validation. A base-only sync remains sufficient for browsing,
+imports and stored aggregation.
 
 Production frontend assets are built into the package. Successful startup
 prints the local UI, API, docs, data directory, and offline/device state. The
@@ -122,8 +126,9 @@ are provisioned separately with normal Hugging Face/Transformers tooling. The
 application has no download manager, setup command, credentials, or cache
 administrator.
 
-BERT/RoBERTa CPU is the supported core path. GPU dependencies and optional
-Llama/Mistral examples are installed and operated by the researcher.
+BERT/RoBERTa CPU is the supported core path. Custom Transformers are uploaded
+as the documented self-contained ZIP and validated entirely from local files;
+the application does not download a base model, tokenizer or custom code.
 
 ## 7. Backup and restore
 

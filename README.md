@@ -17,11 +17,15 @@ reproducible evaluations. It serves a web interface and REST API at
 Requires Ubuntu/Linux, Python 3.12 and [`uv` 0.8.3](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync --frozen
+uv sync --frozen --extra models
 source .venv/bin/activate
 publisher-reliability dataset verify ./dataset/predictions
 publisher-reliability serve
 ```
+
+The `models` extra installs the locked PyTorch, Transformers and safetensors
+dependencies required to scan checkpoints and validate custom bundles. Use
+`uv sync --frozen` only for a lightweight stored-prediction-only environment.
 
 Open **<http://127.0.0.1:8000>**. API documentation is available at
 **<http://127.0.0.1:8000/api/docs>**.
@@ -52,8 +56,8 @@ The service is published only on `127.0.0.1:8000`.
 The bundled release produces:
 
 - **19,411** derived articles;
-- **77,708** immutable prediction runs;
-- **20** historical model/fold identities.
+- **38,854** immutable prediction runs with complete five-class probabilities;
+- **10** historical BERT/RoBERTa model/fold identities.
 
 Imports are identified by content digest, so restarting or importing the same
 dataset again does not duplicate data.
@@ -77,6 +81,12 @@ test fold `N`; checkpoints trained on that article are hidden and rejected.
 New URLs with no stored run report that inference is required instead of
 appearing as a generic compatibility failure.
 
+The Models page also accepts a constrained custom Transformers `.zip` bundle
+using `safetensors` and a local tokenizer. It validates and registers supported
+five-class `AutoModelForSequenceClassification` architectures without loading
+custom Python code. Imported custom models remain non-runnable until the new-web
+inference pipeline is implemented.
+
 Official artifacts are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)
 and remain outside version control.
@@ -87,7 +97,7 @@ and remain outside version control.
 - Imported titles, article text and authors are discarded.
 - Authors and raw HTML have no storage field.
 - Every publisher evaluation records the exact model, articles and runs used.
-- Missing historical probabilities remain missing.
+- Every bundled historical run includes all five class probabilities.
 - The only tracked dataset is the prediction release in `dataset/predictions`.
 
 See [dataset/README.md](dataset/README.md) for the dataset format.

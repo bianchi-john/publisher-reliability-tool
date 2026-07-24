@@ -95,6 +95,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             *settings.models_dirs,
             storage.data_dir / "managed-models",
         ),
+        model_upload_max_bytes=settings.model_upload_max_bytes,
     )
 
     @asynccontextmanager
@@ -353,6 +354,43 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.post("/api/v1/models/scan", status_code=202)
     async def model_scan(_body: EmptyRequest):
         return {"job_id": jobs.submit("model_validation", {})}
+
+    @app.post("/api/v1/models/upload", status_code=202)
+    async def model_upload(file: UploadFile = File(...)):
+        filename = Path(file.filename or "").name
+        if not filename.lower().endswith(".zip"):
+            raise AppError(
+                "INVALID_INPUT",
+                "Custom model upload must be a self-contained .zip bundle.",
+            )
+        token = f"{uuid.uuid4()}.model.zip"
+        destination = storage.data_dir / "uploads" / token
+        total = 0
+        try:
+            with destination.open("xb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > settings.model_upload_max_bytes:
+                        raise AppError(
+                            "PAYLOAD_TOO_LARGE",
+                            "Custom model upload exceeds the byte limit.",
+                        )
+                    output.write(chunk)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        finally:
+            await file.close()
+        return {
+            "job_id": jobs.submit(
+                "model_validation",
+                {
+                    "source_upload_id": token,
+                    "source_name": filename,
+                    "bundle_kind": "custom_transformer",
+                },
+            )
+        }
 
     @app.post("/api/v1/evaluation-jobs", status_code=202)
     async def evaluation_job(body: EvaluationRequest):

@@ -2,9 +2,9 @@
 
 **Status:** Normative verification contract
 
-AT-001–AT-045 and AT-051–AT-053 form the core release gate on a normal CPU workstation.
-AT-046–AT-047 are optional GPU tests. AT-048–AT-050 are optional stress/fault
-tests. Optional failures are reported but do not block the core demo.
+AT-001–AT-047 and AT-051–AT-054 form the core release gate on a normal CPU
+workstation. AT-048–AT-050 are optional stress/fault tests. Optional failures
+are reported but do not block the core demo.
 
 Tests observe public API/UI/CLI behavior and documented CSV files, not private
 classes or implementation call graphs.
@@ -78,14 +78,14 @@ published.
 ### AT-011 — Bundled release verification
 
 The committed manifest verifies part size/SHA-256, content digest, empty
-editorial fields, 19,476 source rows, 19,429 released URLs, 42 duplicate groups,
-and 47 skipped later occurrences.
+editorial fields, 19,429 released URLs, BERT/RoBERTa-only columns, and complete
+five-class probability vectors for both families.
 
 ### AT-012 — Bundled import identity
 
-First startup produces 19,411 derived articles, 77,708 immutable runs, and 20
-historical model identities. Restart returns the existing digest import without
-changing those counts.
+First startup produces 19,411 derived articles, 38,854 immutable runs, and 10
+historical BERT/RoBERTa model identities. Every run has five probabilities.
+Restart returns the existing digest import without changing those counts.
 
 ### AT-013 — Protected user-import projection
 
@@ -217,7 +217,8 @@ Classes `[0,1,4]` store `1.666666...`, display `1.667`, and yield class 2 using
 ### AT-033 — Mean probabilities
 
 Complete vectors are averaged component-wise and smallest maximum index wins.
-Any missing vector returns `PROBABILITIES_REQUIRED` without fabricating data.
+The importer rejects a missing vector; corrupted legacy state still returns
+`PROBABILITIES_REQUIRED` without fabricating data.
 
 ### AT-034 — Exact compatibility and historical models
 
@@ -300,19 +301,22 @@ runtime data. Native/Compose inference over identical frozen text/model on CPU
 matches class and reference probabilities within absolute `1e-6`, relative
 `1e-5`.
 
-## H. Optional GPU suite
+## H. Custom Transformer import
 
-### AT-046 — Optional Llama loader
+### AT-046 — Valid custom Transformer bundle
 
-When authorized base, CUDA, and optional dependencies exist, the pinned 4-bit
-LoRA fixture passes. Otherwise it reports unavailable and does not affect the
-core gate.
+A ZIP containing the closed manifest, supported five-label Transformers config,
+local tokenizer and finite `model.safetensors` passes local-only validation,
+installs under `managed-models/<model_id>`, registers exact digest/input/fold
+provenance, deletes the acquired upload and appears on Models as
+`validated_not_runnable`.
 
-### AT-047 — Optional Mistral loader
+### AT-047 — Unsafe or incompatible custom bundle
 
-When the official PEFT fold, 24B base, CUDA, and optional dependencies exist,
-the pinned tokenizer/adapter fixture passes. Otherwise it reports unavailable
-and does not affect the core gate.
+Traversal, absolute paths, links, decompression overflow, Python/native/pickle
+files, `auto_map`, `trust_remote_code`, unknown manifest fields, missing local
+tokenizer, labels other than five, invalid fold convention, non-finite values,
+or strict key/shape mismatch fail without registration or an installed bundle.
 
 ## I. Optional stress and fault suite
 
@@ -339,9 +343,9 @@ passes verification after documented temp cleanup/marker recovery.
 ### AT-051 — Local inventory intersection
 
 Given only local BERT fold 1 and RoBERTa fold 1 checkpoints, availability never
-offers Llama, Mistral or folds 2–5. A held-out fold-1 dataset article offers the
-two matching stored identities while preserving separate local and historical
-model IDs.
+offers absent custom families or folds 2–5. A held-out fold-1 dataset article
+offers the two matching stored identities while preserving separate local and
+historical model IDs.
 
 ### AT-052 — Training-data leakage guard
 
@@ -359,3 +363,12 @@ exists. Other empty states distinguish no local checkpoints, no matching
 family/fold and insufficient safe articles. Single-article mode hides publisher
 count, aggregation and partial controls. Publisher mode explains that partial
 means using at least two but fewer than the requested safe articles.
+
+### AT-054 — Bundled release replacement
+
+Starting with the obsolete four-family bundled import and then loading the
+current manifest removes old bundled runs, their unreferenced historical model
+identities, obsolete bundled import row and any publisher aggregation that
+references a removed bundled run. It then imports exactly 38,854 BERT/RoBERTa
+runs. User imports, their models/runs/evaluations, saved content, jobs and local
+checkpoint registrations are unchanged.

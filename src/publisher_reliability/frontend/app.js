@@ -59,7 +59,7 @@ async function dashboard() {
     <div class="grid">
       <section class="card"><div class="muted">Articles</div><div class="metric">${Number(d.articles).toLocaleString()}</div><p>Distinct articles represented in prediction history</p></section>
       <section class="card"><div class="muted">Stored predictions</div><div class="metric">${Number(d.historical_predictions).toLocaleString()}</div><p>Immutable model outputs imported from datasets</p></section>
-      <section class="card"><div class="muted">With probabilities</div><div class="metric">${Number(d.predictions_with_probabilities).toLocaleString()}</div><p>Runs containing all five class probabilities</p></section>
+      <section class="card"><div class="muted">Complete probability vectors</div><div class="metric">${Number(d.predictions_with_probabilities).toLocaleString()}</div><p>Every bundled BERT/RoBERTa run contains all five classes</p></section>
       <section class="card"><div class="muted">Publishers</div><div class="metric">${Number(d.publishers).toLocaleString()}</div><p>Normalized publisher identities</p></section>
       <section class="card"><div class="muted">Created aggregations</div><div class="metric">${Number(c.evaluations).toLocaleString()}</div><p>Publisher-level results explicitly created here</p></section>
       <section class="card"><div class="muted">Model identities</div><div class="metric">${Number(c.models).toLocaleString()}</div><p>Historical identities plus validated local checkpoints</p></section>
@@ -121,7 +121,7 @@ async function publisherDetail(id, params) {
     api(`/api/v1/prediction-runs?publisher_id=${encodeURIComponent(id)}&limit=100&offset=${offset}`),
   ]);
   content.innerHTML = pageHead("Publisher dataset history", publisher.normalized_hostname,
-    "Every stored article/model prediction is listed below; missing probability vectors are shown explicitly.",
+    "Every stored BERT/RoBERTa prediction is listed below with its complete five-class probability vector.",
     `<a class="button secondary" href="#publishers">Back to publishers</a>`) + `
     <div class="grid detail-metrics">
       <section class="card"><div class="muted">Articles</div><div class="metric">${publisher.article_count}</div></section>
@@ -179,8 +179,15 @@ function renderModelTables(items) {
 
 async function models() {
   content.innerHTML = pageHead("Checkpoint inventory", "Models",
-    "This page scans configured directories and lists only checkpoints actually present on disk.",
+    "Scan official checkpoints or import a self-contained custom Transformers classifier bundle.",
     `<button id="scan">Rescan model directories</button>`) + `
+    <section class="card full"><h2>Import custom Transformer</h2>
+      <p class="muted">Upload a safe .zip containing prt-model.json, config.json, model.safetensors and a local tokenizer. Custom Python code and pickle weights are rejected.</p>
+      <form id="custom-model-upload"><div class="row">
+        <label>PRT Transformer bundle<input required name="file" type="file" accept=".zip,application/zip"></label>
+        <button>Validate and import</button>
+      </div></form>
+    </section>
     <div id="scan-state" class="notice" aria-live="polite">Loading model inventory…</div>
     <div id="model-tables" class="loading">Loading models…</div>`;
   const scanButton = document.querySelector("#scan");
@@ -213,6 +220,26 @@ async function models() {
   }
 
   scanButton.addEventListener("click", runScan);
+  document.querySelector("#custom-model-upload").addEventListener("submit", async event => {
+    event.preventDefault();
+    const uploadButton = event.currentTarget.querySelector("button");
+    uploadButton.disabled = true;
+    scanState.textContent = "Uploading custom Transformer bundle…";
+    try {
+      const submitted = await api("/api/v1/models/upload", {
+        method: "POST",
+        body: new FormData(event.currentTarget),
+      });
+      const job = await waitForJob(submitted.job_id, scanState);
+      scanState.textContent = job.result.message;
+      event.currentTarget.reset();
+      await loadInventory();
+    } catch (error) {
+      scanState.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+    } finally {
+      uploadButton.disabled = false;
+    }
+  });
   const items = await loadInventory();
   if (!items.some(row => row.identity_kind === "local") && !sessionStorage.getItem("prt-model-scan-started")) {
     sessionStorage.setItem("prt-model-scan-started", "true");

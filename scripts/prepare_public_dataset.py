@@ -37,10 +37,6 @@ PUBLIC_COLUMNS = [
     "bert_fold_id",
     "roberta_predicted_label",
     "roberta_fold_id",
-    "llama_predicted_label",
-    "llama_fold_id",
-    "mistral_predicted_label",
-    "mistral_fold_id",
     "bert_prob_class_0",
     "bert_prob_class_1",
     "bert_prob_class_2",
@@ -70,15 +66,11 @@ EXCLUDED_NEWSGUARD_COLUMNS = [
 PREDICTION_COLUMNS = [
     "bert_predicted_label",
     "roberta_predicted_label",
-    "llama_predicted_label",
-    "mistral_predicted_label",
 ]
 
 FOLD_COLUMNS = [
     "bert_fold_id",
     "roberta_fold_id",
-    "llama_fold_id",
-    "mistral_fold_id",
 ]
 
 PROBABILITY_GROUPS = {
@@ -246,7 +238,7 @@ def prepare_release(
             if reader.fieldnames is None:
                 raise ValueError("source CSV has no header")
 
-            missing = sorted(set(PUBLIC_COLUMNS + EXCLUDED_NEWSGUARD_COLUMNS) - set(reader.fieldnames))
+            missing = sorted(set(PUBLIC_COLUMNS) - set(reader.fieldnames))
             if missing:
                 raise ValueError(f"source CSV is missing required columns: {missing}")
 
