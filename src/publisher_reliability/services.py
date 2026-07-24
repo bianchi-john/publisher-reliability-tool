@@ -80,8 +80,14 @@ class ResearchService:
         model_id: str | None = None,
         predicted_class: int | None = None,
         origin: str | None = None,
+        article_source: str | None = None,
         sort: str = "updated_desc",
     ) -> list[dict[str, object]]:
+        if article_source not in {None, "dataset", "user_evaluation"}:
+            raise AppError("INVALID_INPUT", "Unknown article source filter.")
+        origin_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        for run in self.storage.rows["prediction_runs"]:
+            origin_counts[run["article_id"]][run["origin"]] += 1
         grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
         for run in self.storage.rows["prediction_runs"]:
             if model_id and run["model_id"] != model_id:
@@ -99,6 +105,12 @@ class ResearchService:
         content_ids = {row["article_id"] for row in self.storage.rows["local_content"]}
         summaries: list[dict[str, object]] = []
         for art_id, runs in grouped.items():
+            counts = origin_counts[art_id]
+            dataset_run_count = counts["bundled_import"] + counts["user_import"]
+            local_run_count = counts["local_inference"]
+            source_type = "dataset" if dataset_run_count else "user_evaluation"
+            if article_source and source_type != article_source:
+                continue
             ordered = newest_runs(runs)
             latest = ordered[0]
             summaries.append(
@@ -112,6 +124,10 @@ class ResearchService:
                     "latest_prediction_run_id": latest["prediction_run_id"],
                     "latest_model_id": latest["model_id"],
                     "latest_predicted_class": int(latest["predicted_class"]),
+                    "source_type": source_type,
+                    "dataset_run_count": dataset_run_count,
+                    "local_run_count": local_run_count,
+                    "has_user_evaluation": bool(local_run_count),
                     "content_saved": art_id in content_ids,
                     "first_seen_at": min(run["recorded_at"] for run in runs),
                     "updated_at": max(_effective_time(run) for run in runs),
@@ -632,8 +648,9 @@ class ResearchService:
         columns = [
             "article_id", "canonical_url", "publisher_id", "normalized_hostname",
             "model_count", "run_count", "latest_prediction_run_id",
-            "latest_model_id", "latest_predicted_class", "content_saved",
-            "first_seen_at", "updated_at",
+            "latest_model_id", "latest_predicted_class", "source_type",
+            "dataset_run_count", "local_run_count", "has_user_evaluation",
+            "content_saved", "first_seen_at", "updated_at",
         ]
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
@@ -685,11 +702,16 @@ class ResearchService:
                 reused = True
             return {
                 "article_id": run["article_id"],
+                "canonical_url": run["canonical_url"],
                 "prediction_run_id": run["prediction_run_id"],
                 "predicted_class": int(run["predicted_class"]),
                 "probabilities": [
                     float(run[f"prob_class_{index}"]) for index in range(5)
                 ],
+                "model_id": model_identifier,
+                "family": model["family"],
+                "fold_id": int(model["fold_id"]),
+                "origin": run["origin"],
                 "reused": reused,
             }
 

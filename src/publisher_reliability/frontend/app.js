@@ -1,6 +1,27 @@
 const content = document.querySelector("#content");
 const stateBadge = document.querySelector("#system-state");
+const themeToggle = document.querySelector("#theme-toggle");
 const warning = "Predictions are estimates, not fact checks. Softmax values are not necessarily calibrated confidence.";
+const THEME_KEY = "prt-theme";
+
+function applyTheme(theme, persist = false) {
+  const selected = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = selected;
+  themeToggle.setAttribute("aria-pressed", String(selected === "dark"));
+  themeToggle.querySelector(".theme-label").textContent = selected === "dark"
+    ? "Light theme"
+    : "Dark theme";
+  themeToggle.querySelector(".theme-icon").textContent = selected === "dark" ? "☀" : "◐";
+  if (persist) localStorage.setItem(THEME_KEY, selected);
+}
+
+applyTheme(document.documentElement.dataset.theme);
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", event => {
+  if (!localStorage.getItem(THEME_KEY)) applyTheme(event.matches ? "dark" : "light");
+});
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -11,6 +32,21 @@ const pageHead = (eyebrow, title, intro, action = "") => `
   <header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>
   <p class="intro">${intro}</p></div>${action}</header>`;
 const modelLabel = (row) => `${String(row.family).toUpperCase()} · fold ${row.fold_id}`;
+const originLabel = (origin) => ({
+  bundled_import: "Original dataset",
+  user_import: "Imported dataset",
+  local_inference: "User evaluation",
+})[origin] || origin;
+
+function articleSourceBadges(row) {
+  const primary = row.source_type === "user_evaluation"
+    ? `<span class="source-badge user-source">User evaluated</span>`
+    : `<span class="source-badge dataset-source">Dataset article</span>`;
+  const local = row.source_type === "dataset" && row.has_user_evaluation
+    ? `<span class="source-badge user-source">Also evaluated by user</span>`
+    : "";
+  return `<span class="source-badges">${primary}${local}</span>`;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -39,12 +75,51 @@ function probabilityCells(run) {
   return run.probabilities.map(value => `<td class="mono probability">${(Number(value) * 100).toFixed(2)}%</td>`).join("");
 }
 
+function articlePredictionResult(result) {
+  const sourceText = result.reused
+    ? "Stored prediction reused"
+    : "New user evaluation";
+  const sourceClass = result.origin === "local_inference" ? "user-source" : "dataset-source";
+  return `<section class="evaluation-result-card" aria-labelledby="prediction-result-title">
+    <div class="result-heading">
+      <div>
+        <div class="eyebrow">Evaluation completed</div>
+        <h2 id="prediction-result-title">Predicted label</h2>
+      </div>
+      <div class="predicted-label">Class ${result.predicted_class}</div>
+    </div>
+    <div class="result-meta">
+      <span class="source-badge ${sourceClass}">${escapeHtml(sourceText)}</span>
+      <span><b>Model:</b> ${escapeHtml(String(result.family).toUpperCase())} · fold ${result.fold_id}</span>
+    </div>
+    <h3>Probabilities for every class</h3>
+    <div class="probability-results">
+      ${result.probabilities.map((value, index) => {
+        const percent = Number(value) * 100;
+        const selected = index === Number(result.predicted_class);
+        return `<div class="probability-result ${selected ? "predicted" : ""}">
+          <div class="probability-result-label"><span>Class ${index}${selected ? " · predicted" : ""}</span>
+            <b>${percent.toFixed(2)}%</b></div>
+          <div class="probability-track"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>
+          <div class="mono">${Number(value).toFixed(8)}</div>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="result-actions">
+      <a class="button secondary" href="#article/${encodeURIComponent(result.article_id)}">Open complete prediction history</a>
+      <span class="muted">Run ${shortId(result.prediction_run_id)}</span>
+    </div>
+    <p class="warning">${warning}</p>
+  </section>`;
+}
+
 function pager(base, page) {
+  const separator = base.includes("?") ? "&" : "?";
   const previous = page.offset > 0
-    ? `<a class="button secondary" href="#${base}?offset=${Math.max(0, page.offset - page.limit)}">Previous</a>`
+    ? `<a class="button secondary" href="#${base}${separator}offset=${Math.max(0, page.offset - page.limit)}">Previous</a>`
     : "";
   const next = page.next_offset !== null
-    ? `<a class="button secondary" href="#${base}?offset=${page.next_offset}">Next</a>`
+    ? `<a class="button secondary" href="#${base}${separator}offset=${page.next_offset}">Next</a>`
     : "";
   return previous || next ? `<div class="pager">${previous}<span class="muted">Rows ${page.offset + 1}–${page.offset + page.limit}</span>${next}</div>` : "";
 }
@@ -71,22 +146,41 @@ async function dashboard() {
 
 async function articles(_id, params) {
   const offset = Number(params.get("offset") || 0);
+  const source = params.get("source") || "";
+  const sourceQuery = source ? `&article_source=${encodeURIComponent(source)}` : "";
+  const pageBase = source ? `articles?source=${encodeURIComponent(source)}` : "articles";
   content.innerHTML = pageHead("Prediction history", "Articles & predictions",
-    "Open an article to inspect every stored model output and every available class probability.",
-    `<a class="button secondary" href="/api/v1/articles/export">Export CSV</a>`) + `<div class="loading">Loading articles…</div>`;
-  const data = await api(`/api/v1/articles?limit=25&sort=url_asc&offset=${offset}`);
+    "Dataset articles and articles classified by the user are identified separately. Open one to inspect every model output and probability.",
+    `<a class="button secondary" href="/api/v1/articles/export${source ? `?article_source=${encodeURIComponent(source)}` : ""}">Export CSV</a>`) + `
+    <div class="source-tabs" aria-label="Filter articles by source">
+      <a class="${source ? "" : "active"}" href="#articles">All articles</a>
+      <a class="${source === "dataset" ? "active" : ""}" href="#articles?source=dataset">Dataset articles</a>
+      <a class="${source === "user_evaluation" ? "active" : ""}" href="#articles?source=user_evaluation">User-evaluated articles</a>
+    </div>
+    <div class="source-legend">
+      <span><span class="source-dot dataset-source"></span><b>Dataset article:</b> at least one imported prediction.</span>
+      <span><span class="source-dot user-source"></span><b>User evaluated:</b> a new article classified locally through Evaluate.</span>
+    </div>
+    <div class="loading">Loading articles…</div>`;
+  const data = await api(`/api/v1/articles?limit=25&sort=url_asc&offset=${offset}${sourceQuery}`);
   content.querySelector(".loading").outerHTML = table(
-    ["Article URL", "Publisher", "Models", "Predictions", "Latest class"],
-    data.items.map(row => `<tr><td><a class="url detail-link" href="#article/${encodeURIComponent(row.article_id)}" title="${escapeHtml(row.canonical_url)}">${escapeHtml(row.canonical_url)}</a>${shortId(row.article_id)}</td>
+    ["Article URL", "Source", "Publisher", "Models", "Predictions", "Latest label"],
+    data.items.map(row => `<tr class="${row.source_type === "user_evaluation" ? "user-article-row" : "dataset-article-row"}"><td><a class="url detail-link" href="#article/${encodeURIComponent(row.article_id)}" title="${escapeHtml(row.canonical_url)}">${escapeHtml(row.canonical_url)}</a>${shortId(row.article_id)}</td>
+      <td>${articleSourceBadges(row)}</td>
       <td>${escapeHtml(row.normalized_hostname)}</td><td>${row.model_count}</td><td>${row.run_count}</td>
-      <td><span class="class-chip">${row.latest_predicted_class}</span></td></tr>`)
-  ) + pager("articles", data.page);
+      <td><span class="class-chip">Class ${row.latest_predicted_class}</span></td></tr>`)
+  ) + pager(pageBase, data.page);
 }
 
 async function articleDetail(id) {
   const row = await api(`/api/v1/articles/${encodeURIComponent(id)}`);
   content.innerHTML = pageHead("Article prediction history", row.normalized_hostname,
     row.canonical_url, `<a class="button secondary" href="#articles">Back to articles</a>`) + `
+    <div class="article-source-banner ${row.source_type === "user_evaluation" ? "user-source-panel" : "dataset-source-panel"}">
+      ${articleSourceBadges(row)}
+      <b>${row.source_type === "user_evaluation" ? "Created through a user evaluation" : "Originally represented in an imported dataset"}</b>
+      <span>${row.dataset_run_count} imported prediction(s) · ${row.local_run_count} local user evaluation(s)</span>
+    </div>
     <div class="grid detail-metrics">
       <section class="card"><div class="muted">Models</div><div class="metric">${row.model_count}</div></section>
       <section class="card"><div class="muted">Stored predictions</div><div class="metric">${row.run_count}</div></section>
@@ -97,7 +191,7 @@ async function articleDetail(id) {
       ["Model / fold", "Predicted class", "P(class 0)", "P(class 1)", "P(class 2)", "P(class 3)", "P(class 4)", "Origin", "Run"],
       row.runs.map(run => `<tr><td><b>${escapeHtml(String(run.family || "unknown").toUpperCase())}</b><br>fold ${run.fold_id ?? "—"}</td>
         <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
-        <td>${escapeHtml(run.origin)}</td><td>${shortId(run.prediction_run_id)}</td></tr>`)
+        <td><span class="source-badge ${run.origin === "local_inference" ? "user-source" : "dataset-source"}">${escapeHtml(originLabel(run.origin))}</span></td><td>${shortId(run.prediction_run_id)}</td></tr>`)
     )}</section><p class="warning">${warning}</p>`;
 }
 
@@ -306,14 +400,14 @@ async function jobsPage() {
 
 async function evaluate() {
   content.innerHTML = pageHead("Stored prediction workflow", "Evaluate",
-    "Enter an article or publisher first. The model list is built only from compatible predictions that actually exist for that input.") + `
+    "Enter an article or publisher first. New articles can be classified by runnable local models; stored dataset predictions are reused when available.") + `
     <section class="card full"><form id="evaluation">
       <div class="row">
         <label>Input type<select name="type"><option value="article">Single article</option><option value="publisher">Publisher</option></select></label>
         <label class="grow">Article or publisher URL<input required name="url" type="url" placeholder="https://publisher.example/article"></label>
       </div>
       <div class="row evaluation-options">
-        <label>Available stored model<select required disabled name="model_id"><option value="">Enter a valid URL first</option></select></label>
+        <label>Available model<select required disabled name="model_id"><option value="">Enter a valid URL first</option></select></label>
         <label class="publisher-only">Aggregation method<select name="method"><option value="majority_vote">Majority vote</option><option value="ordinal_mean">Ordinal mean</option><option value="mean_probabilities">Mean probabilities</option></select>
           <small>How the selected article predictions are combined into one publisher result.</small></label>
         <label class="publisher-only">Requested safe articles<input name="count" type="number" min="2" max="50" value="10">
@@ -324,6 +418,10 @@ async function evaluate() {
       <div id="model-availability" class="notice" aria-live="polite">Models will be detected from stored predictions for this input.</div>
       <div class="row"><button disabled>Start evaluation</button></div>
     </form><div id="evaluation-result" aria-live="polite"></div></section>
+    <section class="section-block"><h2>Recent user article evaluations</h2>
+      <p class="muted">New local predictions remain visible here after a refresh. Open an article for its complete model history.</p>
+      <div id="recent-article-evaluations" class="loading">Loading user evaluations…</div>
+    </section>
     <section class="section-block"><h2>Previously created publisher aggregations</h2><div id="saved-evaluations" class="loading">Loading aggregations…</div></section>
     <p class="warning">${warning}</p>`;
 
@@ -336,6 +434,23 @@ async function evaluate() {
   const availability = document.querySelector("#model-availability");
   const submit = form.querySelector("button[type='submit'], button:not([type])");
   let timer;
+
+  async function loadRecentArticleEvaluations() {
+    const recent = await api("/api/v1/prediction-runs?origin=local_inference&limit=25");
+    document.querySelector("#recent-article-evaluations").outerHTML = `<div id="recent-article-evaluations">${
+      recent.items.length
+        ? table(
+          ["Article", "Model / fold", "Predicted label", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Created"],
+          recent.items.map(run => `<tr class="user-article-row">
+            <td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a>
+              <span class="source-badge user-source">User evaluation</span></td>
+            <td><b>${escapeHtml(String(run.family || "unknown").toUpperCase())}</b><br>fold ${run.fold_id ?? "—"}</td>
+            <td><span class="class-chip">Class ${run.predicted_class}</span></td>${probabilityCells(run)}
+            <td>${escapeHtml(run.inference_completed_at || run.recorded_at)}</td></tr>`)
+        )
+        : `<div class="empty notice">No user article evaluation has been completed yet.</div>`
+    }</div>`;
+  }
 
   function updateFieldState() {
     const publisher = typeField.value === "publisher";
@@ -412,18 +527,15 @@ async function evaluate() {
       output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Retrieving and classifying may take a little while on CPU.</p>`;
       const completed = await waitForJob(job.job_id, output);
       if (type === "article") {
-        output.innerHTML = `<section class="card"><h2>Article prediction</h2>
-          <p><span class="class-chip">Class ${completed.result.predicted_class}</span>
-          ${completed.result.reused ? "Reused stored prediction" : "New local inference"}</p>
-          <div class="probabilities">${completed.result.probabilities.map((value, index) =>
-            `<span><b>C${index}</b> ${Number(value).toFixed(6)}</span>`).join("")}</div>
-          <p class="muted">Run ${shortId(completed.result.prediction_run_id)}</p></section>`;
+        output.innerHTML = articlePredictionResult(completed.result);
+        await loadRecentArticleEvaluations();
       } else {
         output.innerHTML = `<p class="notice">Evaluation completed: Class ${completed.result.result_class}, using ${completed.result.used_count} article(s).</p>`;
       }
     } catch (error) { output.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
   });
 
+  await loadRecentArticleEvaluations();
   const evaluations = await api("/api/v1/evaluations?limit=25");
   document.querySelector("#saved-evaluations").outerHTML = evaluations.items.length
     ? table(
@@ -452,10 +564,12 @@ async function route() {
     const activePage = current.page === "article" ? "articles" : current.page === "publisher" ? "publishers" : current.page;
     link.classList.toggle("active", link.dataset.page === activePage);
   });
-  content.innerHTML = `<div class="loading">Loading…</div>`;
+  content.setAttribute("aria-busy", "true");
   try { await (routes[current.page] || dashboard)(current.id, current.params); }
   catch (error) { content.innerHTML = pageHead("Request failed", "Unable to load this view", "") + `<p class="error">${escapeHtml(error.message)}</p>`; }
-  content.focus();
+  finally { content.setAttribute("aria-busy", "false"); }
+  window.scrollTo({top: 0, left: 0, behavior: "auto"});
+  content.focus({preventScroll: true});
 }
 
 window.addEventListener("hashchange", route);

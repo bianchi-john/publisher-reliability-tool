@@ -34,6 +34,11 @@ CORE_MODELS = {
 ROOT_LOCATOR = re.compile(r"root-([1-9][0-9]*)/(.+)")
 MAX_HTML_BYTES = 8 * 1024 * 1024
 MAX_REDIRECTS = 5
+ENGLISH_REQUEST_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": "PublisherReliabilityTool/0.1 local-research",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,22 +94,61 @@ def _response_bytes(response: httpx.Response) -> bytes:
     return bytes(output)
 
 
+def extract_english_article(html: bytes, canonical_url: str) -> RetrievedArticle:
+    """Extract one English article using Newspaper3k only."""
+
+    try:
+        from langdetect import DetectorFactory, LangDetectException, detect
+        from newspaper import Article
+    except ImportError as exc:
+        raise AppError(
+            "MODEL_NOT_RUNNABLE",
+            "Install the project 'models' extra to extract article text.",
+        ) from exc
+
+    try:
+        newspaper_article = Article(canonical_url, language="en")
+        newspaper_article.set_html(html.decode("utf-8", errors="replace"))
+        newspaper_article.parse()
+        text = newspaper_article.text.strip()
+        title = newspaper_article.title.strip()
+    except Exception as exc:
+        raise AppError(
+            "EXTRACTION_FAILED",
+            "Newspaper3k could not parse the article HTML.",
+        ) from exc
+    stripped = text.strip()
+    if len(stripped) < 200 or len(stripped.split()) < 30:
+        raise AppError(
+            "TEXT_TOO_SHORT",
+            "Extracted article text is shorter than 200 characters or 30 words.",
+        )
+
+    DetectorFactory.seed = 0
+    try:
+        language = detect(stripped)
+    except LangDetectException as exc:
+        raise AppError("NON_ENGLISH", "Article language could not be determined.") from exc
+    if language != "en":
+        raise AppError(
+            "NON_ENGLISH",
+            f"Article language is '{language}', but the models require English.",
+        )
+    return RetrievedArticle(canonical_url, title, stripped)
+
+
 def fetch_article(raw_url: str, *, offline: bool = False) -> RetrievedArticle:
     """Retrieve one public page and extract stable visible article text."""
 
     if offline:
         raise AppError("NETWORK_REQUIRED", "Article retrieval is disabled offline.")
     current = normalize_url(raw_url)
-    headers = {
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "PublisherReliabilityTool/0.1 local-research",
-    }
     try:
         with httpx.Client(
             follow_redirects=False,
             timeout=httpx.Timeout(20.0, connect=10.0),
             trust_env=False,
-            headers=headers,
+            headers=ENGLISH_REQUEST_HEADERS,
         ) as client:
             for redirect_count in range(MAX_REDIRECTS + 1):
                 _require_public_destination(current)
@@ -138,67 +182,7 @@ def fetch_article(raw_url: str, *, offline: bool = False) -> RetrievedArticle:
     except httpx.HTTPError as exc:
         raise AppError("NETWORK_ERROR", "Article could not be retrieved.") from exc
 
-    try:
-        from bs4 import BeautifulSoup
-        from langdetect import DetectorFactory, LangDetectException, detect
-    except ImportError as exc:
-        raise AppError(
-            "MODEL_NOT_RUNNABLE",
-            "Install the project 'models' extra to extract article text.",
-        ) from exc
-
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-    except Exception as exc:
-        raise AppError("EXTRACTION_FAILED", "Article HTML could not be parsed.") from exc
-    for node in soup.select("script,style,noscript,svg,nav,footer,aside"):
-        node.decompose()
-
-    def block_text(nodes: list[object]) -> str:
-        parts: list[str] = []
-        for node in nodes:
-            blocks = node.select("h1,h2,h3,p,li")
-            values = blocks or [node]
-            for block in values:
-                value = " ".join(block.get_text(" ", strip=True).split())
-                if value and (not parts or value != parts[-1]):
-                    parts.append(value)
-        return "\n\n".join(parts)
-
-    article_nodes = list(soup.select("article"))
-    text = block_text(article_nodes)
-    if len(text.strip()) < 200:
-        text = block_text(list(soup.select("main")))
-    if len(text.strip()) < 200:
-        text = block_text(list(soup.select("p")))
-    stripped = text.strip()
-    if len(stripped) < 200 or len(stripped.split()) < 30:
-        raise AppError(
-            "TEXT_TOO_SHORT",
-            "Extracted article text is shorter than 200 characters or 30 words.",
-        )
-
-    title_node = soup.select_one('meta[property="og:title"]')
-    title = (
-        str(title_node.get("content", "")).strip()
-        if title_node is not None
-        else ""
-    )
-    if not title:
-        heading = soup.select_one("h1")
-        title = " ".join(heading.get_text(" ", strip=True).split()) if heading else ""
-
-    DetectorFactory.seed = 0
-    try:
-        language = detect(stripped)
-    except LangDetectException as exc:
-        raise AppError("NON_ENGLISH", "Article language could not be determined.") from exc
-    if language != "en":
-        raise AppError(
-            "NON_ENGLISH",
-            f"Article language is '{language}', but the models require English.",
-        )
-    return RetrievedArticle(final_url, title, stripped)
+    return extract_english_article(html, final_url)
 
 
 class InferenceEngine:
@@ -414,7 +398,13 @@ class InferenceEngine:
             "publisher_reliability": __version__,
             "python": sys.version.split()[0],
         }
-        for package in ("torch", "transformers", "tokenizers", "beautifulsoup4", "langdetect"):
+        for package in (
+            "torch",
+            "transformers",
+            "tokenizers",
+            "newspaper3k",
+            "langdetect",
+        ):
             try:
                 versions[package] = importlib.metadata.version(package)
             except importlib.metadata.PackageNotFoundError:

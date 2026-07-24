@@ -21,7 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 models = [
-  "beautifulsoup4==4.15.0",
+  "lxml-html-clean==0.4.3",
+  "newspaper3k==0.2.8",
   "safetensors==0.8.0",
   "torch==2.7.1",
   "transformers==4.53.2",

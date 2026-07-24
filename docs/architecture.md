@@ -16,11 +16,11 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 | Runtime | Python 3.12 |
 | API | FastAPI, Pydantic v2, generated OpenAPI 3.1 |
 | Server | Uvicorn, one worker, fixed loopback binding |
-| Frontend | React, TypeScript, Vite, locally bundled assets |
+| Frontend | Bundled static HTML, CSS and browser JavaScript; local Albert Sans |
 | Persistence | Python `csv`, small in-memory indexes, filesystem lock |
-| Retrieval | `httpx` and Beautiful Soup parsing |
+| Retrieval | `httpx` and English Newspaper3k extraction |
 | Language | `langdetect`, seed zero |
-| Models | PyTorch/Transformers; PEFT/bitsandbytes only for optional loaders |
+| Models | PyTorch, Transformers and safetensors |
 | Packaging | Python wheel and one simple Compose service |
 
 ## 3. Process and data flow
@@ -136,11 +136,25 @@ environment proxies with `trust_env=false`, enforces five redirects, a
 10-second connect/20-second request timeout, HTML MIME, and an 8 MiB
 decompressed page limit.
 
-Beautiful Soup receives only the already downloaded HTML and cannot issue
-network calls. HTML, authors, and extracted content stay in job memory. Only
-validated title/body may cross into `local_content.csv` after `save_local`;
-authors and raw HTML are always released. Offline mode blocks retrieval and
-configures core tokenizer acquisition with local-files-only behavior.
+The request sends `Accept-Language: en-US,en;q=0.9`. Newspaper3k receives only
+the already downloaded HTML and is configured with `language="en"`; it cannot
+issue a second request. No secondary extractor is registered: parsing failure
+is `EXTRACTION_FAILED`, and insufficient Newspaper3k text is `TEXT_TOO_SHORT`.
+HTML, authors, and extracted content stay in job memory. Only validated
+title/body may cross into `local_content.csv` after `save_local`; authors and
+raw HTML are always released. Offline mode blocks retrieval and configures core
+tokenizer acquisition with local-files-only behavior.
+
+The top bar and primary navigation live outside the route content boundary.
+Navigation retains the existing view until the target view is ready, while a
+stable scrollbar gutter and minimum content height prevent layout movement.
+Route completion returns the document to the top and moves keyboard focus to
+the main content with scroll prevention, so the sticky bar cannot cover the
+first navigation item.
+The top bar contains a light/dark theme control. The initial theme follows
+`prefers-color-scheme`, an explicit choice is stored in browser local storage,
+and both palettes use the locally bundled variable Albert Sans font under the
+SIL Open Font License.
 
 ## 9. Model lifecycle
 
@@ -218,7 +232,8 @@ recovery UI, and high-availability behavior are outside the demo.
 1. A publisher evaluation always names exact immutable runs from one model.
 2. Protected reference data never crosses the import projection.
 3. Authors/raw HTML never persist; title/body require explicit consent.
-4. `reuse` does not infer; `recompute` creates a new run.
+4. `reuse` creates no run when an exact run exists; a missing-run `reuse` and
+   every `recompute` create a new immutable run.
 5. Model identity contains scientific settings, never deployment paths.
 6. Offline mode makes no application HTTP connection.
 7. CSV is sufficient to reconstruct every persisted API resource.
@@ -227,3 +242,5 @@ recovery UI, and high-availability behavior are outside the demo.
    fold; only its held-out checkpoint fold is eligible.
 10. Matching a local checkpoint to stored coverage by family/fold never changes
     either the local model ID or the historical prediction model ID.
+11. Article source badges are derived from run origin: imports establish
+    dataset membership, while `local_inference` establishes user evaluation.

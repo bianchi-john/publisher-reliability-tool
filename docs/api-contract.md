@@ -107,10 +107,15 @@ paths, content, metrics history, or operational administration.
 ### `GET /api/v1/articles`
 
 Derived from prediction runs. Filters: `q` substring over canonical URL,
-`publisher`, `model_id`, `predicted_class`, and `origin`. Sort is
+`publisher`, `model_id`, `predicted_class`, and `origin`.
+`article_source=dataset|user_evaluation` distinguishes articles with any
+imported run from articles created solely by local inference. A dataset article
+that also has local runs remains in `dataset` and exposes
+`has_user_evaluation=true`. Sort is
 `updated_desc` (default) or `url_asc`. Each item returns article/publisher IDs,
 canonical URL/hostname, distinct model count, run count, latest run summary,
-`content_saved`, first seen, and last updated.
+source type, imported/local run counts, `has_user_evaluation`, `content_saved`,
+first seen, and last updated.
 
 ### `GET /api/v1/articles/{article_id}`
 
@@ -159,7 +164,7 @@ content is `NOT_FOUND`; bad confirmation is `INVALID_INPUT`.
 Streams all filtered article summaries as CSV using the list filters. Header:
 
 ```text
-article_id,canonical_url,publisher_id,normalized_hostname,model_count,run_count,latest_prediction_run_id,latest_model_id,latest_predicted_class,content_saved,first_seen_at,updated_at
+article_id,canonical_url,publisher_id,normalized_hostname,model_count,run_count,latest_prediction_run_id,latest_model_id,latest_predicted_class,source_type,dataset_run_count,local_run_count,has_user_evaluation,content_saved,first_seen_at,updated_at
 ```
 
 No option can include saved or ephemeral content.
@@ -295,8 +300,30 @@ create missing runs or recompute. For a single article, missing-run `reuse` and
 explicit `recompute` retrieve, extract and infer with the selected runnable
 local model. `reuse + save_local` may retrieve content for an existing run
 without inference; if retrieval resolves to another article, the job returns
-`INVALID_INPUT` and stores nothing. Network/canonical/extraction failures appear
+`INVALID_URL` and stores nothing. Network/canonical/extraction failures appear
 on the accepted job.
+
+A successful single-article job exposes the following `result` through
+`GET /api/v1/jobs/{job_id}`:
+
+```json
+{
+  "article_id": "uuid",
+  "canonical_url": "https://example.org/a",
+  "prediction_run_id": "uuid",
+  "predicted_class": 2,
+  "probabilities": [0.02, 0.08, 0.71, 0.15, 0.04],
+  "model_id": "sha256",
+  "family": "bert",
+  "fold_id": 1,
+  "origin": "local_inference",
+  "reused": false
+}
+```
+
+`origin` is `bundled_import`, `user_import`, or `local_inference`; `reused`
+states whether an existing exact run was selected. The probability array always
+uses class order `[0,1,2,3,4]`.
 
 Before model execution, the service enforces the cross-validation leakage rule
 from the scientific contract for single articles, explicit lists and publisher
@@ -306,12 +333,10 @@ candidates.
 
 Explicit lists run in submitted order, require distinct submitted and resolved
 canonical article IDs, and require every item to succeed before an evaluation
-row is written. Publisher stored-run candidates use effective
-latest-run time descending then canonical URL ascending; known URLs lacking the
-selected-model run use last-seen time descending then URL ascending; discovered
-links use normalized deduplicated homepage document order. If either workflow
-fails, any prediction run/content already committed remains an article-level
-result and is not presented as a publisher evaluation.
+row is written. Publisher stored-run candidates use effective latest-run time
+descending then canonical URL ascending. If either workflow fails, any
+prediction run/content already committed remains an article-level result and is
+not presented as a publisher evaluation.
 
 ## 9. Jobs
 

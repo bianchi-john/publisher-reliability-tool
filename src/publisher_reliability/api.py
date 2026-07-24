@@ -226,6 +226,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         model_id: str | None = None,
         predicted_class: int | None = Query(default=None, ge=0, le=4),
         origin: str | None = None,
+        article_source: Literal["dataset", "user_evaluation"] | None = None,
         sort: Literal["updated_desc", "url_asc"] = "updated_desc",
     ):
         return PlainTextResponse(
@@ -235,6 +236,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 model_id=model_id,
                 predicted_class=predicted_class,
                 origin=origin,
+                article_source=article_source,
                 sort=sort,
             ),
             media_type="text/csv; charset=utf-8",
@@ -250,6 +252,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         model_id: str | None = None,
         predicted_class: int | None = Query(default=None, ge=0, le=4),
         origin: str | None = None,
+        article_source: Literal["dataset", "user_evaluation"] | None = None,
         sort: Literal["updated_desc", "url_asc"] = "updated_desc",
     ):
         return paginate(
@@ -259,6 +262,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 model_id=model_id,
                 predicted_class=predicted_class,
                 origin=origin,
+                article_source=article_source,
                 sort=sort,
             ),
             limit,

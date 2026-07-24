@@ -81,20 +81,23 @@ compression is not scientific identity.
 
 Online input follows this exact boundary:
 
-1. retrieve HTML through the safe application client;
-2. parse the already downloaded HTML with Beautiful Soup, remove non-content
-   elements, and prefer visible blocks below `article`, then `main`, then `p`;
-3. join extracted block text without case normalization, stemming, or
+1. retrieve HTML through the safe application client while sending
+   `Accept-Language: en-US,en;q=0.9`;
+2. parse the already downloaded HTML with Newspaper3k configured as
+   `language="en"`;
+3. if Newspaper3k cannot parse the document, return `EXTRACTION_FAILED`; no
+   secondary extractor or page request is attempted;
+4. retain Newspaper3k's extracted text without case normalization, stemming, or
    lemmatization;
-4. trim only for minimum-length measurement; require at least 200 Unicode
+5. trim only for minimum-length measurement; require at least 200 Unicode
    characters and 30 whitespace-delimited tokens;
-5. run `langdetect` with `DetectorFactory.seed = 0` and require exact `en`;
-6. pass unchanged extracted text to the selected tokenizer;
-7. discard HTML/authors always and title/body unless `save_local` is explicit.
+6. run `langdetect` with `DetectorFactory.seed = 0` and require exact `en`;
+7. pass unchanged extracted text to the selected tokenizer;
+8. discard HTML/authors always and title/body unless `save_local` is explicit.
 
 Tokenizer subwords, truncation, attention masks, and padding are model encoding,
-not text cleaning. Saved local body is used unchanged for a missing run under
-`reuse`. `recompute` always retrieves a fresh page.
+not text cleaning. A missing run under `reuse` and every `recompute` retrieve a
+fresh page.
 
 ## 5. Core and custom models
 
@@ -201,9 +204,10 @@ predictions also require complete vectors; probabilities are never fabricated.
 
 `reuse` chooses the latest run for exact `(article_id,model_id)` using effective
 completion time descending and run ID ascending. It performs no network or
-inference when found under `discard`. A missing run may use validated saved text
-or retrieve the page. `recompute` always retrieves and creates a new UUIDv4 run.
-Imported run ID is deterministic UUIDv5 from article/model/import.
+inference when found under `discard`. A missing run retrieves the page and
+creates a new UUIDv4 run with action `missing_run_inference`. `recompute` also
+retrieves and creates a new UUIDv4 run. Imported run ID is deterministic UUIDv5
+from article/model/import.
 
 Explicit `save_local` is independent of run selection. When an existing run is
 reused and no content is saved, retrieval may add validated title/body without
@@ -211,7 +215,7 @@ inference only if the resolved canonical article ID still equals the run's
 article ID. Otherwise nothing is saved.
 
 Local `software_versions_json` records at least application, Python, torch,
-transformers, tokenizers, Beautiful Soup, and langdetect versions; an unused
+transformers, tokenizers, Newspaper3k, and langdetect versions; an unused
 optional library is JSON null. Imported runs use `{}` rather than guessed data.
 
 ## 8. Publisher aggregation
@@ -277,6 +281,7 @@ truncation/padding, strict keys/shapes, frozen English input, predicted class,
 five reference probabilities (CPU float32 absolute `1e-6`, relative `1e-5`),
 fold identity, aggregation, and absence of protected/editorial leakage.
 
-Live pages are never scientific fixtures. Custom bundle safety/shape fixtures
-are separate from output-equivalence fixtures and do not make a custom model
-runnable.
+Live pages are never scientific fixtures. Custom bundle validation is separate
+from the frozen core-model output-equivalence fixtures. A custom bundle becomes
+runnable after its local tokenizer, architecture, finite safetensors values and
+strict key/shape compatibility all pass the documented validation.

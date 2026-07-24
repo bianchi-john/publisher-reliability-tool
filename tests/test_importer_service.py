@@ -103,6 +103,9 @@ class ImporterServiceTest(unittest.TestCase):
                 article = service.article(storage.rows["prediction_runs"][0]["article_id"])
                 self.assertEqual(article["run_count"], 1)
                 self.assertEqual(article["runs"][0]["probabilities"], [0, 1, 0, 0, 0])
+                self.assertEqual(article["source_type"], "dataset")
+                self.assertEqual(article["dataset_run_count"], 1)
+                self.assertEqual(article["local_run_count"], 0)
 
                 article_availability = service.available_models(
                     input_type="article",

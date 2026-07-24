@@ -31,7 +31,8 @@ fault tolerance.
 The MVP shall:
 
 - start through one native command or a simple Compose service;
-- serve a local React UI, REST API, OpenAPI document, and health endpoints;
+- serve a local bundled browser UI, REST API, OpenAPI document, and health
+  endpoints;
 - verify/import the bundled public prediction manifest on first startup;
 - import user CSV or CSV.GZ files after safe projection and validation;
 - persist essential models, runs, evaluations, imports, jobs, and explicitly
@@ -46,8 +47,8 @@ The MVP shall:
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
 - aggregate exact compatible runs with the three scientific methods;
-- constrain Evaluate choices to locally present model family/fold combinations
-  with sufficient safe stored coverage;
+- derive Evaluate choices from locally present models: safe matching stored
+  family/fold coverage or runnable local IDs for new single-article inference;
 - prevent a checkpoint from evaluating known imported articles outside its
   held-out test fold;
 - display exact model/fold/run/article provenance and scientific warnings;
@@ -62,8 +63,8 @@ The MVP shall:
   cancellation, queue priorities, or parallel candidates within one job;
 - storage compaction, record versioning, commit watermarks, transactional CSV
   database semantics, automatic backup retention, or online maintenance;
-- ZIP import, generic archive manifests, API import from a server path, or
-  arbitrary import roots;
+- dataset ZIP import, generic dataset archive manifests, API dataset import
+  from a server path, or arbitrary import roots;
 - generic custom-model manifests outside the documented PRT bundle, plugins,
   runtime code loading, arbitrary/base-weight downloads, credential management,
   or general-purpose cache management;
@@ -189,8 +190,8 @@ Every evaluation has:
 - `content_retention`: `discard` (default) or `save_local`.
 
 `reuse` selects the latest exact-model run by effective completion time
-descending then run ID ascending. If absent, a runnable model uses saved local
-text or retrieves the page. `recompute` always retrieves and creates a new run.
+descending then run ID ascending. If absent, a runnable model retrieves the page
+and creates a new run. `recompute` always retrieves and creates a new run.
 `save_local` stores only validated title/body and never changes which run is
 selected. With an existing run but no saved content, `reuse + save_local`
 retrieves/validates content without inference; the resolved canonical article
@@ -214,6 +215,14 @@ training-data leakage. `allow_partial=true` is explained as using 2..requested
 safe articles when the requested count cannot be met; false requires the full
 count.
 
+After single-article completion, Evaluate keeps a prominent result card on the
+page with the predicted `Class 0..4`, all five decimal/percentage
+probabilities, exact model/fold, stored-versus-new origin, run ID, and a link to
+the complete article history. A recent-local-runs table remains available after
+refresh. Articles & predictions provides separate filters and visual badges for
+dataset-backed articles and articles created solely by a user inference; a
+dataset article evaluated locally retains both facts.
+
 For a five-fold imported corpus, checkpoint fold `N` may evaluate known
 articles assigned to held-out test fold `N` and must not evaluate known articles
 assigned to any other fold. The same rule filters publisher candidates and is
@@ -227,11 +236,10 @@ Explicit-list candidates run in submitted order and all must succeed. Submitted
 and online-resolved canonical article IDs must remain distinct; otherwise the
 job fails `INVALID_INPUT`. On any failure no evaluation is written, while
 already committed individual runs/content stay valid. Publisher stored
-candidates are ordered by effective latest-run time
-descending then canonical URL ascending. Known URLs without the selected-model
-run use last-seen time descending then URL ascending. Newly discovered links
-use homepage document order after normalization and deduplication. Publisher
-failure or partial success does not roll back individual runs/content.
+candidates are ordered by effective latest-run time descending then canonical
+URL ascending. Publisher input does not discover or infer additional articles.
+Publisher failure or partial success does not roll back previously committed
+individual runs/content.
 
 ### 7.4 Import
 
@@ -279,7 +287,11 @@ temporary files are cleaned after pending-import recovery.
 The UI has Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs.
 It favors provenance and scientific explanation over administration. Charts
 have adjacent semantic tables. Loading, empty, offline, missing-model, partial,
-and error states use clear English text.
+and error states use clear English text. The persistent top bar provides a
+keyboard-accessible light/dark theme control, initially follows the operating
+system, stores an explicit browser-local preference, and does not remount or
+shift during route changes. The locally bundled Albert Sans variable font is
+used without a CDN.
 
 ## 9. Functional requirements
 
@@ -304,7 +316,7 @@ and error states use clear English text.
 | FR-017 | Essential state shall survive restart in the seven documented CSV ledgers. |
 | FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
-| FR-020 | UI and API shall expose model, fold, run, contributing articles, method, and scientific limitations. |
+| FR-020 | UI and API shall expose model, fold, run, contributing articles, method, all available probabilities, dataset-versus-user origin, and scientific limitations. |
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
@@ -319,8 +331,8 @@ and error states use clear English text.
 | NFR-003 | Dependency locks, dataset checksums, and core model fixtures shall make the demo reproducible. |
 | NFR-004 | CSV writes shall use one writer, fsync, and atomic replacement or append-tail recovery as documented. |
 | NFR-005 | Logs and errors shall exclude editorial content, protected data, credentials, and unrestricted paths. |
-| NFR-006 | Frontend assets and API documentation shall be bundled locally without telemetry or CDN dependencies. |
-| NFR-007 | User-visible text, errors, and exports shall be English and accessible. |
+| NFR-006 | Frontend assets, the open font and API documentation shall be bundled locally without telemetry or CDN dependencies. |
+| NFR-007 | User-visible text, errors, exports and the persistent light/dark theme control shall be English and accessible. |
 | NFR-008 | API and frontend shall share the same service and validation functions. |
 
 ## 11. Release gate

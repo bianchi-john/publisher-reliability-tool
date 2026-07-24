@@ -146,8 +146,8 @@ and evaluations can be browsed/exported and stored compatible runs aggregated.
 
 ### AT-022 — Strict offline transport
 
-Strict offline mode produces zero DNS/HTTP connection attempts. Reuse and saved-
-body inference work locally; a request requiring retrieval fails
+Strict offline mode produces zero DNS/HTTP connection attempts. Stored-run
+reuse, browsing, and aggregation work locally; a request requiring retrieval fails
 `NETWORK_REQUIRED` without changing readiness.
 
 ### AT-023 — URL normalization fixtures
@@ -165,10 +165,10 @@ redirects, HTML MIME, timeouts, and an 8-MiB decompressed body limit.
 
 ### AT-025 — Extraction and English validation
 
-Frozen HTML passed to the Beautiful Soup block extractor yields the expected
-article/main/paragraph text. Empty/parser failure is `EXTRACTION_FAILED`,
-minimum-length failure is `TEXT_TOO_SHORT`, and seed-zero language validation
-accepts exact `en` or returns `NON_ENGLISH`.
+The request contains `Accept-Language: en-US,en;q=0.9`. Frozen HTML passed to
+Newspaper3k uses `language="en"` and no secondary extractor. Newspaper3k parser
+failure is `EXTRACTION_FAILED`, minimum-length failure is `TEXT_TOO_SHORT`, and
+seed-zero language validation accepts exact `en` or returns `NON_ENGLISH`.
 
 ## E. Evaluation and provenance
 
@@ -201,9 +201,9 @@ leaves earlier article-level runs/content valid but creates no evaluation.
 
 ### AT-030 — Publisher evaluation
 
-A publisher request uses eligible stored runs first, then sequential known/new
-candidates under the documented timestamp/URL/document-order rules, stops at
-requested count, and never creates extra run/content.
+A publisher request uses only eligible stored runs under the documented
+effective-time/URL ordering, stops at requested count, never crawls for links,
+and never creates extra run/content.
 With at least two but fewer than requested, `allow_partial=true` records a
 partial evaluation; false returns `INSUFFICIENT_ARTICLES`.
 
@@ -272,13 +272,22 @@ quantization value changes it.
 
 Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs are keyboard
 reachable and present loading, empty, offline, missing-model, partial, and error
-states with clear English actions.
+states with clear English actions. Articles exposes distinct dataset and
+user-evaluated filters/badges derived from run origin rather than URL heuristics.
+An imported article with a later local run remains dataset-backed and also
+shows the user-evaluated badge. The keyboard-accessible theme control follows
+the initial system preference, persists an explicit light/dark choice locally,
+and uses no remote font or style dependency. Route changes keep the top bar
+mounted, keep its first navigation item visible, and do not collapse page
+height or scrollbar space.
 
 ### AT-041 — Transparent results
 
-Article/publisher pages show prediction—not fact—warning, exact model/fold/run,
-contributing articles, method/version, probability limitations, and accessible
-tables containing the same values as charts.
+Evaluate and article/publisher pages show prediction—not fact—warning, predicted
+class, all five available probabilities, exact model/fold/run, dataset or user
+origin, contributing articles, method/version, and accessible tables containing
+the same values as visual probability bars. Recent local article predictions
+remain visible in Evaluate after refresh.
 
 ### AT-042 — Export privacy
 

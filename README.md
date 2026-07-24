@@ -46,7 +46,7 @@ The service is published only on `127.0.0.1:8000`.
 | --- | --- |
 | Dataset | Verified automatic import of the bundled predictions |
 | Exploration | Articles, publishers, runs, models, imports and jobs |
-| Evaluation | Single-article reuse and publisher aggregation |
+| Evaluation | Stored reuse, new single-article inference and publisher aggregation |
 | Methods | Majority vote, ordinal mean and mean probabilities |
 | Import | Privacy-preserving CSV and CSV.GZ import |
 | Persistence | Seven readable CSV ledgers under `data/state` |
@@ -84,6 +84,21 @@ For a new URL, Evaluate offers each runnable local model and creates an
 immutable prediction run containing all five probabilities. Retrieval,
 extraction, tokenizer acquisition and inference failures are reported
 separately.
+
+The request explicitly prefers English (`Accept-Language: en-US,en;q=0.9`).
+Newspaper3k is the only article-body extractor and parses with `language="en"`;
+there is no secondary HTML extractor. Deterministic language detection still
+rejects non-English extracted text.
+
+Articles & predictions labels dataset-backed articles separately from articles
+created by a user evaluation, while retaining both badges when a dataset
+article is also evaluated locally. Evaluate keeps both the completed result card
+and a refresh-safe table of recent local article predictions.
+
+The bundled interface uses the locally distributed open-source Albert Sans
+font. Its light/dark theme follows the operating-system preference initially
+and can be overridden from the persistent top bar; the choice is saved in the
+browser.
 
 The Models page also accepts a constrained custom Transformers `.zip` bundle
 using `safetensors` and a local tokenizer. It validates and registers supported
@@ -137,10 +152,12 @@ uv run --frozen python -m unittest discover -s tests -v
 
 Start with:
 
+- [User guide](docs/user-guide.md)
 - [Product specification](docs/product-specification.md)
 - [API contract](docs/api-contract.md)
 - [Scientific contract](docs/scientific-contract.md)
 - [CSV storage contract](docs/csv-storage-contract.md)
+- [Custom model bundle](docs/custom-model-bundle.md)
 - [Deployment guide](docs/deployment.md)
 
 ## License

@@ -114,9 +114,11 @@ The upload ZIP is deleted after terminal success or failure.
 ## Fold leakage
 
 The manifest asserts a five-fold training convention: model fold `N` was
-trained on the other four folds and held out fold `N`. The existing leakage
-guard therefore permits known dataset articles only when their family/fold
-registry establishes that they belong to the matching held-out fold.
+trained on the other four folds and held out fold `N`. The leakage guard can
+enforce this only when stored predictions for the same custom family establish
+an article's fold membership. The standard CSV importer currently accepts only
+BERT and RoBERTa families, so a newly named `custom_...` family normally has no
+such registry and external/dataset article membership remains unknown.
 
 For a genuinely different training corpus, the current manifest is not
 expressive enough to prove per-article exclusion. Do not mislabel such a model

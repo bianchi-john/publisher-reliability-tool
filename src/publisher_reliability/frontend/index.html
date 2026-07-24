@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Inspect prediction provenance and publisher aggregation locally.">
   <title>Publisher Reliability Tool</title>
+  <script>
+    (() => {
+      const saved = localStorage.getItem("prt-theme");
+      const preferred = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = saved === "dark" || saved === "light" ? saved : preferred;
+    })();
+  </script>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -14,7 +21,13 @@
       <span class="brand-mark">PR</span>
       <span><strong>Publisher Reliability</strong><small>Research workspace</small></span>
     </a>
-    <div id="system-state" class="system-state" aria-live="polite">Connecting…</div>
+    <div class="topbar-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
+        <span class="theme-icon" aria-hidden="true">◐</span>
+        <span class="theme-label">Dark theme</span>
+      </button>
+      <div id="system-state" class="system-state" aria-live="polite">Connecting…</div>
+    </div>
   </header>
   <div class="shell">
     <nav aria-label="Primary">

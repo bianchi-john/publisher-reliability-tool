@@ -130,7 +130,18 @@ No credentials are required.
 BERT/RoBERTa CPU is the supported core path. Custom Transformers are uploaded
 as the documented self-contained ZIP and validated entirely from local files;
 the application does not download anything for a custom bundle or execute
-custom code.
+custom code. Use **Models → Import custom Transformer**; the page includes the
+required layout and manifest example. See
+[Custom Transformers bundle](custom-model-bundle.md) for the full contract.
+
+New article extraction is part of the `models` extra. Retrieval requests
+English content explicitly and Newspaper3k is the only body extractor, parsing
+with `language="en"`. Deterministic language detection still rejects extracted
+text that is not English.
+
+Albert Sans and its SIL Open Font License are included in the packaged frontend.
+The light/dark theme needs no remote asset or CDN; only an explicit user choice
+is retained in browser local storage.
 
 ## 7. Backup and restore
 

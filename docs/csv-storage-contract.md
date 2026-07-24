@@ -166,7 +166,8 @@ prediction_run_id,article_id,canonical_url,publisher_id,normalized_hostname,mode
 - This is immutable append-only history.
 - `origin`: `bundled_import`, `user_import`, or `local_inference`.
 - `action`: `import`, `missing_run_inference`, or `recompute`.
-- `input_source`: `unavailable`, `saved_local`, or `ephemeral_web`.
+- `input_source`: `unavailable` for imported predictions; local inference
+  records the normalized submitted URL that initiated retrieval.
 - Imports require `source_import_id`; inference requires `job_id`.
 - Every imported or inferred run requires all five probabilities.
 - Canonical URL and normalized hostname are intentionally denormalized so the
@@ -175,6 +176,13 @@ prediction_run_id,article_id,canonical_url,publisher_id,normalized_hostname,mode
 The reusable run for `(article_id,model_id)` is the greatest effective
 completion time (`inference_completed_at`, falling back to `recorded_at` for
 imports), then lexicographically smallest run ID on a timestamp tie.
+
+Article source classification is a derived API/UI view, not another stored
+ledger field. An article is `dataset` when it has at least one
+`bundled_import` or `user_import` run; otherwise it is `user_evaluation`.
+`has_user_evaluation=true` when at least one `local_inference` run exists. Thus
+an imported article later evaluated locally remains `dataset` and carries the
+additional user-evaluation flag.
 
 ### 5.4 `evaluations.csv`
 
