@@ -20,6 +20,7 @@ from .config import Config
 from .errors import AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
+from .model_scanner import scan_model_roots
 from .services import ResearchService, paginate
 from .storage import Storage
 
@@ -87,7 +88,13 @@ def create_app(config: Config | None = None) -> FastAPI:
     settings = config or Config.from_env()
     storage = Storage(settings.data_dir)
     bundled_import = import_bundled_release(storage, settings.seed_dataset)
-    service = ResearchService(storage, offline=settings.offline)
+    startup_model_scan = scan_model_roots(storage, settings.models_dirs)
+    service = ResearchService(
+        storage,
+        offline=settings.offline,
+        model_roots=settings.models_dirs,
+        device=settings.device,
+    )
     jobs = JobManager(
         storage,
         service,
@@ -116,6 +123,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.service = service
     app.state.jobs = jobs
     app.state.bundled_import = bundled_import
+    app.state.startup_model_scan = startup_model_scan
 
     @app.middleware("http")
     async def local_host_boundary(request: Request, call_next):

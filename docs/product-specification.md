@@ -65,8 +65,8 @@ The MVP shall:
 - ZIP import, generic archive manifests, API import from a server path, or
   arbitrary import roots;
 - generic custom-model manifests outside the documented PRT bundle, plugins,
-  runtime code loading, automatic downloads, credential management, or cache
-  management;
+  runtime code loading, arbitrary/base-weight downloads, credential management,
+  or general-purpose cache management;
 - model training, tuning, calibration, automatic ensembling, hosted inference,
   telemetry, analytics, or production metrics;
 - automatic deletion from user backups or external copies;
@@ -129,8 +129,7 @@ Startup order is:
    physical record from an append-only ledger;
 7. verify the complete store before any seed/model mutation;
 8. verify/import the optional bundled release by content digest;
-9. refresh only availability of registered artifact locators; discovering or
-   fully validating model files remains an explicit scan;
+9. scan configured core model roots and refresh managed-bundle integrity;
 10. load lightweight indexes;
 11. leave source-free queued jobs queued; leave upload-backed queued jobs
     queued only when every acquired source they require still exists; mark an
@@ -162,21 +161,25 @@ Articles and publishers are views derived from those runs.
 
 ### 7.2 Models
 
-The researcher manually downloads official artifacts, copies them below a
-configured model root, and starts a scan. Scan/validation is a
-`model_validation` job because checksums and reference fixtures can be slow.
-The Models page reports compatible, validated-not-runnable,
+The researcher manually downloads official artifacts and copies them below a
+configured model root. Startup scans those roots; an explicit
+`model_validation` job is also available after files change while the service
+is running. The Models page reports compatible, validated-not-runnable,
 dependency-missing, resource-unavailable, artifact-missing, custom and
-historical-only identities. It never downloads anything.
+historical-only identities. On first online inference for a compatible core
+checkpoint, the application caches only its tokenizer/configuration resources
+from a pinned immutable official revision; it never downloads base weights.
 
 BERT/RoBERTa CPU behavior is part of the core gate. A custom upload is one
 self-contained `.zip` using the exact format in `custom-model-bundle.md`.
 Validation runs as a `model_validation` job, installs a successful bundle under
-`managed-models`, and never imports executable artifact code.
+`managed-models`, marks it compatible, and never imports executable artifact
+code.
 
 Evaluate never presents all historical identities as if they were installed
-checkpoints. It intersects stored prediction identities with locally available
-artifacts by family/fold, while retaining their separate scientific IDs.
+checkpoints. For stored results it intersects prediction identities with local
+artifacts by family/fold while retaining separate scientific IDs. For a single
+new URL it offers runnable local model IDs directly and creates a new run.
 
 ### 7.3 Evaluation controls
 
@@ -197,11 +200,11 @@ Content is committed only after an exact run has been selected or created, so
 `local_content.csv` cannot introduce an article absent from run history.
 
 Single-article evaluation creates no publisher aggregate. Explicit lists must
-contain 2–50 distinct URLs that resolve to one publisher. Publisher evaluation
-uses stored compatible runs first, then known URLs requiring inference, then
-simple homepage discovery until the requested count is reached or candidates
-end. Candidates are processed sequentially. `allow_partial=true` permits an
-aggregate with 2..requested successful runs; otherwise an unmet count fails.
+contain 2–50 distinct URLs that resolve to one publisher and create missing
+runs sequentially when the selected model is runnable. Publisher URL evaluation
+uses stored compatible runs only; it does not crawl or infer undiscovered
+articles. `allow_partial=true` permits an aggregate with 2..requested stored
+runs; otherwise an unmet count fails.
 
 For single-article input, publisher count, aggregation method and partial-result
 controls are hidden because they do not apply. Before submission, Evaluate
@@ -302,7 +305,7 @@ and error states use clear English text.
 | FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
 | FR-020 | UI and API shall expose model, fold, run, contributing articles, method, and scientific limitations. |
-| FR-021 | Evaluate shall offer only locally present family/fold combinations with sufficient stored coverage and shall explain every empty availability result. |
+| FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
 | FR-024 | Custom Transformers import shall accept only the documented local-only ZIP/config/tokenizer/safetensors contract and reject executable code, pickle, unsafe paths, invalid folds and key/shape mismatches. |

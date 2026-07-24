@@ -37,7 +37,8 @@ class ModelScannerTest(unittest.TestCase):
                 self.assertEqual(model["fold_id"], "1")
                 self.assertEqual(model["artifact_locator"], "root-1/bert_fold_1.pt")
                 self.assertEqual(model["artifact_available"], "true")
-                self.assertEqual(model["runnable"], "false")
+                self.assertEqual(model["status"], "compatible")
+                self.assertEqual(model["runnable"], "true")
 
 
 if __name__ == "__main__":

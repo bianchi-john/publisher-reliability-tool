@@ -276,7 +276,7 @@ def import_custom_transformer_bundle(
             "padding_policy": manifest["padding_policy"],
             "training_data": manifest["training_data"],
             "loader_recipe": "custom_auto_sequence_classification_safetensors",
-            "loader_recipe_version": "1",
+            "loader_recipe_version": "2",
         }
         identifier = sha256_json(identity)
         destination = storage.data_dir / "managed-models" / identifier
@@ -308,7 +308,7 @@ def import_custom_transformer_bundle(
         "artifact_sha256": artifact_digest,
         "official_manifest_entry_sha256": "",
         "loader_recipe": "custom_auto_sequence_classification_safetensors",
-        "loader_recipe_version": "1",
+        "loader_recipe_version": "2",
         "base_model": manifest.get("base_model", ""),
         "base_revision": manifest.get("base_revision", ""),
         "tokenizer_source": f"local-sha256:{artifact_digest}",
@@ -326,12 +326,12 @@ def import_custom_transformer_bundle(
                 "training_data": manifest["training_data"],
             }
         ),
-        "status": "validated_not_runnable",
+        "status": "compatible",
         "artifact_available": True,
-        "runnable": False,
+        "runnable": True,
         "status_detail": (
             "Custom Transformer and tokenizer validated without custom code. "
-            "New web inference remains unavailable in this release."
+            "Local inference is available."
         ),
         "registered_at": existing["registered_at"] if existing else now,
         "last_validated_at": now,

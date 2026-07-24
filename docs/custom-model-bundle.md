@@ -4,8 +4,8 @@
 
 The Models page accepts one self-contained `.zip`. Import validates and
 registers the model; it never downloads files and never executes code from the
-bundle. New-page inference remains unavailable in the current release, so a
-successful custom import has status `validated_not_runnable`.
+bundle. A successful custom import has status `compatible` and can classify new
+article URLs because the ZIP includes its tokenizer and weights.
 
 Install the locked model-validation dependencies before starting the
 application:
@@ -87,6 +87,10 @@ python -m zipfile -c my-model.zip my-model/
 ```
 
 Upload `my-model.zip` from Models → Import custom Transformer.
+
+The Models page includes the same three-step export instructions and a manifest
+example directly above the upload control. A standalone `.pt` file is not a
+custom bundle.
 
 ## Validation
 

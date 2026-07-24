@@ -62,13 +62,15 @@ The bundled release produces:
 Imports are identified by content digest, so restarting or importing the same
 dataset again does not duplicate data.
 
-## Current limit
+## Models and new article inference
 
 The repository does not distribute model weights. The Models page safely scans
 configured roots, validates recognized BERT/RoBERTa state dictionaries and
-keeps local checkpoints separate from historical dataset identities. This
-version does not yet retrieve new pages or run inference; operations requiring
-a new prediction fail explicitly instead of creating synthetic results.
+keeps local checkpoints separate from historical dataset identities. Compatible
+local checkpoints can retrieve and classify a new public English article URL.
+Only the small official tokenizer resources are cached on first online use,
+pinned to immutable Hugging Face revisions; base-model weights are never
+downloaded because the local checkpoint already contains them.
 
 Stored dataset predictions remain fully browseable by article, publisher,
 model/fold and class probability. Publisher aggregations created in the
@@ -78,14 +80,16 @@ Evaluate derives its choices from both the local Models inventory and the
 stored prediction coverage for the submitted URL. For fold-indexed dataset
 articles, checkpoint fold `N` is offered only for articles assigned to held-out
 test fold `N`; checkpoints trained on that article are hidden and rejected.
-New URLs with no stored run report that inference is required instead of
-appearing as a generic compatibility failure.
+For a new URL, Evaluate offers each runnable local model and creates an
+immutable prediction run containing all five probabilities. Retrieval,
+extraction, tokenizer acquisition and inference failures are reported
+separately.
 
 The Models page also accepts a constrained custom Transformers `.zip` bundle
 using `safetensors` and a local tokenizer. It validates and registers supported
 five-class `AutoModelForSequenceClassification` architectures without loading
-custom Python code. Imported custom models remain non-runnable until the new-web
-inference pipeline is implemented.
+custom Python code. A successfully validated custom bundle is immediately
+runnable because it includes both its tokenizer and safetensors weights.
 
 Official artifacts are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)

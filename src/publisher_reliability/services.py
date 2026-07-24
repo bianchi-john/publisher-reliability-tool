@@ -5,13 +5,16 @@ from __future__ import annotations
 import csv
 import io
 import json
+import time
 import uuid
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Iterable
 
 from .aggregation import WARNING, aggregate
 from .errors import AppError
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
+from .inference import InferenceEngine, RetrievedArticle, fetch_article
 from .storage import Storage, json_field, utc_now
 
 
@@ -40,9 +43,23 @@ def paginate(items: list[dict[str, object]], limit: int, offset: int) -> dict[st
 
 
 class ResearchService:
-    def __init__(self, storage: Storage, *, offline: bool = False):
+    def __init__(
+        self,
+        storage: Storage,
+        *,
+        offline: bool = False,
+        model_roots: tuple[Path, ...] = (),
+        device: str = "auto",
+        inference_engine: InferenceEngine | None = None,
+    ):
         self.storage = storage
         self.offline = offline
+        self.inference = inference_engine or InferenceEngine(
+            storage,
+            model_roots=model_roots,
+            offline=offline,
+            device=device,
+        )
 
     @property
     def models_by_id(self) -> dict[str, dict[str, str]]:
@@ -419,27 +436,64 @@ class ResearchService:
                     "run_count": len(runs),
                     "probability_count": probability_count,
                     "eligible": article_count >= required,
+                    "mode": "stored_prediction",
                 }
             )
+
+        blocked = []
+        if input_type == "article":
+            existing_model_ids = {str(row["model_id"]) for row in result}
+            for local_model in local_models:
+                family = local_model["family"]
+                fold_id = int(local_model["fold_id"])
+                assigned_folds = {
+                    represented_fold
+                    for represented_family, represented_fold in represented_family_folds
+                    if represented_family == family
+                }
+                if assigned_folds and fold_id not in assigned_folds:
+                    blocked.append(
+                        {
+                            "family": family,
+                            "fold_id": fold_id,
+                            "reason": (
+                                "The article belongs to another held-out fold, so "
+                                "this checkpoint was trained on it."
+                            ),
+                        }
+                    )
+                    continue
+                if (
+                    local_model["model_id"] in existing_model_ids
+                    or (family, fold_id) in represented_family_folds
+                    or local_model["runnable"] != "true"
+                ):
+                    continue
+                result.append(
+                    {
+                        "model_id": local_model["model_id"],
+                        "local_model_id": local_model["model_id"],
+                        "family": family,
+                        "fold_id": fold_id,
+                        "display_name": local_model["display_name"],
+                        "local_status": local_model["status"],
+                        "local_runnable": True,
+                        "article_count": 0,
+                        "run_count": 0,
+                        "probability_count": 0,
+                        "eligible": True,
+                        "mode": "new_inference",
+                    }
+                )
         result.sort(
             key=lambda row: (
                 not bool(row["eligible"]),
+                str(row["mode"]),
                 str(row["family"]),
                 int(row["fold_id"]),
             )
         )
 
-        blocked = [
-            {
-                "family": family,
-                "fold_id": fold_id,
-                "reason": "The article belongs to another held-out fold, so this checkpoint was trained on it.",
-            }
-            for family, fold_id in sorted(local_by_family_fold)
-            if input_type == "article"
-            and any(key[0] == family for key in represented_family_folds)
-            and (family, fold_id) not in represented_family_folds
-        ]
         eligible_count = sum(bool(row["eligible"]) for row in result)
         if not local_models:
             code = "NO_LOCAL_CHECKPOINTS"
@@ -449,10 +503,18 @@ class ResearchService:
             )
         elif result and eligible_count:
             code = "AVAILABLE"
-            message = (
-                f"{eligible_count} local checkpoint(s) have enough leakage-safe stored "
-                "predictions for this request."
-            )
+            if input_type == "article" and any(
+                row["eligible"] and row["mode"] == "new_inference" for row in result
+            ):
+                message = (
+                    f"{eligible_count} model option(s) are available. Options marked "
+                    "'new inference' will retrieve and classify this page locally."
+                )
+            else:
+                message = (
+                    f"{eligible_count} local checkpoint(s) have enough leakage-safe "
+                    "stored predictions for this request."
+                )
         elif result:
             code = "INSUFFICIENT_SAFE_ARTICLES"
             message = (
@@ -460,16 +522,10 @@ class ResearchService:
                 "held-out predictions than the requested article count."
             )
         elif input_type == "article" and not matching:
-            runnable = any(model["runnable"] == "true" for model in local_models)
             code = "NEW_ARTICLE_REQUIRES_INFERENCE"
             message = (
                 "This URL is not present in the imported prediction dataset. It requires "
-                + (
-                    "a new inference run."
-                    if runnable
-                    else "a new inference run, but the local checkpoints are validated "
-                    "for storage only and the inference pipeline is not runnable yet."
-                )
+                "a new inference run, but no runnable local model is available."
             )
         elif blocked:
             code = "TRAINING_DATA_LEAKAGE"
@@ -596,17 +652,6 @@ class ResearchService:
             "discard", "save_local"
         }:
             raise AppError("INVALID_INPUT", "Unsupported evaluation option.")
-        if action == "recompute":
-            raise AppError(
-                "MODEL_NOT_RUNNABLE",
-                "The selected historical model cannot recompute predictions.",
-            )
-        if retention == "save_local":
-            raise AppError(
-                "NETWORK_REQUIRED" if self.offline else "MODEL_NOT_RUNNABLE",
-                "Content retrieval is unavailable until a runnable model is installed.",
-            )
-
         input_value = request.get("input")
         if not isinstance(input_value, dict):
             raise AppError("INVALID_INPUT", "Evaluation input is required.")
@@ -614,16 +659,38 @@ class ResearchService:
         if input_type == "article":
             canonical = normalize_url(str(input_value.get("url", "")))
             self.assert_not_training_article(model, article_id(canonical))
-            run = self._latest_run(article_id(canonical), model_identifier)
+            run = (
+                self._latest_run(article_id(canonical), model_identifier)
+                if action == "reuse"
+                else None
+            )
             if run is None:
-                raise AppError(
-                    "MODEL_NOT_RUNNABLE",
-                    "No stored run exists and the selected model cannot infer.",
+                run = self._create_inference_run(
+                    model,
+                    canonical,
+                    job_id=job_id,
+                    action=action,
+                    retention=retention,
                 )
+                reused = False
+            else:
+                if retention == "save_local":
+                    retrieved = fetch_article(canonical, offline=self.offline)
+                    if article_id(retrieved.canonical_url) != run["article_id"]:
+                        raise AppError(
+                            "INVALID_URL",
+                            "Retrieved canonical URL differs from the stored prediction.",
+                        )
+                    self._save_content(retrieved)
+                reused = True
             return {
                 "article_id": run["article_id"],
                 "prediction_run_id": run["prediction_run_id"],
-                "reused": True,
+                "predicted_class": int(run["predicted_class"]),
+                "probabilities": [
+                    float(run[f"prob_class_{index}"]) for index in range(5)
+                ],
+                "reused": reused,
             }
 
         method = str(request.get("aggregation_method", ""))
@@ -643,11 +710,18 @@ class ResearchService:
             selected = []
             for canonical in canonical_urls:
                 self.assert_not_training_article(model, article_id(canonical))
-                run = self._latest_run(article_id(canonical), model_identifier)
+                run = (
+                    self._latest_run(article_id(canonical), model_identifier)
+                    if action == "reuse"
+                    else None
+                )
                 if run is None:
-                    raise AppError(
-                        "MODEL_NOT_RUNNABLE",
-                        "A listed article has no stored run for the selected model.",
+                    run = self._create_inference_run(
+                        model,
+                        canonical,
+                        job_id=job_id,
+                        action=action,
+                        retention=retention,
                     )
                 selected.append(run)
             requested = len(selected)
@@ -655,6 +729,11 @@ class ResearchService:
             input_mode = "article_list"
             hostname = hostnames.pop()
         elif input_type == "publisher":
+            if action == "recompute":
+                raise AppError(
+                    "INVALID_INPUT",
+                    "Publisher recompute requires an explicit article list.",
+                )
             canonical = normalize_url(str(input_value.get("url", "")))
             hostname = normalized_hostname(canonical)
             try:
@@ -731,3 +810,73 @@ class ResearchService:
             and row["model_id"] == model_identifier
         ]
         return newest_runs(matching)[0] if matching else None
+
+    def _save_content(self, article: RetrievedArticle) -> None:
+        self.storage.upsert(
+            "local_content",
+            "article_id",
+            {
+                "article_id": article_id(article.canonical_url),
+                "canonical_url": article.canonical_url,
+                "title": article.title,
+                "text": article.text,
+                "content_saved_at": utc_now(),
+            },
+        )
+
+    def _create_inference_run(
+        self,
+        model: dict[str, str],
+        canonical_url: str,
+        *,
+        job_id: str,
+        action: str,
+        retention: str,
+    ) -> dict[str, str]:
+        if (
+            model["artifact_kind"] == "historical_virtual"
+            or model["artifact_available"] != "true"
+            or model["runnable"] != "true"
+        ):
+            raise AppError(
+                "MODEL_NOT_RUNNABLE",
+                "The selected model cannot create a new prediction.",
+            )
+        started = utc_now()
+        started_clock = time.monotonic()
+        retrieved = fetch_article(canonical_url, offline=self.offline)
+        identifier = article_id(retrieved.canonical_url)
+        self.assert_not_training_article(model, identifier)
+        prediction = self.inference.predict(model, retrieved.text)
+        completed = utc_now()
+        run: dict[str, object] = {
+            "prediction_run_id": str(uuid.uuid4()),
+            "article_id": identifier,
+            "canonical_url": retrieved.canonical_url,
+            "publisher_id": publisher_id(
+                normalized_hostname(retrieved.canonical_url)
+            ),
+            "normalized_hostname": normalized_hostname(retrieved.canonical_url),
+            "model_id": model["model_id"],
+            "predicted_class": prediction.predicted_class,
+            **{
+                f"prob_class_{index}": prediction.probabilities[index]
+                for index in range(5)
+            },
+            "origin": "local_inference",
+            "action": "recompute" if action == "recompute" else "missing_run_inference",
+            "input_source": canonical_url,
+            "content_retention": retention,
+            "source_import_id": "",
+            "job_id": job_id,
+            "inference_started_at": started,
+            "inference_completed_at": completed,
+            "duration_ms": round((time.monotonic() - started_clock) * 1000),
+            "device": prediction.device,
+            "software_versions_json": json_field(prediction.software_versions),
+            "recorded_at": completed,
+        }
+        self.storage.append("prediction_runs", run)
+        if retention == "save_local":
+            self._save_content(retrieved)
+        return {key: str(value) for key, value in run.items()}

@@ -159,14 +159,16 @@ duplicates, `+`, encoding, path case, and trailing slash.
 ### AT-024 — Retrieval safety
 
 Direct/redirected private, loopback, link-local, reserved, multicast, and
-unspecified destinations never receive a connection. Public retrieval enforces
-validated peer, redirects, robots, MIME, timeouts, rate, and 10-MiB body limit.
+unspecified destinations are rejected before an application request. Public
+retrieval disables environment proxies and enforces hop validation, five
+redirects, HTML MIME, timeouts, and an 8-MiB decompressed body limit.
 
 ### AT-025 — Extraction and English validation
 
-Frozen HTML passed to `newspaper3k` yields unchanged expected text. Empty/parser
-failure is `EXTRACTION_FAILED`, minimum-length failure is `TEXT_TOO_SHORT`, and
-seed-zero language validation accepts exact `en` or returns `NON_ENGLISH`.
+Frozen HTML passed to the Beautiful Soup block extractor yields the expected
+article/main/paragraph text. Empty/parser failure is `EXTRACTION_FAILED`,
+minimum-length failure is `TEXT_TOO_SHORT`, and seed-zero language validation
+accepts exact `en` or returns `NON_ENGLISH`.
 
 ## E. Evaluation and provenance
 
@@ -246,7 +248,9 @@ it.
 ### AT-037 — Missing dependency or resource
 
 A recognized model with missing base/tokenizer or device becomes non-runnable
-with safe guidance; browsing remains usable and no automatic download starts.
+with safe guidance; browsing remains usable. Online first use may acquire only
+the pinned official tokenizer/configuration files, while offline first use
+returns `NETWORK_REQUIRED` if they are not already cached.
 
 ### AT-038 — Missing artifact preserves history
 
@@ -309,7 +313,8 @@ A ZIP containing the closed manifest, supported five-label Transformers config,
 local tokenizer and finite `model.safetensors` passes local-only validation,
 installs under `managed-models/<model_id>`, registers exact digest/input/fold
 provenance, deletes the acquired upload and appears on Models as
-`validated_not_runnable`.
+`compatible`; a single new article can create a five-probability local run with
+that exact model ID.
 
 ### AT-047 — Unsafe or incompatible custom bundle
 
@@ -357,12 +362,13 @@ remain eligible.
 
 ### AT-053 — Availability explanation and conditional controls
 
-A new URL absent from stored history returns
-`NEW_ARTICLE_REQUIRES_INFERENCE` and explains whether a runnable local pipeline
-exists. Other empty states distinguish no local checkpoints, no matching
-family/fold and insufficient safe articles. Single-article mode hides publisher
-count, aggregation and partial controls. Publisher mode explains that partial
-means using at least two but fewer than the requested safe articles.
+A new URL absent from stored history offers every runnable local model with mode
+`new_inference`; when none is runnable it returns
+`NEW_ARTICLE_REQUIRES_INFERENCE`. Other empty states distinguish no local
+checkpoints, no matching family/fold and insufficient safe articles.
+Single-article mode hides publisher count, aggregation and partial controls.
+Publisher mode explains that partial means using at least two but fewer than
+the requested safe articles.
 
 ### AT-054 — Bundled release replacement
 

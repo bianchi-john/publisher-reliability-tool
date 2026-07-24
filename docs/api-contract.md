@@ -212,8 +212,10 @@ Explains model availability for one proposed evaluation input. Query parameters
 are `input_type=article|publisher`, `url`, `requested_count=2..50`, and
 `allow_partial=true|false`.
 
-`items` contains only stored historical model/fold identities for which a local
-checkpoint with the same family/fold is currently present. Each item includes
+For stored coverage, `items` contains historical model/fold identities for
+which a local checkpoint with the same family/fold is present. For
+single-article input it additionally contains runnable local model IDs that can
+create a missing run. Each item includes `mode=stored_prediction|new_inference`,
 the separate `local_model_id`, local status/runnable flag, safe held-out article
 count, run count, probability count and `eligible`.
 
@@ -222,9 +224,9 @@ registry:
 
 | Availability code | Meaning |
 | --- | --- |
-| `AVAILABLE` | At least one locally present family/fold has sufficient safe stored coverage |
+| `AVAILABLE` | At least one safe stored or runnable local model option is available |
 | `NO_LOCAL_CHECKPOINTS` | No validated local artifact is currently present |
-| `NEW_ARTICLE_REQUIRES_INFERENCE` | URL has no stored prediction and therefore needs a new run |
+| `NEW_ARTICLE_REQUIRES_INFERENCE` | URL needs a new run but no runnable local model is available |
 | `TRAINING_DATA_LEAKAGE` | Present local folds were trained on this known dataset article |
 | `INSUFFICIENT_SAFE_ARTICLES` | Matching publisher coverage is below the required safe count |
 | `NO_MATCHING_LOCAL_MODEL` | Stored history has no family/fold present in the local inventory |
@@ -285,15 +287,16 @@ For single-article input, `aggregation_method`, `requested_article_count` and
 leakage-safe subset when it contains at least two articles; `false` requires the
 full requested count.
 
-Lists contain 2–50 distinct same-publisher URLs. Publisher evaluation always
-uses stored eligible runs first and sequentially retrieves/discovers only the
-remaining count; there are no separate discovery modes. A historical or missing
-artifact model may reuse stored exact runs but cannot create missing runs or
-recompute. `reuse + save_local` may retrieve content for an existing run but
-does not infer; if retrieval resolves to another article, the job returns
-`INVALID_INPUT` and stores nothing. Validation that depends only on submitted/
-local state is synchronous; network/canonical/extraction failures appear on the
-accepted job.
+Lists contain 2–50 distinct same-publisher URLs. A runnable exact model creates
+missing list runs sequentially; publisher URL input aggregates only the stored
+eligible runs already known for that publisher and does not crawl for links.
+A historical or missing-artifact model may reuse stored exact runs but cannot
+create missing runs or recompute. For a single article, missing-run `reuse` and
+explicit `recompute` retrieve, extract and infer with the selected runnable
+local model. `reuse + save_local` may retrieve content for an existing run
+without inference; if retrieval resolves to another article, the job returns
+`INVALID_INPUT` and stores nothing. Network/canonical/extraction failures appear
+on the accepted job.
 
 Before model execution, the service enforces the cross-validation leakage rule
 from the scientific contract for single articles, explicit lists and publisher

@@ -18,7 +18,7 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 | Server | Uvicorn, one worker, fixed loopback binding |
 | Frontend | React, TypeScript, Vite, locally bundled assets |
 | Persistence | Python `csv`, small in-memory indexes, filesystem lock |
-| Retrieval | `httpx` and `newspaper3k` parsing |
+| Retrieval | `httpx` and Beautiful Soup parsing |
 | Language | `langdetect`, seed zero |
 | Models | PyTorch/Transformers; PEFT/bitsandbytes only for optional loaders |
 | Packaging | Python wheel and one simple Compose service |
@@ -130,19 +130,17 @@ registrable-domain guessing is not used.
 
 ## 8. Retrieval boundary
 
-The retriever accepts HTTP(S), resolves every hop, rejects private, loopback,
-link-local, multicast, reserved, and unspecified addresses, connects to the
-validated peer with `trust_env=false`, enforces five redirects, 10-second
-connect/30-second response timeout, HTML MIME, robots policy, one request per
-second per hostname, and 10 MiB decompressed page size.
+The retriever accepts HTTP(S), resolves and validates every hop, rejects private,
+loopback, link-local, multicast, reserved, and unspecified addresses, disables
+environment proxies with `trust_env=false`, enforces five redirects, a
+10-second connect/20-second request timeout, HTML MIME, and an 8 MiB
+decompressed page limit.
 
-`newspaper3k` receives already downloaded HTML and cannot issue unchecked
+Beautiful Soup receives only the already downloaded HTML and cannot issue
 network calls. HTML, authors, and extracted content stay in job memory. Only
 validated title/body may cross into `local_content.csv` after `save_local`;
-authors and raw HTML are always released. Offline mode injects a deny-all HTTP
-transport before application services are created, configures Transformers/
-tokenizers with local-files-only behavior, and never delegates retrieval to
-`newspaper3k`.
+authors and raw HTML are always released. Offline mode blocks retrieval and
+configures core tokenizer acquisition with local-files-only behavior.
 
 ## 9. Model lifecycle
 
@@ -154,9 +152,10 @@ paths.
 
 The internal `<data-dir>/managed-models` directory stores successful custom
 bundle uploads. Startup does not rerun their full Transformers validation; a
-scan checks the registered managed directory still exists and marks a missing
-one `artifact_missing`. Built-in BERT/RoBERTa discovery remains explicit through
-the UI/API job or synchronous CLI scan.
+scan verifies the registered directory digest and marks a missing or altered
+bundle unavailable. Startup scans configured BERT/RoBERTa roots so copied,
+removed, or restored checkpoints are reflected before readiness; the UI/API
+scan remains available for changes made while the service is running.
 
 Upload validation moves a successful artifact into that root before the
 atomic model-ledger registration. A crash in between may leave an unregistered
@@ -172,8 +171,10 @@ Historical runs remain browseable and aggregable when an artifact disappears.
 BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
 fixed PRT manifest vocabulary and architectures already registered in the
 locked Transformers dependency. `auto_map`, `trust_remote_code`, Python/native
-files and pickle weights are rejected. Unknown artifacts are reported and
-ignored; no artifact changes loader behavior.
+files and pickle weights are rejected. A valid self-contained custom bundle is
+`compatible` and runnable. Core checkpoints cache only their pinned official
+tokenizer resources on first online inference; unknown artifacts are reported
+and ignored.
 
 ## 10. Local HTTP boundary
 

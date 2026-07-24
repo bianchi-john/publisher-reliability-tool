@@ -76,7 +76,8 @@ class CustomModelImportTest(unittest.TestCase):
                 model = storage.rows["models"][0]
                 self.assertEqual(model["artifact_kind"], "custom_transformer_bundle")
                 self.assertEqual(model["artifact_available"], "true")
-                self.assertEqual(model["runnable"], "false")
+                self.assertEqual(model["status"], "compatible")
+                self.assertEqual(model["runnable"], "true")
                 installed = storage.data_dir / model["artifact_locator"]
                 self.assertTrue((installed / "model.safetensors").is_file())
                 self.assertTrue((installed / "prt-model.json").is_file())

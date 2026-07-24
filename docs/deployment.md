@@ -121,14 +121,16 @@ attempts.
 ## 6. Models
 
 Download artifacts manually from the official OSF link, copy them under a
-configured root, and use the Models page/CLI scan. Base models and tokenizers
-are provisioned separately with normal Hugging Face/Transformers tooling. The
-application has no download manager, setup command, credentials, or cache
-administrator.
+configured root, and restart or use the Models page/CLI scan. The application
+never downloads base-model weights. On first online inference it may cache the
+small BERT/RoBERTa tokenizer/configuration files from the immutable revisions
+recorded in model identity; offline inference requires that cache to exist.
+No credentials are required.
 
 BERT/RoBERTa CPU is the supported core path. Custom Transformers are uploaded
 as the documented self-contained ZIP and validated entirely from local files;
-the application does not download a base model, tokenizer or custom code.
+the application does not download anything for a custom bundle or execute
+custom code.
 
 ## 7. Backup and restore
 

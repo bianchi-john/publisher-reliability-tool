@@ -82,9 +82,10 @@ compression is not scientific identity.
 Online input follows this exact boundary:
 
 1. retrieve HTML through the safe application client;
-2. give already downloaded HTML to `newspaper3k`;
-3. take its extracted article text without cleaning, case normalization,
-   stemming, or lemmatization;
+2. parse the already downloaded HTML with Beautiful Soup, remove non-content
+   elements, and prefer visible blocks below `article`, then `main`, then `p`;
+3. join extracted block text without case normalization, stemming, or
+   lemmatization;
 4. trim only for minimum-length measurement; require at least 200 Unicode
    characters and 30 whitespace-delimited tokens;
 5. run `langdetect` with `DetectorFactory.seed = 0` and require exact `en`;
@@ -105,7 +106,9 @@ The package contains `official-model-manifest-v1.json` with one immutable entry
 per official family/fold: expected artifact digest, built-in loader recipe and
 version, class order, input length/padding, output-relevant runtime options,
 base/tokenizer repositories, and immutable revisions. The application does not
-download dependencies or execute code from an artifact.
+download base-model weights or execute code from an artifact. For core
+checkpoints it may cache only the official tokenizer/configuration resources
+from the manifest's immutable revision on first online inference.
 
 ### 5.1 Core CPU demo
 
@@ -136,8 +139,8 @@ from `config.json`.
 The exact bundle file/digest inventory, manifest input policy, family/fold,
 training convention and loader recipe determine identity. A valid bundle is
 installed below `managed-models` and registered as
-`validated_not_runnable`; safe import does not imply that new-web inference is
-implemented.
+`compatible`; its local tokenizer and safetensors weights can be used for new
+article inference without network model acquisition.
 
 ## 6. Exact model identity
 
@@ -208,7 +211,7 @@ inference only if the resolved canonical article ID still equals the run's
 article ID. Otherwise nothing is saved.
 
 Local `software_versions_json` records at least application, Python, torch,
-transformers, tokenizers, PEFT, newspaper3k, and langdetect versions; an unused
+transformers, tokenizers, Beautiful Soup, and langdetect versions; an unused
 optional library is JSON null. Imported runs use `{}` rather than guessed data.
 
 ## 8. Publisher aggregation
@@ -252,9 +255,9 @@ local artifact digest produced it.
 
 Absence from the imported URL/fold registry is not proof that an arbitrary
 external article was absent from every possible training corpus. Such an input
-is reported as requiring new inference, with leakage membership unknown outside
-the registered corpus. The application never infers training membership from
-publication date, hostname or text similarity.
+may be classified by a runnable local model, with leakage membership explicitly
+unknown outside the registered corpus. The application never infers training
+membership from publication date, hostname or text similarity.
 
 ## 9. Required result warnings
 

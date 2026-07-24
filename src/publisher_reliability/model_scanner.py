@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .custom_models import directory_identity
 from .identity import sha256_json
+from .inference import CORE_MODELS
 from .storage import Storage, json_field, utc_now
 
 
@@ -88,7 +89,8 @@ def _model_row(
     parameter_count: int,
     timestamp: str,
 ) -> dict[str, object]:
-    base_model = "bert-base-uncased" if family == "bert" else "roberta-large"
+    base_model = CORE_MODELS[family]["base_model"]
+    base_revision = CORE_MODELS[family]["revision"]
     return {
         "model_id": identifier,
         "family": family,
@@ -99,11 +101,11 @@ def _model_row(
         "artifact_sha256": digest,
         "official_manifest_entry_sha256": "",
         "loader_recipe": f"{family}_state_dict",
-        "loader_recipe_version": "1",
+        "loader_recipe_version": "2",
         "base_model": base_model,
-        "base_revision": "",
+        "base_revision": base_revision,
         "tokenizer_source": base_model,
-        "tokenizer_revision": "",
+        "tokenizer_revision": base_revision,
         "class_order_json": json_field([0, 1, 2, 3, 4]),
         "max_tokens": "256",
         "padding_policy": "fixed_max_length",
@@ -116,12 +118,12 @@ def _model_row(
                 "tensor_count": tensor_count,
             }
         ),
-        "status": "validated_not_runnable",
+        "status": "compatible",
         "artifact_available": True,
-        "runnable": False,
+        "runnable": True,
         "status_detail": (
-            "Checkpoint structure and values are valid. New inference remains disabled "
-            "until an immutable tokenizer/base revision and inference pipeline are registered."
+            "Checkpoint is valid and local inference is available. The pinned tokenizer "
+            "is cached on first online use."
         ),
         "registered_at": timestamp,
         "last_validated_at": timestamp,
@@ -159,8 +161,14 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
                 "family": family,
                 "fold_id": int(fold_value),
                 "loader_recipe": f"{family}_state_dict",
-                "loader_recipe_version": "1",
+                "loader_recipe_version": "2",
+                "base_model": CORE_MODELS[family]["base_model"],
+                "base_revision": CORE_MODELS[family]["revision"],
+                "tokenizer_source": CORE_MODELS[family]["base_model"],
+                "tokenizer_revision": CORE_MODELS[family]["revision"],
                 "class_order": [0, 1, 2, 3, 4],
+                "max_tokens": 256,
+                "padding_policy": "fixed_max_length",
             }
             discovered.append(
                 _model_row(

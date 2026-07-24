@@ -160,8 +160,8 @@ function renderModelTables(items) {
   const local = items.filter(row => row.identity_kind === "local");
   const historical = items.filter(row => row.identity_kind === "historical");
   return `
-    <section class="section-block"><h2>Local checkpoints found in configured model directories</h2>
-      <p class="muted">Only recognized files that pass safe structural validation appear here. They are never confused with historical dataset identities.</p>
+    <section class="section-block"><h2>Local and imported models</h2>
+      <p class="muted">Models marked Ready can classify new article URLs. Core .pt checkpoints are discovered in configured directories; custom Transformers are installed from the ZIP form above.</p>
       ${table(
         ["Checkpoint", "Digest", "Status", "Available", "Inference"],
         local.map(row => `<tr><td><b>${escapeHtml(modelLabel(row))}</b><br><span class="mono">${escapeHtml(row.artifact_locator)}</span></td>
@@ -179,12 +179,29 @@ function renderModelTables(items) {
 
 async function models() {
   content.innerHTML = pageHead("Checkpoint inventory", "Models",
-    "Scan official checkpoints or import a self-contained custom Transformers classifier bundle.",
+    "Core BERT/RoBERTa checkpoints are scanned automatically. User-created Transformers are imported as a self-contained safe bundle.",
     `<button id="scan">Rescan model directories</button>`) + `
     <section class="card full"><h2>Import custom Transformer</h2>
-      <p class="muted">Upload a safe .zip containing prt-model.json, config.json, model.safetensors and a local tokenizer. Custom Python code and pickle weights are rejected.</p>
+      <ol>
+        <li>Export the model with <span class="mono">model.save_pretrained(..., safe_serialization=True)</span> and export its tokenizer with <span class="mono">tokenizer.save_pretrained(...)</span>.</li>
+        <li>Add <span class="mono">prt-model.json</span> to that same folder, then compress the complete folder as one <span class="mono">.zip</span>.</li>
+        <li>Select that ZIP below. A standalone <span class="mono">.pt</span> file is not a custom bundle.</li>
+      </ol>
+      <details><summary>Required files and manifest example</summary>
+        <p class="muted">Required: prt-model.json, config.json, model.safetensors, tokenizer_config.json, plus all tokenizer resources.</p>
+        <pre class="mono">${escapeHtml(`{
+  "schema_version": 1,
+  "display_name": "My custom classifier",
+  "family": "custom_my_model",
+  "fold_id": 1,
+  "class_order": [0, 1, 2, 3, 4],
+  "max_tokens": 256,
+  "padding_policy": "fixed_max_length",
+  "training_data": {"kind": "five_fold", "held_out_fold": 1}
+}`)}</pre>
+      </details>
       <form id="custom-model-upload"><div class="row">
-        <label>PRT Transformer bundle<input required name="file" type="file" accept=".zip,application/zip"></label>
+        <label>Choose the complete custom-model ZIP<input required name="file" type="file" accept=".zip,application/zip"></label>
         <button>Validate and import</button>
       </div></form>
     </section>
@@ -347,8 +364,13 @@ async function evaluate() {
       const data = await api(`/api/v1/models/available?${query}`);
       const eligible = data.items.filter(row => row.eligible);
       modelField.innerHTML = eligible.length
-        ? eligible.map(row => `<option value="${escapeHtml(row.model_id)}">${escapeHtml(modelLabel(row))} · local checkpoint ${escapeHtml(row.local_status.replaceAll("_", " "))} · ${row.article_count} held-out article(s)${row.probability_count ? " · probabilities available" : ""}</option>`).join("")
-        : `<option value="">No compatible stored model</option>`;
+        ? eligible.map(row => {
+          const operation = row.mode === "new_inference"
+            ? "new local inference"
+            : `${row.article_count} stored held-out article(s)`;
+          return `<option value="${escapeHtml(row.model_id)}">${escapeHtml(modelLabel(row))} · ${escapeHtml(operation)} · ${escapeHtml(row.local_status.replaceAll("_", " "))}</option>`;
+        }).join("")
+        : `<option value="">No available model</option>`;
       modelField.disabled = !eligible.length;
       submit.disabled = !eligible.length;
       const blocked = data.availability.blocked_training_models || [];
@@ -387,7 +409,18 @@ async function evaluate() {
     output.textContent = "Submitting evaluation…";
     try {
       const job = await api("/api/v1/evaluation-jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-      output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Follow its persisted status on the Jobs page.</p>`;
+      output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Retrieving and classifying may take a little while on CPU.</p>`;
+      const completed = await waitForJob(job.job_id, output);
+      if (type === "article") {
+        output.innerHTML = `<section class="card"><h2>Article prediction</h2>
+          <p><span class="class-chip">Class ${completed.result.predicted_class}</span>
+          ${completed.result.reused ? "Reused stored prediction" : "New local inference"}</p>
+          <div class="probabilities">${completed.result.probabilities.map((value, index) =>
+            `<span><b>C${index}</b> ${Number(value).toFixed(6)}</span>`).join("")}</div>
+          <p class="muted">Run ${shortId(completed.result.prediction_run_id)}</p></section>`;
+      } else {
+        output.innerHTML = `<p class="notice">Evaluation completed: Class ${completed.result.result_class}, using ${completed.result.used_count} article(s).</p>`;
+      }
     } catch (error) { output.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
   });
 
