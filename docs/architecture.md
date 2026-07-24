@@ -26,13 +26,16 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 ## 3. Process and data flow
 
 ```text
-browser/CLI -> FastAPI service -> Storage (seven CSV files)
+browser/CLI -> FastAPI service -> Storage (seven authoritative CSV files)
                          |
                          +-> FIFO job worker
                                -> ArticleRetriever
                                -> ModelLoader
                                -> InferenceService
                                -> AggregationMethod
+                                      |
+                                      +-> PredictionDatasetMirror
+                                          -> dataset/predictions/predictions.csv
 ```
 
 Frontend and API use the same Pydantic request types and service functions.
@@ -44,6 +47,7 @@ CSV files.
 | Boundary | Responsibility | How to extend |
 | --- | --- | --- |
 | `Storage` | Load ledgers, lock data directory, append immutable rows, atomically rewrite small mutable files | Add a column/schema version and loader validation |
+| `PredictionDatasetMirror` | Upgrade the public CSV schema, mirror local runs idempotently, refresh its manifest, and restore mirrored runs at startup | Add an explicit origin/run field without changing original-row identity |
 | `ModelLoader` | Recognize one explicit family, validate resources, tokenize, run its frozen fixture | Add one Python class and scientific fixture; no plugin loader |
 | `ArticleRetriever` | Normalize URLs, enforce safe HTTP policy, parse supplied HTML | Add an extraction strategy behind the same content boundary |
 | `InferenceService` | Select reuse/recompute, call loader, validate probabilities, create provenance | Add output fields explicitly to run schema |
@@ -59,6 +63,15 @@ extension mechanism.
 `csv-storage-contract.md` defines seven authoritative CSV ledgers. Articles and
 publishers are derived at startup from canonical URL, publisher hostname, and
 prediction-run data. This avoids synchronizing a second entity store.
+
+The prediction release is a deliberate, inspectable replica for user-created
+article runs. Original rows use `prediction_origin=dataset_original`; one local
+inference uses one `prediction_origin=user_evaluation` row identified by
+`prediction_run_id`. A run commits to `prediction_runs.csv` first, then the
+mirror rewrites `predictions.csv` and `manifest.json` through sibling temporary
+files. At startup, mirrored local rows missing from state are restored before
+all local runs are synchronized again. Thus the dataset copy can aid recovery
+but never creates a competing run ID or duplicate on restart.
 
 - Immutable scientific rows (`prediction_runs.csv`, `evaluations.csv`, and
   `imports.csv`) are appended, flushed, and fsynced.
@@ -222,6 +235,7 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Running job at restart | Mark `PROCESS_INTERRUPTED` |
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |
 | Missing artifact | Preserve historical model identity and runs |
+| Prediction mirror is unwritable | Preserve the committed state run, fail the dependent inference operation, and report storage failure |
 | Purge | Rewrite active local-content file; backups remain the user's responsibility |
 
 Manual stopped-server copying of the data directory is the backup and restore
@@ -245,3 +259,6 @@ recovery UI, and high-availability behavior are outside the demo.
     either the local model ID or the historical prediction model ID.
 11. Article source badges are derived from run origin: imports establish
     dataset membership, while `local_inference` establishes user evaluation.
+12. Every committed local inference has at most one schema-2 dataset row with
+    the same `prediction_run_id`; original dataset rows are never rewritten as
+    user rows.

@@ -27,7 +27,9 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 ```
 
 Only `state/*.csv` is authoritative. Articles and publishers are derived views
-over prediction runs. Uploads, staging files, managed model artifact bytes,
+over prediction runs. `dataset/predictions/predictions.csv` is an additional
+inspectable, recoverable mirror of locally inferred runs, not an eighth
+authoritative ledger. Uploads, staging files, managed model artifact bytes,
 indexes, logs, and the writer lock are operational; losing managed artifact
 bytes disables new inference but does not lose historical scientific records.
 
@@ -112,7 +114,8 @@ Minimum commit units are deliberately explicit:
 
 - import: the marker-controlled replacement of runs, imports, and historical
   models;
-- new prediction: one append-only prediction-run row;
+- new prediction: one append-only prediction-run row followed by an idempotent
+  schema-2 dataset mirror update keyed by `prediction_run_id`;
 - publisher evaluation: one append-only evaluation row referencing already
   committed runs;
 - content save/delete: one complete `local_content.csv` replacement;
@@ -123,6 +126,16 @@ These units are independent. If the process stops after a run/evaluation/import
 commits but before its job-success rewrite, the scientific record remains valid
 and the recovered job is `PROCESS_INTERRUPTED`. Already committed article runs
 or content from a failed multi-article evaluation are not rolled back.
+
+For the prediction mirror, `predictions.csv` is completely rewritten to a
+sibling temporary file, flushed/fsynced and replaced; `manifest.json` is then
+refreshed with the new part checksum and origin counts. The original dataset
+content digest is calculated only over the legacy scientific columns of
+`dataset_original` rows, so local additions do not change the release identity.
+Startup imports only original rows, restores any missing
+`user_evaluation` run into state, and synchronizes state back to the mirror.
+Repeated synchronization adds nothing when a `prediction_run_id` is already
+present.
 
 No compaction, record versions, tombstones, transaction ledger, commit
 sequence, or pagination snapshot is part of schema version 1.

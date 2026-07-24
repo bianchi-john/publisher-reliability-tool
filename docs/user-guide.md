@@ -113,6 +113,18 @@ prediction-run ID, and a link to the complete article history. The **Recent
 user article evaluations** table reloads persisted local inference runs after a
 page refresh.
 
+Every completed new inference is stored in two coordinated places:
+
+- `data/state/prediction_runs.csv` is the authoritative application ledger;
+- `dataset/predictions/predictions.csv` contains an inspectable mirror row with
+  `prediction_origin=user_evaluation`.
+
+The mirrored row includes the run ID, URL, exact model ID/family/fold, predicted
+label, all five probabilities, action, timestamps, duration, device and
+software versions. Existing release rows use
+`prediction_origin=dataset_original`. A repeated start or synchronization does
+not duplicate a prediction because the run ID is unique.
+
 Common availability messages have distinct meanings:
 
 - **No validated local checkpoint**: add/scan a supported artifact or import a
@@ -152,6 +164,10 @@ origins; it does not guess from the URL:
 
 The article CSV export includes the same derived source counts and flags but
 never includes saved body text, authors, or raw HTML.
+
+Run origin in the application ledger (`local_inference`) and row origin in the
+combined prediction dataset (`user_evaluation`) describe the same user-created
+inference at two storage boundaries.
 
 ## 5. Evaluate a publisher
 

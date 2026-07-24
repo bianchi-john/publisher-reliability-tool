@@ -7,6 +7,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import sys
 from collections import Counter
 from itertools import zip_longest
@@ -14,21 +15,23 @@ from pathlib import Path
 
 try:
     from .prepare_public_dataset import (
+        BASE_PUBLIC_COLUMNS,
         PUBLIC_COLUMNS,
         REDACTED_EDITORIAL_COLUMNS,
         normalized_domain,
         open_source,
-        serialize_csv_row,
+        serialize_original_row,
         sha256_file,
         validate_model_values,
     )
 except ImportError:
     from prepare_public_dataset import (
+        BASE_PUBLIC_COLUMNS,
         PUBLIC_COLUMNS,
         REDACTED_EDITORIAL_COLUMNS,
         normalized_domain,
         open_source,
-        serialize_csv_row,
+        serialize_original_row,
         sha256_file,
         validate_model_values,
     )
@@ -55,11 +58,38 @@ def iter_release_rows(release_dir: Path, part_names: list[str]):
             yield from reader
 
 
+def validate_user_prediction(row: dict[str, str], row_number: int) -> None:
+    try:
+        predicted = int(row["predicted_label"])
+        fold = int(row["prediction_fold_id"])
+        probabilities = [float(row[f"prob_class_{index}"]) for index in range(5)]
+    except ValueError as exc:
+        raise ValueError(f"invalid user prediction at release row {row_number}") from exc
+    if predicted not in range(5) or fold not in range(1, 6):
+        raise ValueError(f"user class/fold out of range at release row {row_number}")
+    if (
+        any(
+            not math.isfinite(value) or value < 0 or value > 1
+            for value in probabilities
+        )
+        or abs(sum(probabilities) - 1) > 1e-5
+    ):
+        raise ValueError(f"invalid user probabilities at release row {row_number}")
+    if (
+        not row["prediction_run_id"]
+        or not row["model_id"]
+        or not row["prediction_family"]
+    ):
+        raise ValueError(f"incomplete user prediction identity at release row {row_number}")
+
+
 def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[str, int]:
     manifest_path = release_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("columns") != PUBLIC_COLUMNS:
         raise ValueError("manifest columns do not match the public schema")
+    if manifest.get("schema_version") != 2:
+        raise ValueError("manifest schema version is unsupported")
     if manifest.get("redacted_editorial_columns") != REDACTED_EDITORIAL_COLUMNS:
         raise ValueError("manifest editorial-redaction declaration is invalid")
 
@@ -91,14 +121,15 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
     digest = hashlib.sha256()
     url_counts: Counter[str] = Counter()
     total_rows = 0
+    original_rows = 0
+    user_rows = 0
+    user_run_ids: set[str] = set()
     actual_part_rows: list[int] = []
 
     for part_name in part_names:
         count = 0
         for row in iter_release_rows(release_dir, [part_name]):
             row_number = total_rows + 2
-            if row["article_id"] != str(total_rows):
-                raise ValueError(f"non-contiguous article_id at release row {row_number}")
             if row["domain"] != normalized_domain(row["url"]):
                 raise ValueError(f"domain mismatch at release row {row_number}")
             for column in REDACTED_EDITORIAL_COLUMNS:
@@ -106,8 +137,25 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
                     raise ValueError(
                         f"editorial field {column} is not empty at release row {row_number}"
                     )
-            validate_model_values(row, row_number)
-            digest.update(serialize_csv_row(row))
+            origin = row["prediction_origin"]
+            if origin == "dataset_original":
+                if row["article_id"] != str(original_rows):
+                    raise ValueError(
+                        f"non-contiguous original article_id at release row {row_number}"
+                    )
+                validate_model_values(row, row_number)
+                digest.update(serialize_original_row(row))
+                original_rows += 1
+            elif origin == "user_evaluation":
+                validate_user_prediction(row, row_number)
+                if row["prediction_run_id"] in user_run_ids:
+                    raise ValueError(
+                        f"duplicate user run identity at release row {row_number}"
+                    )
+                user_run_ids.add(row["prediction_run_id"])
+                user_rows += 1
+            else:
+                raise ValueError(f"invalid prediction origin at release row {row_number}")
             url_counts[row["url"]] += 1
             total_rows += 1
             count += 1
@@ -123,9 +171,17 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
         raise ValueError("duplicate URL count does not match manifest")
     if digest.hexdigest() != manifest["content_digest_sha256"]:
         raise ValueError("content digest does not match manifest")
+    if original_rows != int(manifest["dataset_original_records"]):
+        raise ValueError("original prediction row count does not match manifest")
+    if user_rows != int(manifest["user_evaluation_records"]):
+        raise ValueError("user prediction row count does not match manifest")
 
     if source_path is not None:
-        release_rows = iter_release_rows(release_dir, part_names)
+        release_rows = (
+            row
+            for row in iter_release_rows(release_dir, part_names)
+            if row["prediction_origin"] == "dataset_original"
+        )
         duplicate_policy = manifest.get("duplicate_policy", "keep")
         source_record_count = 0
         skipped_duplicate_count = 0
@@ -150,7 +206,7 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
                 source_row, release_row = pair
                 if source_row is None or release_row is None:
                     raise ValueError("source and release contain different row counts")
-                for column in PUBLIC_COLUMNS:
+                for column in BASE_PUBLIC_COLUMNS:
                     if column == "article_id":
                         expected = str(index)
                     elif column == "domain":
@@ -176,6 +232,8 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
         "unique_urls": len(url_counts),
         "duplicate_url_rows": total_rows - len(url_counts),
         "skipped_duplicate_rows": int(manifest.get("skipped_duplicate_rows", 0)),
+        "dataset_original_records": original_rows,
+        "user_evaluation_records": user_rows,
     }
 
 

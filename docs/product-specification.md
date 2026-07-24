@@ -37,6 +37,9 @@ The MVP shall:
 - import user CSV or CSV.GZ files after safe projection and validation;
 - persist essential models, runs, evaluations, imports, jobs, and explicitly
   saved local content in seven inspectable CSV ledgers;
+- mirror every locally inferred article run into
+  `dataset/predictions/predictions.csv` with an explicit user/original origin,
+  exact label, probabilities and provenance;
 - derive article and publisher views from persisted prediction runs;
 - scan configured model roots and accept browser uploads of supported official
   artifacts;
@@ -92,7 +95,7 @@ publisher-reliability storage verify
 | `--port` | `8000` | Loopback port `1..65535` |
 | `--data-dir` | `./data` | CSV state, lock, temporary uploads, logs |
 | `--models-dir` | `./models` | Repeatable configured model root |
-| `--seed-dataset` | `./dataset/predictions` | Bundled manifest directory; missing is allowed |
+| `--seed-dataset` | `./dataset/predictions` | Bundled manifest and writable local-prediction mirror; missing is allowed |
 | `--offline` | false | Deny all application HTTP retrieval |
 | `--device` | `auto` | `auto`, `cpu`, or `cuda` |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error` |
@@ -131,12 +134,15 @@ Startup order is:
 7. verify the complete store before any seed/model mutation;
 8. verify/import the optional bundled release by content digest;
 9. scan configured core model roots and refresh managed-bundle integrity;
-10. load lightweight indexes;
-11. leave source-free queued jobs queued; leave upload-backed queued jobs
+10. restore any mirrored `user_evaluation` run absent from the authoritative
+    state ledger, then idempotently synchronize all local inference runs back
+    to the prediction CSV and refresh its manifest;
+11. load lightweight indexes;
+12. leave source-free queued jobs queued; leave upload-backed queued jobs
     queued only when every acquired source they require still exists; mark an
     upload-backed queued job with a missing source and every `running` job
     failed with `PROCESS_INTERRUPTED`;
-12. start the FIFO worker and accept HTTP requests; readiness is then `ready`.
+13. start the FIFO worker and accept HTTP requests; readiness is then `ready`.
 
 Recovery performs only the two actions in step 6. Any other structural
 corruption fails startup without completing, migrating, or guessing state.
@@ -215,7 +221,11 @@ training-data leakage. `allow_partial=true` is explained as using 2..requested
 safe articles when the requested count cannot be met; false requires the full
 count.
 
-After single-article completion, Evaluate keeps a prominent result card on the
+After single-article completion, the new immutable run is appended to the
+authoritative state ledger and mirrored to
+`dataset/predictions/predictions.csv` as
+`prediction_origin=user_evaluation`. The row stores one exact run rather than
+overwriting the original wide BERT/RoBERTa fields. Evaluate keeps a prominent result card on the
 page with the predicted `Class 0..4`, all five decimal/percentage
 probabilities, exact model/fold, stored-versus-new origin, run ID, and a link to
 the complete article history. A recent-local-runs table remains available after
@@ -305,7 +315,7 @@ for paragraphs, navigation and controls, without a CDN.
 | FR-005 | Title/body shall persist only after explicit `save_local` and active-state deletion shall be available. |
 | FR-006 | Article and publisher history shall remain browsable and aggregable offline. |
 | FR-007 | `reuse` shall select the latest exact-model immutable run without creating another run. |
-| FR-008 | `recompute` and missing-run inference shall create new immutable runs with exact provenance. |
+| FR-008 | `recompute` and missing-run inference shall create new immutable runs with exact provenance and idempotently mirror each run to the prediction dataset as `user_evaluation`. |
 | FR-009 | Every publisher evaluation shall reference the exact ordered runs and articles used. |
 | FR-010 | The three aggregation methods shall implement the scientific formulas and availability rules exactly. |
 | FR-011 | Bundled and user-imported predictions shall contain all five finite class probabilities; values shall never be fabricated. |
@@ -314,10 +324,10 @@ for paragraphs, navigation and controls, without a CDN.
 | FR-014 | BERT and RoBERTa shall form the built-in core model path. |
 | FR-015 | New web inference shall use safe retrieval, unchanged extracted text, and deterministic English validation. |
 | FR-016 | Strict offline mode shall prevent every application-initiated outbound HTTP request. |
-| FR-017 | Essential state shall survive restart in the seven documented CSV ledgers. |
+| FR-017 | Essential state shall survive restart in the seven documented CSV ledgers; user-evaluation rows in the dataset CSV shall provide an additional recoverable mirror, not a second independent identity system. |
 | FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
-| FR-020 | UI and API shall expose model, fold, run, contributing articles, method, all available probabilities, dataset-versus-user origin, and scientific limitations. |
+| FR-020 | UI, API and the prediction CSV shall expose model, fold, run, contributing articles where applicable, method, all available probabilities, dataset-versus-user origin, and scientific limitations. |
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |

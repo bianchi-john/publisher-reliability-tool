@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_records": 19429,
-  "records": 19429,
-  "unique_urls": 19429,
-  "duplicate_url_rows": 0,
+  "records": 19432,
+  "unique_urls": 19431,
+  "duplicate_url_rows": 1,
   "duplicate_policy": "error",
   "duplicate_source_url_groups": 0,
   "skipped_duplicate_rows": 0,
@@ -27,7 +27,28 @@
     "roberta_prob_class_1",
     "roberta_prob_class_2",
     "roberta_prob_class_3",
-    "roberta_prob_class_4"
+    "roberta_prob_class_4",
+    "prediction_origin",
+    "prediction_run_id",
+    "model_id",
+    "prediction_family",
+    "prediction_fold_id",
+    "predicted_label",
+    "prob_class_0",
+    "prob_class_1",
+    "prob_class_2",
+    "prob_class_3",
+    "prob_class_4",
+    "prediction_action",
+    "input_source",
+    "content_retention",
+    "job_id",
+    "inference_started_at",
+    "inference_completed_at",
+    "duration_ms",
+    "device",
+    "software_versions_json",
+    "recorded_at"
   ],
   "redacted_editorial_columns": [
     "title",
@@ -48,9 +69,11 @@
   "parts": [
     {
       "file": "predictions.csv",
-      "rows": 19429,
-      "bytes": 6933652,
-      "sha256": "0b8e1039644289d271b10c31630ae4cf53cb4b2fb801dbc7dc58a452b1b6c586"
+      "rows": 19432,
+      "bytes": 7655224,
+      "sha256": "99a30bc1e80badac90d9f0afb042de8b6af425c83f73a86872679eb84edd6393"
     }
-  ]
+  ],
+  "dataset_original_records": 19429,
+  "user_evaluation_records": 3
 }

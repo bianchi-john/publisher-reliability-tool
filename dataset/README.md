@@ -1,27 +1,47 @@
 # Prediction dataset
 
-> This directory contains the project’s only dataset: public model predictions,
-> without ground-truth labels or article content.
+> This directory contains the project’s prediction dataset: the original public
+> model outputs plus an append-style mirror of article evaluations created
+> locally by the user. It contains no ground-truth labels or article content.
 
 ## Contents
 
 ```text
 predictions/
 ├── manifest.json      # schema, counts and SHA-256 checksums
-└── predictions.csv    # URLs, model classes, folds and probabilities
+└── predictions.csv    # Original predictions and local user evaluations
 ```
 
 | Measure | Value |
 | --- | ---: |
-| Source rows | 19,429 |
-| Released URLs | 19,429 |
+| Original dataset rows | 19,429 |
+| Current user-evaluation rows | See `manifest.json` |
 | Derived articles | 19,411 |
-| Prediction runs | 38,854 |
-| Runs with five probabilities | 38,854 |
-| Model/fold identities | 10 |
+| Original prediction runs | 38,854 |
+| Original model/fold identities | 10 |
 
-`title`, `text` and `authors` are empty compatibility columns. Protected
+Schema version 2 uses `prediction_origin` to distinguish the two row types:
+
+- `dataset_original`: one original wide-format BERT/RoBERTa dataset row;
+- `user_evaluation`: one immutable local inference run, including its model ID,
+  family, fold, predicted label, all five probabilities, action, timestamps,
+  device and software versions.
+
+The original wide-format columns remain unchanged. Generic local-run fields are
+`prediction_run_id`, `model_id`, `prediction_family`,
+`prediction_fold_id`, `predicted_label`, `prob_class_0` through
+`prob_class_4`, `prediction_action`, `input_source`, `content_retention`,
+`job_id`, inference timestamps, `duration_ms`, `device`,
+`software_versions_json` and `recorded_at`.
+
+`title`, `text` and `authors` remain empty compatibility columns. Protected
 provider labels, scores and metadata are not included.
+
+`data/state/prediction_runs.csv` is the application's authoritative operational
+ledger. After a local inference commits there, the same run is written
+idempotently to this CSV. At startup, mirrored `user_evaluation` rows can also
+restore a missing local run before the mirror is synchronized again. Repeated
+startup never duplicates a run because `prediction_run_id` is unique.
 
 ## Verify
 
@@ -35,8 +55,10 @@ Or use the standalone script:
 python3 scripts/verify_public_dataset.py dataset/predictions
 ```
 
-Verification checks the schema, row counts, part size, SHA-256 and content
-digest without changing application state.
+Verification checks the schema, origin counts, row counts, part size, SHA-256
+and content digest without changing application state. The stable content
+digest covers only `dataset_original` rows; the part checksum and total/user
+counts are refreshed whenever a local prediction is added.
 
 ## Import format
 
@@ -66,6 +88,13 @@ python3 scripts/prepare_public_dataset.py \
 ```
 
 The generator never modifies the source file.
+
+## Write access
+
+The application needs write access to `predictions.csv` and `manifest.json` to
+mirror new user evaluations. The Compose configuration therefore mounts
+`./dataset` read/write. For native use, the account running the application
+must be able to replace files inside `dataset/predictions`.
 
 ## License
 

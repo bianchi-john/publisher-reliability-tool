@@ -22,17 +22,18 @@ from .identity import (
     publisher_id,
     sha256_json,
 )
+from .prediction_dataset import (
+    BASE_PUBLIC_COLUMNS,
+    DATASET_ORIGIN,
+    PUBLIC_COLUMNS,
+    USER_ORIGIN,
+    _serialized_original,
+    _user_values,
+)
 from .storage import Storage, json_field, utc_now
 
 
 FAMILIES = ("bert", "roberta")
-PUBLIC_COLUMNS = [
-    "article_id", "url", "title", "text", "authors", "domain",
-    "bert_predicted_label", "bert_fold_id",
-    "roberta_predicted_label", "roberta_fold_id",
-    *[f"bert_prob_class_{index}" for index in range(5)],
-    *[f"roberta_prob_class_{index}" for index in range(5)],
-]
 EDITORIAL_COLUMNS = {"title", "text", "authors"}
 PROTECTED_COLUMNS = {
     "score", "country", "language", "topics", "paywall",
@@ -87,11 +88,16 @@ def verify_manifest(release_dir: Path) -> dict[str, object]:
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise AppError("IMPORT_INVALID", "Bundled dataset manifest is unreadable.") from exc
-    if manifest.get("schema_version") != 1 or manifest.get("columns") != PUBLIC_COLUMNS:
+    schema_version = manifest.get("schema_version")
+    expected_columns = BASE_PUBLIC_COLUMNS if schema_version == 1 else PUBLIC_COLUMNS
+    if schema_version not in {1, 2} or manifest.get("columns") != expected_columns:
         raise AppError("IMPORT_INVALID", "Bundled dataset schema is unsupported.")
 
     digest = hashlib.sha256()
     total = 0
+    original_count = 0
+    user_count = 0
+    user_run_ids: set[str] = set()
     for part in manifest.get("parts", []):
         name = str(part.get("file", ""))
         if Path(name).name != name or not name.endswith(".csv"):
@@ -103,15 +109,29 @@ def verify_manifest(release_dir: Path) -> dict[str, object]:
             raise AppError("IMPORT_INVALID", "Bundled dataset part checksum failed.")
         with path.open(encoding="utf-8", newline="") as stream:
             reader = csv.DictReader(stream)
-            if reader.fieldnames != PUBLIC_COLUMNS:
+            if reader.fieldnames != expected_columns:
                 raise AppError("IMPORT_INVALID", "Bundled dataset columns are invalid.")
             count = 0
             for row in reader:
-                if None in row or any(row[column] is None for column in PUBLIC_COLUMNS):
+                if None in row or any(row[column] is None for column in expected_columns):
                     raise AppError("IMPORT_INVALID", "Bundled dataset row is malformed.")
                 if any(row[column] for column in EDITORIAL_COLUMNS):
                     raise AppError("IMPORT_INVALID", "Bundled editorial fields must be empty.")
-                digest.update(_serialized_projection(row))
+                origin = row.get("prediction_origin") or DATASET_ORIGIN
+                if origin == DATASET_ORIGIN:
+                    digest.update(_serialized_original(row))
+                    original_count += 1
+                elif origin == USER_ORIGIN and schema_version == 2:
+                    _user_values(row)
+                    if row["prediction_run_id"] in user_run_ids:
+                        raise AppError(
+                            "IMPORT_INVALID",
+                            "Bundled dataset contains a duplicate user run identity.",
+                        )
+                    user_run_ids.add(row["prediction_run_id"])
+                    user_count += 1
+                else:
+                    raise AppError("IMPORT_INVALID", "Bundled prediction origin is invalid.")
                 count += 1
                 total += 1
             if count != int(part["rows"]):
@@ -120,6 +140,11 @@ def verify_manifest(release_dir: Path) -> dict[str, object]:
         raise AppError("IMPORT_INVALID", "Bundled row count is invalid.")
     if digest.hexdigest() != manifest.get("content_digest_sha256"):
         raise AppError("IMPORT_INVALID", "Bundled content digest failed.")
+    if schema_version == 2 and (
+        original_count != int(manifest.get("dataset_original_records", -1))
+        or user_count != int(manifest.get("user_evaluation_records", -1))
+    ):
+        raise AppError("IMPORT_INVALID", "Bundled prediction-origin counts are invalid.")
     return manifest
 
 
@@ -445,19 +470,7 @@ def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str
     _remove_previous_bundled_release(storage)
 
     parts = list(manifest["parts"])
-    if len(parts) == 1:
-        source = release_dir / str(parts[0]["file"])
-        return import_csv(
-            storage,
-            source,
-            source_kind="bundled_manifest",
-            source_name="bundled-predictions-v1",
-            release_id="osf:r9atz",
-            known_content_digest=digest,
-            legacy_bare_percent=True,
-        )
-
-    temporary = storage.data_dir / "staging" / "bundled-joined.csv"
+    temporary = storage.data_dir / "staging" / "bundled-original.csv"
     try:
         with temporary.open("w", encoding="utf-8", newline="") as output:
             writer = csv.DictWriter(output, fieldnames=PUBLIC_COLUMNS, lineterminator="\n")
@@ -466,7 +479,15 @@ def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str
                 with (release_dir / str(part["file"])).open(
                     encoding="utf-8", newline=""
                 ) as stream:
-                    writer.writerows(csv.DictReader(stream))
+                    for row in csv.DictReader(stream):
+                        if (row.get("prediction_origin") or DATASET_ORIGIN) != DATASET_ORIGIN:
+                            continue
+                        writer.writerow(
+                            {
+                                column: row.get(column, "")
+                                for column in PUBLIC_COLUMNS
+                            }
+                        )
         return import_csv(
             storage,
             temporary,

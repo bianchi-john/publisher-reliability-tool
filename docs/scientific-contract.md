@@ -34,9 +34,11 @@ ordered run and article IDs it used. A newer run never changes an older result.
 
 ## 3. Dataset inputs
 
-The bundled release is `dataset/predictions/manifest.json` plus ordered CSV
-parts. Part sizes/checksums, row counts, schema, and
-`prt-dataset-content-v1` digest are verified before import.
+The working release is `dataset/predictions/manifest.json` plus
+`predictions.csv`. Part size/checksum, row counts, schema, and the stable
+`prt-dataset-content-v1` digest of original rows are verified before import.
+Schema version 2 distinguishes `dataset_original` and `user_evaluation` through
+the required `prediction_origin` field.
 
 The bundled legacy wide schema contains:
 
@@ -49,6 +51,14 @@ The bundled legacy wide schema contains:
 | `<family>_predicted_label` | Integer `0..4` for each represented family |
 | `<family>_fold_id` | Integer `1..5` |
 | `<family>_prob_class_0..4` | Optional only as a complete valid vector |
+
+Those columns are populated for `dataset_original` rows. A
+`user_evaluation` row instead represents exactly one local run through the
+generic fields `prediction_run_id`, `model_id`, `prediction_family`,
+`prediction_fold_id`, `predicted_label`, `prob_class_0..4`,
+`prediction_action`, `input_source`, `content_retention`, `job_id`, timestamps,
+duration, device, software versions and recording time. Original wide-format
+prediction cells are empty on such a row.
 
 User CSV/CSV.GZ requires `url` and at least one represented family's label/fold
 pair. Source ID, domain, title, text, and authors are optional. Supported family
@@ -73,9 +83,12 @@ BERT/RoBERTa family/fold identities. Every run has one complete five-class
 probability vector. Llama/Mistral hard labels are deliberately absent because
 their class probabilities were not available.
 
-The sole content digest is `prt-dataset-content-v1` as defined by the storage
-contract. Equivalent CSV/CSV.GZ projected record sequences share identity;
-compression is not scientific identity.
+The release-identity content digest is `prt-dataset-content-v1` as defined by
+the storage contract and covers only the original wide-format values.
+Appending a `user_evaluation` changes the physical file checksum and manifest
+counts but not that original scientific identity. Equivalent CSV/CSV.GZ
+projected original record sequences share identity; compression is not
+scientific identity.
 
 ## 4. Article input
 
@@ -217,6 +230,13 @@ article ID. Otherwise nothing is saved.
 Local `software_versions_json` records at least application, Python, torch,
 transformers, tokenizers, Newspaper3k, and langdetect versions; an unused
 optional library is JSON null. Imported runs use `{}` rather than guessed data.
+
+After the state-ledger append, every local inference is mirrored idempotently
+to the schema-2 dataset as `prediction_origin=user_evaluation`. The mirror
+copies the same run ID, URL, exact local model/fold, hard class, five
+probabilities and provenance. It neither changes nor fills an original BERT or
+RoBERTa output. Startup may restore a mirrored run absent from state and then
+resynchronize all local runs; run IDs prevent duplication.
 
 ## 8. Publisher aggregation
 
