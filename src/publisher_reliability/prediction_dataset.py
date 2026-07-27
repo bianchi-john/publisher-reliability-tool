@@ -38,6 +38,9 @@ USER_PREDICTION_COLUMNS = [
     "model_id",
     "prediction_family",
     "prediction_fold_id",
+    "prediction_model_name",
+    "prediction_model_provenance",
+    "prediction_official_manifest_entry_sha256",
     "predicted_label",
     *[f"prob_class_{index}" for index in range(5)],
     "prediction_action",
@@ -100,8 +103,23 @@ def _user_values(row: dict[str, str]) -> tuple[int, tuple[float, ...]]:
         not row.get("prediction_run_id")
         or not row.get("model_id")
         or not row.get("prediction_family")
+        or not row.get("prediction_model_name")
+        or row.get("prediction_model_provenance")
+        not in {"paper_official", "user_custom", "local_checkpoint"}
     ):
         raise AppError("IMPORT_INVALID", "User prediction identity is incomplete.")
+    official_digest = row.get("prediction_official_manifest_entry_sha256", "")
+    if (
+        row["prediction_model_provenance"] == "paper_official"
+        and (
+            not isinstance(official_digest, str)
+            or len(official_digest) != 64
+            or any(character not in "0123456789abcdef" for character in official_digest)
+        )
+    ):
+        raise AppError("IMPORT_INVALID", "Official model provenance digest is invalid.")
+    if row["prediction_model_provenance"] != "paper_official" and official_digest:
+        raise AppError("IMPORT_INVALID", "Only paper models can carry an official digest.")
     return fold, probabilities
 
 
@@ -154,6 +172,17 @@ def _dataset_row(run: dict[str, str], model: dict[str, str]) -> dict[str, str]:
             "model_id": run["model_id"],
             "prediction_family": model["family"],
             "prediction_fold_id": model["fold_id"],
+            "prediction_model_name": model["display_name"],
+            "prediction_model_provenance": (
+                "paper_official"
+                if model["official_manifest_entry_sha256"]
+                else "user_custom"
+                if model["artifact_kind"].startswith("custom_")
+                else "local_checkpoint"
+            ),
+            "prediction_official_manifest_entry_sha256": model[
+                "official_manifest_entry_sha256"
+            ],
             "predicted_label": run["predicted_class"],
             **{
                 f"prob_class_{index}": run[f"prob_class_{index}"]
@@ -392,14 +421,22 @@ def restore_user_predictions(storage: Storage, release_dir: Path | None) -> int:
                     "family": row["prediction_family"],
                     "fold_id": fold,
                     "display_name": (
-                        f"{row['prediction_family'].upper()} fold {fold} "
-                        "(restored user prediction)"
+                        row["prediction_model_name"]
                     ),
                     "artifact_kind": "historical_virtual",
+                    "official_manifest_entry_sha256": row[
+                        "prediction_official_manifest_entry_sha256"
+                    ],
                     "loader_recipe": "restored_user_prediction",
                     "loader_recipe_version": "1",
                     "class_order_json": json_field([0, 1, 2, 3, 4]),
-                    "runtime_scientific_json": json_field({}),
+                    "runtime_scientific_json": json_field(
+                        {
+                            "source_model_provenance": row[
+                                "prediction_model_provenance"
+                            ]
+                        }
+                    ),
                     "status": "historical_only",
                     "artifact_available": False,
                     "runnable": False,

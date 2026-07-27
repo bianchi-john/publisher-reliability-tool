@@ -8,6 +8,7 @@ from publisher_reliability.identity import article_id, normalized_hostname, publ
 from publisher_reliability.prediction_dataset import (
     BASE_PUBLIC_COLUMNS,
     PUBLIC_COLUMNS,
+    _dataset_row,
     reconcile_prediction_dataset,
     restore_user_predictions,
     sync_user_predictions,
@@ -18,6 +19,40 @@ from scripts.verify_public_dataset import verify_release
 
 
 class PredictionDatasetSyncTest(unittest.TestCase):
+    def test_mirror_preserves_official_model_name_and_manifest_identity(self) -> None:
+        model = {column: "" for column in HEADERS["models"]}
+        model.update(
+            model_id="paper-model",
+            family="mistral",
+            fold_id="4",
+            display_name="Mistral 24B — paper original — fold 4",
+            artifact_kind="paper_mistral_adapter_bundle",
+            official_manifest_entry_sha256="a" * 64,
+        )
+        run = {column: "" for column in HEADERS["prediction_runs"]}
+        run.update(
+            prediction_run_id="run",
+            article_id="article",
+            canonical_url="https://example.com/article",
+            normalized_hostname="example.com",
+            model_id="paper-model",
+            predicted_class="3",
+            prob_class_0="0.01",
+            prob_class_1="0.02",
+            prob_class_2="0.07",
+            prob_class_3="0.80",
+            prob_class_4="0.10",
+        )
+
+        row = _dataset_row(run, model)
+
+        self.assertEqual(row["prediction_model_name"], model["display_name"])
+        self.assertEqual(row["prediction_model_provenance"], "paper_official")
+        self.assertEqual(
+            row["prediction_official_manifest_entry_sha256"],
+            "a" * 64,
+        )
+
     def test_mirrors_without_duplicates_and_restores_user_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -112,6 +147,15 @@ class PredictionDatasetSyncTest(unittest.TestCase):
             self.assertEqual(rows[-1]["prediction_origin"], "user_evaluation")
             self.assertEqual(rows[-1]["prediction_run_id"], "local-run")
             self.assertEqual(rows[-1]["model_id"], "local-model")
+            self.assertEqual(rows[-1]["prediction_model_name"], "Local BERT")
+            self.assertEqual(
+                rows[-1]["prediction_model_provenance"],
+                "local_checkpoint",
+            )
+            self.assertEqual(
+                rows[-1]["prediction_official_manifest_entry_sha256"],
+                "",
+            )
 
             manifest_path = release / "manifest.json"
             stale_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

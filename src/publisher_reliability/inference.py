@@ -17,9 +17,9 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from . import __version__
-from .custom_models import directory_identity
 from .errors import AppError
 from .identity import normalize_url
+from .official_models import MANAGED_ARTIFACT_KINDS, verify_managed_model
 from .storage import Storage
 
 
@@ -216,25 +216,19 @@ class InferenceEngine:
         self._loaded_device = "cpu"
 
     def _artifact_path(self, model: dict[str, str]) -> Path:
-        if model["artifact_kind"] == "custom_transformer_bundle":
+        if model["artifact_kind"] in MANAGED_ARTIFACT_KINDS:
             candidate = self.storage.data_dir / model["artifact_locator"]
             if candidate.is_symlink():
-                raise AppError("MODEL_NOT_AVAILABLE", "Custom model bundle is unsafe.")
+                raise AppError("MODEL_NOT_AVAILABLE", "Managed model bundle is unsafe.")
             path = candidate.resolve()
             managed = (self.storage.data_dir / "managed-models").resolve()
             if path.parent != managed or not path.is_dir():
-                raise AppError("MODEL_NOT_AVAILABLE", "Custom model bundle is missing.")
-            try:
-                digest = directory_identity(path)[0]
-            except OSError as exc:
+                raise AppError("MODEL_NOT_AVAILABLE", "Managed model bundle is missing.")
+            valid, _problem = verify_managed_model(self.storage, model)
+            if not valid:
                 raise AppError(
                     "MODEL_NOT_AVAILABLE",
-                    "Custom model bundle failed its integrity check.",
-                ) from exc
-            if digest != model["artifact_sha256"]:
-                raise AppError(
-                    "MODEL_NOT_AVAILABLE",
-                    "Custom model bundle has changed since validation.",
+                    "Managed model bundle has changed since validation.",
                 )
             return path
         match = ROOT_LOCATOR.fullmatch(model["artifact_locator"])
@@ -317,6 +311,7 @@ class InferenceEngine:
 
         path = self._artifact_path(model_row)
         family = model_row["family"]
+        uses_device_map = False
         try:
             if model_row["artifact_kind"] == "custom_transformer_bundle":
                 tokenizer = AutoTokenizer.from_pretrained(
@@ -330,6 +325,101 @@ class InferenceEngine:
                     trust_remote_code=False,
                     use_safetensors=True,
                 )
+            elif model_row["artifact_kind"] in {
+                "paper_llama_state_dict_bundle",
+                "paper_mistral_adapter_bundle",
+                "custom_peft_adapter_bundle",
+            }:
+                if not torch.cuda.is_available():
+                    raise AppError(
+                        "MODEL_NOT_RUNNABLE",
+                        "Llama and Mistral QLoRA inference requires a CUDA GPU.",
+                    )
+                try:
+                    from peft import LoraConfig, PeftModel, get_peft_model
+                    from transformers import BitsAndBytesConfig
+                except ImportError as exc:
+                    raise AppError(
+                        "MODEL_NOT_RUNNABLE",
+                        "Install the project 'llm-models' extra for Llama/Mistral inference.",
+                    ) from exc
+                dependency_cache = self.storage.data_dir / "model-dependencies"
+                dependency_cache.mkdir(exist_ok=True)
+                quantization = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                )
+                tokenizer_source: str | Path = (
+                    path
+                    if model_row["artifact_kind"] in {
+                        "paper_mistral_adapter_bundle",
+                        "custom_peft_adapter_bundle",
+                    }
+                    else model_row["tokenizer_source"]
+                )
+                tokenizer = AutoTokenizer.from_pretrained(
+                    tokenizer_source,
+                    revision=(
+                        None
+                        if isinstance(tokenizer_source, Path)
+                        else model_row["tokenizer_revision"]
+                    ),
+                    cache_dir=dependency_cache,
+                    local_files_only=(
+                        True if isinstance(tokenizer_source, Path) else self.offline
+                    ),
+                    trust_remote_code=False,
+                )
+                if tokenizer.pad_token_id is None:
+                    tokenizer.pad_token = tokenizer.eos_token
+                loaded_model = AutoModelForSequenceClassification.from_pretrained(
+                    model_row["base_model"],
+                    revision=model_row["base_revision"],
+                    cache_dir=dependency_cache,
+                    local_files_only=self.offline,
+                    trust_remote_code=False,
+                    num_labels=5,
+                    quantization_config=quantization,
+                    device_map="auto",
+                    torch_dtype=torch.bfloat16,
+                )
+                loaded_model.config.pad_token_id = tokenizer.pad_token_id
+                if model_row["artifact_kind"] == "paper_llama_state_dict_bundle":
+                    loaded_model = get_peft_model(
+                        loaded_model,
+                        LoraConfig(
+                            r=8,
+                            lora_alpha=16,
+                            target_modules=[
+                                "q_proj",
+                                "k_proj",
+                                "v_proj",
+                                "o_proj",
+                                "gate_proj",
+                                "down_proj",
+                                "up_proj",
+                            ],
+                            lora_dropout=0.05,
+                            bias="none",
+                            task_type="SEQ_CLS",
+                        ),
+                    )
+                    state = torch.load(
+                        path / "model.pt",
+                        map_location="cpu",
+                        weights_only=True,
+                        mmap=True,
+                    )
+                    loaded_model.load_state_dict(state, strict=True)
+                else:
+                    loaded_model = PeftModel.from_pretrained(
+                        loaded_model,
+                        path,
+                        is_trainable=False,
+                    )
+                uses_device_map = True
             elif family in CORE_MODELS:
                 recipe = CORE_MODELS[family]
                 dependency_cache = self.storage.data_dir / "model-dependencies"
@@ -387,8 +477,8 @@ class InferenceEngine:
                 "The local model could not be loaded with its validated recipe.",
             ) from exc
 
-        selected_device = self._selected_device(torch)
-        if selected_device != "cpu":
+        selected_device = "cuda" if uses_device_map else self._selected_device(torch)
+        if selected_device != "cpu" and not uses_device_map:
             loaded_model = loaded_model.to(selected_device)
         loaded_model.eval()
         self._model = loaded_model

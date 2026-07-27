@@ -75,6 +75,24 @@ class ResearchService:
             for row in self.storage.rows["prediction_runs"]
         }
 
+    @staticmethod
+    def model_provenance(model: dict[str, str]) -> str:
+        if model.get("artifact_kind") == "historical_virtual":
+            try:
+                source = json.loads(model.get("runtime_scientific_json") or "{}").get(
+                    "source_model_provenance"
+                )
+            except json.JSONDecodeError:
+                source = None
+            if source in {"paper_official", "user_custom", "local_checkpoint"}:
+                return source
+            return "paper_dataset"
+        if model.get("official_manifest_entry_sha256"):
+            return "paper_official"
+        if model.get("artifact_kind", "").startswith("custom_"):
+            return "user_custom"
+        return "local_checkpoint"
+
     def _imported_fold_registry(self) -> dict[tuple[str, str], set[int]]:
         registry: dict[tuple[str, str], set[int]] = defaultdict(set)
         models = self.models_by_id
@@ -205,6 +223,8 @@ class ResearchService:
             "probabilities": probabilities if all(v is not None for v in probabilities) else None,
             "family": model.get("family"),
             "fold_id": int(model["fold_id"]) if model.get("fold_id") else None,
+            "model_display_name": model.get("display_name"),
+            "model_provenance": self.model_provenance(model) if model else None,
         }
 
     def prediction_runs(self, **filters: str | None) -> list[dict[str, object]]:
@@ -394,10 +414,13 @@ class ResearchService:
                 "support_level": (
                     "core"
                     if row["family"] in {"bert", "roberta"}
+                    else "paper_llm"
+                    if row["official_manifest_entry_sha256"]
                     else "custom"
-                    if row["family"].startswith("custom_")
+                    if row["artifact_kind"].startswith("custom_")
                     else "optional"
                 ),
+                "provenance": self.model_provenance(row),
             }
             for row in self.storage.rows["models"]
             if (not family or row["family"] == family)
@@ -482,6 +505,7 @@ class ResearchService:
                     "family": model["family"],
                     "fold_id": int(model["fold_id"]),
                     "display_name": model["display_name"],
+                    "provenance": self.model_provenance(local_model),
                     "local_status": local_model["status"],
                     "local_runnable": local_model["runnable"] == "true",
                     "article_count": article_count,
@@ -536,6 +560,7 @@ class ResearchService:
                         "family": family,
                         "fold_id": fold_id,
                         "display_name": local_model["display_name"],
+                        "provenance": self.model_provenance(local_model),
                         "local_status": local_model["status"],
                         "local_runnable": True,
                         "article_count": 0,
@@ -774,6 +799,8 @@ class ResearchService:
                 "model_id": model_identifier,
                 "family": model["family"],
                 "fold_id": int(model["fold_id"]),
+                "model_display_name": model["display_name"],
+                "model_provenance": self.model_provenance(model),
                 "origin": run["origin"],
                 "reused": reused,
             }

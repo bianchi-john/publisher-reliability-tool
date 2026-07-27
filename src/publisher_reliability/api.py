@@ -21,6 +21,7 @@ from .errors import AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
 from .model_scanner import scan_model_roots
+from .official_models import official_catalog
 from .prediction_dataset import (
     reconcile_prediction_dataset,
     restore_user_predictions,
@@ -375,6 +376,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def models(family: str | None = None, status: str | None = None):
         return {"items": service.models(family=family, status=status)}
 
+    @app.get("/api/v1/models/official-catalog")
+    async def model_official_catalog():
+        return {"items": official_catalog()}
+
     @app.get("/api/v1/models/available")
     async def available_models(
         input_type: Literal["article", "publisher"],
@@ -430,6 +435,56 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
         except Exception:
             destination.unlink(missing_ok=True)
+            raise
+        return {"job_id": job_id}
+
+    @app.post("/api/v1/models/official-upload", status_code=202)
+    async def official_model_upload(files: list[UploadFile] = File(...)):
+        if not 1 <= len(files) <= 2:
+            raise AppError(
+                "INVALID_INPUT",
+                "Select one Mistral ZIP or both Llama .z01/.z02 files.",
+            )
+        tokens: list[str] = []
+        names: list[str] = []
+        total = 0
+        try:
+            for uploaded in files:
+                filename = Path(uploaded.filename or "").name
+                if not filename or filename != uploaded.filename:
+                    raise AppError("INVALID_INPUT", "Official model filename is invalid.")
+                token = f"{uuid.uuid4()}.official"
+                destination = storage.data_dir / "uploads" / token
+                tokens.append(token)
+                with destination.open("xb") as output:
+                    while chunk := await uploaded.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > settings.model_upload_max_bytes:
+                            raise AppError(
+                                "PAYLOAD_TOO_LARGE",
+                                "Official model upload exceeds the combined byte limit.",
+                            )
+                        output.write(chunk)
+                names.append(filename)
+        except Exception:
+            for token in tokens:
+                (storage.data_dir / "uploads" / token).unlink(missing_ok=True)
+            raise
+        finally:
+            for uploaded in files:
+                await uploaded.close()
+        try:
+            job_id = jobs.submit(
+                "model_validation",
+                {
+                    "source_upload_ids": tokens,
+                    "source_names": names,
+                    "bundle_kind": "paper_official",
+                },
+            )
+        except Exception:
+            for token in tokens:
+                (storage.data_dir / "uploads" / token).unlink(missing_ok=True)
             raise
         return {"job_id": job_id}
 

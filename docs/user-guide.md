@@ -31,7 +31,8 @@ Install the locked inference dependencies before starting the application:
 uv sync --frozen --extra models
 ```
 
-There are two supported model paths.
+There are three supported model paths: core BERT/RoBERTa checkpoints, original
+paper Llama/Mistral checkpoints, and custom five-class Transformers.
 
 ### Core BERT or RoBERTa checkpoint
 
@@ -50,10 +51,25 @@ On first online inference the application may cache only the small tokenizer
 and configuration resources from the pinned immutable Hugging Face revision.
 It never downloads base-model weights.
 
+### Original paper Llama or Mistral model
+
+1. Open **Models** and expand the official catalog.
+2. Download one `mistral_fold_N.zip`, or both
+   `llama_fold_N.pt.z01` and `llama_fold_N.pt.z02` for the same fold.
+3. Select those file(s) under **Import an original paper model from OSF**.
+4. Wait for byte-size and SHA-256 authentication. Family and fold are detected
+   automatically.
+
+The imported row is marked **Paper original**. On a machine without CUDA or the
+`llm-models` extra it remains verified but not runnable. Llama also requires
+external Hugging Face access to its gated, pinned base snapshot.
+
+The same exact filenames can be copied to a configured `models/` root and
+imported with **Rescan model directories**.
+
 ### Custom Transformers model
 
-A standalone `.pt` file is not a custom model bundle. Export a self-contained
-ZIP containing:
+A custom model uses one self-contained ZIP. A full encoder bundle contains:
 
 ```text
 prt-model.json
@@ -63,14 +79,17 @@ tokenizer_config.json
 tokenizer resources
 ```
 
-Open **Models → Import custom Transformer**, review the three-step example shown
+Open **Models → Import a custom five-class Transformer**, review the example shown
 above the upload control, select the ZIP, and wait for the validation job. A
-valid bundle is installed under the managed data directory, appears as
-`compatible`, and is immediately runnable without a network model download.
+valid bundle is installed under the managed data directory and marked
+**User custom**.
 
-The model must be a five-label encoder classifier from the allowlist documented
-in the bundle contract. Decoder-only Llama, Mistral, and Mixtral architectures
-are not supported. The application rejects executable code, pickle/PyTorch
+Alternatively, schema 2 accepts a Llama 3 8B or Mistral 24B PEFT LoRA
+`AutoModelForSequenceClassification` adapter with local tokenizer and a
+five-row classification head. It uses the exact base repository and immutable
+revision declared in the manifest and requires CUDA to run.
+
+The application rejects executable code, pickle/PyTorch
 weights, unsafe ZIP paths, remote tokenizer dependencies, non-finite tensors,
 and state-dictionary key/shape mismatches. See
 [Custom Transformers bundle](custom-model-bundle.md) for the complete manifest

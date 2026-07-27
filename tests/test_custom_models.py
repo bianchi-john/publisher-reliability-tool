@@ -91,6 +91,60 @@ class CustomModelImportTest(unittest.TestCase):
                 self.assertTrue((installed / "model.safetensors").is_file())
                 self.assertTrue((installed / "prt-model.json").is_file())
 
+    def test_imports_custom_peft_classifier_with_user_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "custom-mistral.zip"
+            manifest = {
+                "schema_version": 2,
+                "model_kind": "peft_sequence_classifier",
+                "architecture": "mistral",
+                "display_name": "Custom Mistral experiment",
+                "family": "custom_mistral_experiment",
+                "fold_id": 3,
+                "class_order": [0, 1, 2, 3, 4],
+                "max_tokens": 1024,
+                "padding_policy": "dynamic_longest",
+                "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+                "base_revision": "a" * 40,
+                "training_data": {"kind": "five_fold", "held_out_fold": 3},
+            }
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("prt-model.json", json.dumps(manifest))
+                archive.writestr("adapter_config.json", "{}")
+                archive.writestr("adapter_model.safetensors", b"safe-placeholder")
+                archive.writestr("tokenizer_config.json", "{}")
+                archive.writestr("tokenizer.json", "{}")
+
+            with Storage(root / "data") as storage:
+                with (
+                    patch(
+                        "publisher_reliability.custom_models._validate_peft_adapter",
+                        return_value={
+                            "architecture": "mistral",
+                            "model_type": "mistral",
+                            "parameter_count": 100,
+                            "tensor_count": 10,
+                        },
+                    ),
+                    patch(
+                        "publisher_reliability.official_models.llm_runtime_status",
+                        return_value=("resource_unavailable", False, "CUDA required."),
+                    ),
+                ):
+                    result = import_custom_transformer_bundle(
+                        storage,
+                        source,
+                        max_uncompressed_bytes=1024 * 1024,
+                    )
+
+                self.assertEqual(result["provenance"], "user_custom")
+                model = storage.rows["models"][0]
+                self.assertEqual(model["artifact_kind"], "custom_peft_adapter_bundle")
+                self.assertEqual(model["loader_recipe"], "custom_peft_sequence_classification")
+                self.assertFalse(model["official_manifest_entry_sha256"])
+                self.assertEqual(model["status"], "resource_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

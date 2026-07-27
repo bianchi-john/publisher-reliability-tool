@@ -32,7 +32,13 @@ const statusPill = (value) => `<span class="pill ${escapeHtml(value)}">${escapeH
 const pageHead = (eyebrow, title, intro, action = "") => `
   <header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>
   <p class="intro">${intro}</p></div>${action}</header>`;
-const modelLabel = (row) => `${String(row.family).toUpperCase()} · fold ${row.fold_id}`;
+const modelLabel = (row) => row.display_name || row.model_display_name || `${String(row.family).toUpperCase()} · fold ${row.fold_id}`;
+const provenanceLabel = (value) => ({
+  paper_official: "Paper original",
+  user_custom: "User custom",
+  paper_dataset: "Dataset identity",
+  local_checkpoint: "Local checkpoint",
+})[value] || value || "Unknown provenance";
 const originLabel = (origin) => ({
   bundled_import: "Original dataset",
   user_import: "Imported dataset",
@@ -95,7 +101,8 @@ function articlePredictionResult(result) {
     </div>
     <div class="result-meta">
       <span class="source-badge ${sourceClass}">${escapeHtml(sourceText)}</span>
-      <span><b>Model:</b> ${escapeHtml(String(result.family).toUpperCase())} · fold ${result.fold_id}</span>
+      <span><b>Model:</b> ${escapeHtml(modelLabel(result))}</span>
+      <span class="source-badge">${escapeHtml(provenanceLabel(result.model_provenance))}</span>
     </div>
     <h3>Probabilities for every class</h3>
     <div class="probability-results">
@@ -194,7 +201,7 @@ async function articleDetail(id) {
     <section class="section-block"><h2>Every model prediction</h2>
     ${table(
       ["Model / fold", "Predicted class", "P(class 0)", "P(class 1)", "P(class 2)", "P(class 3)", "P(class 4)", "Origin", "Run"],
-      row.runs.map(run => `<tr><td><b>${escapeHtml(String(run.family || "unknown").toUpperCase())}</b><br>fold ${run.fold_id ?? "—"}</td>
+      row.runs.map(run => `<tr><td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
         <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
         <td><span class="source-badge ${run.origin === "local_inference" ? "user-source" : "dataset-source"}">${escapeHtml(originLabel(run.origin))}</span></td><td>${shortId(run.prediction_run_id)}</td></tr>`)
     )}</section><p class="warning">${warning}</p>`;
@@ -231,7 +238,7 @@ async function publisherDetail(id, params) {
     ${table(
       ["Article", "Model / fold", "Class", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Run"],
       runs.items.map(run => `<tr><td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a></td>
-        <td><b>${escapeHtml(String(run.family || "unknown").toUpperCase())}</b><br>fold ${run.fold_id ?? "—"}</td>
+        <td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
         <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
         <td>${shortId(run.prediction_run_id)}</td></tr>`)
     )}${pager(`publisher/${encodeURIComponent(id)}`, runs.page)}</section>
@@ -262,8 +269,9 @@ function renderModelTables(items) {
     <section class="section-block"><h2>Local and imported models</h2>
       <p class="muted">Models marked Ready can classify new article URLs. Core .pt checkpoints are discovered in configured directories; custom Transformers are installed from the ZIP form above.</p>
       ${table(
-        ["Checkpoint", "Digest", "Status", "Available", "Inference"],
+        ["Checkpoint", "Provenance", "Digest", "Status", "Available", "Inference"],
         local.map(row => `<tr><td><b>${escapeHtml(modelLabel(row))}</b><br><span class="mono">${escapeHtml(row.artifact_locator)}</span></td>
+          <td><span class="source-badge">${escapeHtml(provenanceLabel(row.provenance))}</span></td>
           <td>${shortId(row.artifact_sha256)}</td><td>${statusPill(row.status)}<br><span class="muted">${escapeHtml(row.status_detail)}</span></td>
           <td>${row.artifact_available ? "Yes" : "No"}</td><td>${row.runnable ? "Ready" : "Not yet runnable"}</td></tr>`)
       )}</section>
@@ -278,26 +286,40 @@ function renderModelTables(items) {
 
 async function models() {
   content.innerHTML = pageHead("Checkpoint inventory", "Models",
-    "Core BERT/RoBERTa checkpoints are scanned automatically. User-created encoder classifiers are imported as a self-contained safe bundle.",
+    "Import authenticated paper checkpoints or compatible user-created five-class Transformers. Their provenance remains distinct in every prediction.",
     `<button id="scan">Rescan model directories</button>`) + `
-    <section class="card full"><h2>Import custom Transformer</h2>
+    <section class="card full"><h2>Import an original paper model from OSF</h2>
+      <p>Download one Mistral ZIP or both Llama segments for the same fold from the catalog below, then select the file or files here. Family and fold are detected automatically from exact size and SHA-256 checksums.</p>
+      <p class="warning">Llama 3 8B and Mistral 24B inference requires the <span class="mono">llm-models</span> extra, CUDA and access to the pinned base model. A verified checkpoint can be stored even when this machine cannot run it.</p>
+      <form id="official-model-upload"><div class="row">
+        <label>Official OSF file(s)<input required multiple name="files" type="file" accept=".zip,.z01,.z02,application/zip"></label>
+        <button>Authenticate and import</button>
+      </div></form>
+      <details><summary>Official Llama/Mistral catalog</summary><div id="official-catalog" class="loading">Loading OSF manifest…</div></details>
+    </section>
+    <section class="card full"><h2>Import a custom five-class Transformer</h2>
       <ol>
-        <li>Export the model with <span class="mono">model.save_pretrained(..., safe_serialization=True)</span> and export its tokenizer with <span class="mono">tokenizer.save_pretrained(...)</span>.</li>
+        <li>For an encoder, export the complete classifier with safe serialization. For Llama/Mistral, export a PEFT LoRA sequence-classification adapter and tokenizer.</li>
         <li>Add <span class="mono">prt-model.json</span> to that same folder, then compress the complete folder as one <span class="mono">.zip</span>.</li>
-        <li>Select that ZIP below. A standalone <span class="mono">.pt</span> file is not a custom bundle.</li>
+        <li>The model must output exactly five logits in class order 0–4. Imported predictions are marked <b>User custom</b>.</li>
       </ol>
-      <details><summary>Required files and manifest example</summary>
-        <p class="muted">Required: prt-model.json, config.json, model.safetensors, tokenizer_config.json, plus all tokenizer resources. Decoder-only LLMs such as Llama and Mistral are outside this paper's scope.</p>
+      <details><summary>Custom Llama/Mistral manifest example</summary>
+        <p class="muted">Required: prt-model.json, adapter_config.json, adapter_model.safetensors, tokenizer_config.json and tokenizer.json. Executable custom code and pickle checkpoints are rejected.</p>
         <pre class="mono">${escapeHtml(`{
-  "schema_version": 1,
-  "display_name": "My custom classifier",
-  "family": "custom_my_model",
+  "schema_version": 2,
+  "model_kind": "peft_sequence_classifier",
+  "architecture": "mistral",
+  "display_name": "My custom Mistral classifier",
+  "family": "custom_mistral_experiment",
   "fold_id": 1,
   "class_order": [0, 1, 2, 3, 4],
-  "max_tokens": 256,
-  "padding_policy": "fixed_max_length",
+  "max_tokens": 1024,
+  "padding_policy": "dynamic_longest",
+  "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+  "base_revision": "<40-character commit SHA>",
   "training_data": {"kind": "five_fold", "held_out_fold": 1}
 }`)}</pre>
+        <p class="muted">The schema 1 full-safetensors encoder contract remains supported.</p>
       </details>
       <form id="custom-model-upload"><div class="row">
         <label>Choose the complete custom-model ZIP<input required name="file" type="file" accept=".zip,application/zip"></label>
@@ -309,6 +331,7 @@ async function models() {
   const scanButton = document.querySelector("#scan");
   const scanState = document.querySelector("#scan-state");
   const tables = document.querySelector("#model-tables");
+  const catalogElement = document.querySelector("#official-catalog");
 
   async function loadInventory() {
     const data = await api("/api/v1/models");
@@ -336,6 +359,26 @@ async function models() {
   }
 
   scanButton.addEventListener("click", runScan);
+  document.querySelector("#official-model-upload").addEventListener("submit", async event => {
+    event.preventDefault();
+    const uploadButton = event.currentTarget.querySelector("button");
+    uploadButton.disabled = true;
+    scanState.textContent = "Uploading and authenticating official OSF checkpoint…";
+    try {
+      const submitted = await api("/api/v1/models/official-upload", {
+        method: "POST",
+        body: new FormData(event.currentTarget),
+      });
+      const job = await waitForJob(submitted.job_id, scanState);
+      scanState.textContent = job.result.message;
+      event.currentTarget.reset();
+      await loadInventory();
+    } catch (error) {
+      scanState.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+    } finally {
+      uploadButton.disabled = false;
+    }
+  });
   document.querySelector("#custom-model-upload").addEventListener("submit", async event => {
     event.preventDefault();
     const uploadButton = event.currentTarget.querySelector("button");
@@ -356,7 +399,16 @@ async function models() {
       uploadButton.disabled = false;
     }
   });
-  const items = await loadInventory();
+  const [items, catalog] = await Promise.all([
+    loadInventory(),
+    api("/api/v1/models/official-catalog"),
+  ]);
+  catalogElement.className = "";
+  catalogElement.innerHTML = table(
+    ["Model", "Required OSF files"],
+    catalog.items.map(row => `<tr><td><b>${escapeHtml(row.display_name)}</b><br><span class="muted">${escapeHtml(row.base_model)} @ ${escapeHtml(row.base_revision.slice(0, 12))}…</span></td>
+      <td>${row.files.map(file => `<a href="${escapeHtml(file.download_url)}" target="_blank" rel="noopener">${escapeHtml(file.name)}</a> <span class="muted">(${(Number(file.size) / 1024 / 1024 / 1024).toFixed(2)} GiB)</span>`).join("<br>")}</td></tr>`)
+  );
   if (!items.some(row => row.identity_kind === "local") && !sessionStorage.getItem("prt-model-scan-started")) {
     sessionStorage.setItem("prt-model-scan-started", "true");
     await runScan();
@@ -449,7 +501,7 @@ async function evaluate() {
           recent.items.map(run => `<tr class="user-article-row">
             <td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a>
               <span class="source-badge user-source">User evaluation</span></td>
-            <td><b>${escapeHtml(String(run.family || "unknown").toUpperCase())}</b><br>fold ${run.fold_id ?? "—"}</td>
+            <td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
             <td><span class="class-chip">Class ${run.predicted_class}</span></td>${probabilityCells(run)}
             <td>${escapeHtml(run.inference_completed_at || run.recorded_at)}</td></tr>`)
         )
@@ -529,7 +581,7 @@ async function evaluate() {
     output.textContent = "Submitting evaluation…";
     try {
       const job = await api("/api/v1/evaluation-jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-      output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Retrieving and classifying may take a little while on CPU.</p>`;
+      output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Retrieval and local inference may take some time depending on the selected model and hardware.</p>`;
       const completed = await waitForJob(job.job_id, output);
       if (type === "article") {
         output.innerHTML = articlePredictionResult(completed.result);

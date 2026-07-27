@@ -28,6 +28,15 @@ The `models` extra is required for local checkpoint scanning and custom
 Transformer validation. A base-only sync remains sufficient for browsing,
 imports and stored aggregation.
 
+For Llama/Mistral inference install the locked LLM runtime:
+
+```bash
+uv sync --frozen --extra llm-models
+```
+
+It adds PEFT, Accelerate and bitsandbytes. A CUDA GPU is required; model
+authentication and catalog browsing do not require one.
+
 Production frontend assets are built into the package. Successful startup
 prints the local UI, API, docs, data directory, and offline/device state. The
 host is fixed to `127.0.0.1`; only the port is configurable.
@@ -56,7 +65,7 @@ services:
       PRT_DEVICE: "${PRT_DEVICE:-auto}"
       PRT_LOG_LEVEL: "${PRT_LOG_LEVEL:-info}"
       PRT_DATASET_UPLOAD_MAX_BYTES: "${PRT_DATASET_UPLOAD_MAX_BYTES:-536870912}"
-      PRT_MODEL_UPLOAD_MAX_BYTES: "${PRT_MODEL_UPLOAD_MAX_BYTES:-4294967296}"
+      PRT_MODEL_UPLOAD_MAX_BYTES: "${PRT_MODEL_UPLOAD_MAX_BYTES:-8589934592}"
     volumes:
       - ./data:/data
       - ./models:/models:ro
@@ -101,7 +110,7 @@ Precedence is CLI, environment, default. No configuration file is loaded.
 | `PRT_DEVICE` | `auto` | `auto`, `cpu`, `cuda` |
 | `PRT_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
 | `PRT_DATASET_UPLOAD_MAX_BYTES` | `536870912` | Positive, maximum 512 MiB in supported demo |
-| `PRT_MODEL_UPLOAD_MAX_BYTES` | `4294967296` | Positive, maximum 4 GiB in supported demo |
+| `PRT_MODEL_UPLOAD_MAX_BYTES` | `8589934592` | Positive, maximum 8 GiB; covers both Llama segments |
 
 Host, public origin, CORS, API keys, job lanes, queue limits, backup retention,
 and UID/GID remapping are intentionally not configurable.
@@ -123,19 +132,24 @@ attempts.
 
 ## 6. Models
 
-Download artifacts manually from the official OSF link, copy them under a
-configured root, and restart or use the Models page/CLI scan. The application
-never downloads base-model weights. On first online inference it may cache the
-small BERT/RoBERTa tokenizer/configuration files from the immutable revisions
-recorded in model identity; offline inference requires that cache to exist.
-No credentials are required.
+Download artifacts manually from the official OSF link. Copy exact files under
+a configured root and scan, or use the official upload form. Mistral needs one
+ZIP; Llama needs both segments for one fold. Size and SHA-256 are checked
+against the packaged OSF manifest before `paper_official` provenance is granted.
 
-BERT/RoBERTa CPU is the supported core path. Custom Transformers are uploaded
-as the documented self-contained ZIP and restricted to the encoder-only
-sequence-classifier allowlist. Decoder-only LLM families are unsupported. The
-application does not download anything for a custom bundle or execute custom
-code. Use **Models → Import custom Transformer**; the page includes the required
-layout and manifest example. See
+On first online BERT/RoBERTa inference the application may cache the small
+tokenizer/configuration files from the immutable revisions recorded in model
+identity. BERT/RoBERTa CPU is the supported core path.
+
+Official and custom Llama/Mistral classification reproduce the notebook QLoRA
+recipe and require CUDA plus the pinned Hugging Face base snapshot. Llama's
+repository is gated; credentials and license acceptance are managed externally
+through the normal Hugging Face cache. The application never stores them.
+
+Custom Transformers are either a complete allowlisted encoder classifier or a
+Llama/Mistral PEFT sequence-classification adapter. The application does not
+execute artifact code. Use **Models → Import a custom five-class Transformer**.
+See
 [Custom Transformers bundle](custom-model-bundle.md) for the full contract.
 
 New article extraction is part of the `models` extra. Retrieval requests

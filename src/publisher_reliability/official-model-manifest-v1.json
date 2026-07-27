@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "osf",
+    "project_title": "From Articles to Publishers: Aggregating Language Model Predictions for News Source Reliability Inference",
+    "project_url": "https://osf.io/r9atz/",
+    "view_only_url": "https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74"
+  },
+  "class_order": [0, 1, 2, 3, 4],
+  "models": [
+    {
+      "family": "llama",
+      "fold_id": 1,
+      "display_name": "Llama 3 8B — paper original — fold 1",
+      "artifact_format": "concatenated_torch_state_dict",
+      "loader_recipe": "paper_llama_3_8b_qlora_state_dict",
+      "loader_recipe_version": "1",
+      "base_model": "meta-llama/Meta-Llama-3-8B",
+      "base_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "tokenizer_source": "meta-llama/Meta-Llama-3-8B",
+      "tokenizer_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "max_tokens": 256,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+      },
+      "files": [
+        {
+          "name": "llama_fold_1.pt.z01",
+          "size": 3221225716,
+          "sha256": "1ef156b0bc1bce011856ffd1046d95b8501ec119d6c8afd162ec7a277f5ab378",
+          "download_url": "https://osf.io/download/694a94861af45b20650031fe/"
+        },
+        {
+          "name": "llama_fold_1.pt.z02",
+          "size": 2566827594,
+          "sha256": "bc06dd13d24812402974fb9830edd9a8386d5850625e15576596d5a19eafffd2",
+          "download_url": "https://osf.io/download/694aa4a37596a3c720877acc/"
+        }
+      ]
+    },
+    {
+      "family": "llama",
+      "fold_id": 2,
+      "display_name": "Llama 3 8B — paper original — fold 2",
+      "artifact_format": "concatenated_torch_state_dict",
+      "loader_recipe": "paper_llama_3_8b_qlora_state_dict",
+      "loader_recipe_version": "1",
+      "base_model": "meta-llama/Meta-Llama-3-8B",
+      "base_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "tokenizer_source": "meta-llama/Meta-Llama-3-8B",
+      "tokenizer_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "max_tokens": 256,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+      },
+      "files": [
+        {
+          "name": "llama_fold_2.pt.z01",
+          "size": 3221225716,
+          "sha256": "7e3eb3fd72b34f88c0800b8dc98ed83558558a2f826b0b27174573c230f9b537",
+          "download_url": "https://osf.io/download/694a96e60442e8e48a877c58/"
+        },
+        {
+          "name": "llama_fold_2.pt.z02",
+          "size": 2566827594,
+          "sha256": "462179b5f3efd0367bee407fd8cbdc27abdcdc2c66e75f6e6e80ced4488d40db",
+          "download_url": "https://osf.io/download/694a96c19678c96e82e4921e/"
+        }
+      ]
+    },
+    {
+      "family": "llama",
+      "fold_id": 3,
+      "display_name": "Llama 3 8B — paper original — fold 3",
+      "artifact_format": "concatenated_torch_state_dict",
+      "loader_recipe": "paper_llama_3_8b_qlora_state_dict",
+      "loader_recipe_version": "1",
+      "base_model": "meta-llama/Meta-Llama-3-8B",
+      "base_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "tokenizer_source": "meta-llama/Meta-Llama-3-8B",
+      "tokenizer_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "max_tokens": 256,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+      },
+      "files": [
+        {
+          "name": "llama_fold_3.pt.z01",
+          "size": 3221225716,
+          "sha256": "a77cac8a5cd63910115d2d7d58c86b747546562037e8c1a4c34b13c2e821963c",
+          "download_url": "https://osf.io/download/694a99dab96a3fe5ec003639/"
+        },
+        {
+          "name": "llama_fold_3.pt.z02",
+          "size": 2566827594,
+          "sha256": "cfa8fd01ac4594a7d60b94540982ebb7395aff50e3dcff90f4b7a248bf21c543",
+          "download_url": "https://osf.io/download/694a99ae1af45b206500349f/"
+        }
+      ]
+    },
+    {
+      "family": "llama",
+      "fold_id": 4,
+      "display_name": "Llama 3 8B — paper original — fold 4",
+      "artifact_format": "concatenated_torch_state_dict",
+      "loader_recipe": "paper_llama_3_8b_qlora_state_dict",
+      "loader_recipe_version": "1",
+      "base_model": "meta-llama/Meta-Llama-3-8B",
+      "base_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "tokenizer_source": "meta-llama/Meta-Llama-3-8B",
+      "tokenizer_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "max_tokens": 256,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+      },
+      "files": [
+        {
+          "name": "llama_fold_4.pt.z01",
+          "size": 3221225716,
+          "sha256": "6421b7860c4c1170bb0ea1df1029830a014cf126cb7574114d86174d307cdd13",
+          "download_url": "https://osf.io/download/694a9e19b96a3fe5ec00375d/"
+        },
+        {
+          "name": "llama_fold_4.pt.z02",
+          "size": 2566827594,
+          "sha256": "3c6007cff744c777aff6aaae95513b07fd9f12fe78c12b5f36d70f763c22f525",
+          "download_url": "https://osf.io/download/694a9df1f9c0576aa200353a/"
+        }
+      ]
+    },
+    {
+      "family": "llama",
+      "fold_id": 5,
+      "display_name": "Llama 3 8B — paper original — fold 5",
+      "artifact_format": "concatenated_torch_state_dict",
+      "loader_recipe": "paper_llama_3_8b_qlora_state_dict",
+      "loader_recipe_version": "1",
+      "base_model": "meta-llama/Meta-Llama-3-8B",
+      "base_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "tokenizer_source": "meta-llama/Meta-Llama-3-8B",
+      "tokenizer_revision": "8cde5ca8380496c9a6cc7ef3a8b46a0372a1d920",
+      "max_tokens": 256,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"]
+      },
+      "files": [
+        {
+          "name": "llama_fold_5.pt.z01",
+          "size": 3221225716,
+          "sha256": "19af554b6731667b190c1cd1260f09e01a1b483eeea7a1ef7a337f7d5b3ecb5b",
+          "download_url": "https://osf.io/download/694a9f7d3fec1c6a45877ecb5b/"
+        },
+        {
+          "name": "llama_fold_5.pt.z02",
+          "size": 2566827594,
+          "sha256": "33b6e5e4435bedeaabdc6525cc595bbb6cb52ebf8eed9b35900ec8212d14685e",
+          "download_url": "https://osf.io/download/694a9f575ccb0f4b91e490aa/"
+        }
+      ]
+    },
+    {
+      "family": "mistral",
+      "fold_id": 1,
+      "display_name": "Mistral 24B — paper original — fold 1",
+      "artifact_format": "peft_adapter_zip",
+      "loader_recipe": "paper_mistral_24b_qlora_adapter",
+      "loader_recipe_version": "1",
+      "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+      "base_revision": "b0a2e4ed093c26997495ae625528f81ea04b749f",
+      "tokenizer_source": "local_adapter_bundle",
+      "tokenizer_revision": "osf-archive",
+      "max_tokens": 1024,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+      },
+      "files": [
+        {
+          "name": "mistral_fold_1.zip",
+          "size": 75770165,
+          "sha256": "618295e1de4de5a582aeac3e164ddb06dbcf48ee5d972c328dd8cd369ed98511",
+          "download_url": "https://osf.io/download/6a31501026a7fc2fdc6dbc27/"
+        }
+      ]
+    },
+    {
+      "family": "mistral",
+      "fold_id": 2,
+      "display_name": "Mistral 24B — paper original — fold 2",
+      "artifact_format": "peft_adapter_zip",
+      "loader_recipe": "paper_mistral_24b_qlora_adapter",
+      "loader_recipe_version": "1",
+      "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+      "base_revision": "b0a2e4ed093c26997495ae625528f81ea04b749f",
+      "tokenizer_source": "local_adapter_bundle",
+      "tokenizer_revision": "osf-archive",
+      "max_tokens": 1024,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+      },
+      "files": [
+        {
+          "name": "mistral_fold_2.zip",
+          "size": 75783659,
+          "sha256": "a20a97bdadbc34ba300a433ea75b2c3991927dfa8e5d9e509ca4fac35d53ef94",
+          "download_url": "https://osf.io/download/6a3150550e18e39a156dbbaf/"
+        }
+      ]
+    },
+    {
+      "family": "mistral",
+      "fold_id": 3,
+      "display_name": "Mistral 24B — paper original — fold 3",
+      "artifact_format": "peft_adapter_zip",
+      "loader_recipe": "paper_mistral_24b_qlora_adapter",
+      "loader_recipe_version": "1",
+      "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+      "base_revision": "b0a2e4ed093c26997495ae625528f81ea04b749f",
+      "tokenizer_source": "local_adapter_bundle",
+      "tokenizer_revision": "osf-archive",
+      "max_tokens": 1024,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+      },
+      "files": [
+        {
+          "name": "mistral_fold_3.zip",
+          "size": 75770841,
+          "sha256": "ec7cf5b96e67ab3200b0014ceb7d90f4022b70b757fa8a2749dcf2c6d6eea6f1",
+          "download_url": "https://osf.io/download/6a315077300b8248836dbc74/"
+        }
+      ]
+    },
+    {
+      "family": "mistral",
+      "fold_id": 4,
+      "display_name": "Mistral 24B — paper original — fold 4",
+      "artifact_format": "peft_adapter_zip",
+      "loader_recipe": "paper_mistral_24b_qlora_adapter",
+      "loader_recipe_version": "1",
+      "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+      "base_revision": "b0a2e4ed093c26997495ae625528f81ea04b749f",
+      "tokenizer_source": "local_adapter_bundle",
+      "tokenizer_revision": "osf-archive",
+      "max_tokens": 1024,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+      },
+      "files": [
+        {
+          "name": "mistral_fold_4.zip",
+          "size": 75774480,
+          "sha256": "83b967b85b56aead48b0b4b81f75eaa5aa0ac47bf6f5f7fbaabc0cc29e0bb5cb",
+          "download_url": "https://osf.io/download/6a3150861d399e70ae6dbc2f/"
+        }
+      ]
+    },
+    {
+      "family": "mistral",
+      "fold_id": 5,
+      "display_name": "Mistral 24B — paper original — fold 5",
+      "artifact_format": "peft_adapter_zip",
+      "loader_recipe": "paper_mistral_24b_qlora_adapter",
+      "loader_recipe_version": "1",
+      "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+      "base_revision": "b0a2e4ed093c26997495ae625528f81ea04b749f",
+      "tokenizer_source": "local_adapter_bundle",
+      "tokenizer_revision": "osf-archive",
+      "max_tokens": 1024,
+      "padding_policy": "dynamic_longest",
+      "recipe": {
+        "quantization": "bitsandbytes-nf4-double-quant-bfloat16",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+      },
+      "files": [
+        {
+          "name": "mistral_fold_5.zip",
+          "size": 75774325,
+          "sha256": "2eb962b03c7125b9e7b46bd4c86bedf14df866a5ec83302c50cea946d1f33802",
+          "download_url": "https://osf.io/download/6a315095a1182e32fc9451fa/"
+        }
+      ]
+    }
+  ]
+}

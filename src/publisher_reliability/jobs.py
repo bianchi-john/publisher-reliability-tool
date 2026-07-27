@@ -13,6 +13,7 @@ from .errors import AppError
 from .custom_models import import_custom_transformer_bundle
 from .importer import import_csv
 from .model_scanner import scan_model_roots
+from .official_models import import_official_model
 from .services import ResearchService
 from .storage import Storage, json_field, utc_now
 
@@ -25,7 +26,7 @@ class JobManager:
         *,
         model_roots: tuple[Path, ...] = (),
         dataset_upload_max_bytes: int = 536_870_912,
-        model_upload_max_bytes: int = 4_294_967_296,
+        model_upload_max_bytes: int = 8_589_934_592,
     ):
         self.storage = storage
         self.service = service
@@ -148,8 +149,39 @@ class JobManager:
                 )
                 source.unlink(missing_ok=True)
             else:
+                tokens = request.get("source_upload_ids")
                 token = request.get("source_upload_id")
-                if isinstance(token, str):
+                if isinstance(tokens, list):
+                    if not tokens or any(
+                        not isinstance(value, str) or Path(value).name != value
+                        for value in tokens
+                    ):
+                        raise AppError("INVALID_INPUT", "Invalid official upload tokens.")
+                    sources = [
+                        self.storage.data_dir / "uploads" / str(value)
+                        for value in tokens
+                    ]
+                    if any(not source.is_file() for source in sources):
+                        raise AppError(
+                            "PROCESS_INTERRUPTED",
+                            "An acquired official model file is missing.",
+                        )
+                    names = request.get("source_names")
+                    if (
+                        not isinstance(names, list)
+                        or len(names) != len(sources)
+                        or any(not isinstance(value, str) for value in names)
+                    ):
+                        raise AppError("INVALID_INPUT", "Official source names are invalid.")
+                    result = import_official_model(
+                        self.storage,
+                        sources,
+                        source_names=names,
+                        max_uncompressed_bytes=self.model_upload_max_bytes,
+                    )
+                    for source in sources:
+                        source.unlink(missing_ok=True)
+                elif isinstance(token, str):
                     if Path(token).name != token:
                         raise AppError("INVALID_INPUT", "Invalid upload token.")
                     source = self.storage.data_dir / "uploads" / token
@@ -214,3 +246,8 @@ class JobManager:
         token = request.get("source_upload_id")
         if isinstance(token, str) and Path(token).name == token:
             (self.storage.data_dir / "uploads" / token).unlink(missing_ok=True)
+        tokens = request.get("source_upload_ids")
+        if isinstance(tokens, list):
+            for value in tokens:
+                if isinstance(value, str) and Path(value).name == value:
+                    (self.storage.data_dir / "uploads" / value).unlink(missing_ok=True)
