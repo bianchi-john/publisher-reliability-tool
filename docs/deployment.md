@@ -131,10 +131,11 @@ recorded in model identity; offline inference requires that cache to exist.
 No credentials are required.
 
 BERT/RoBERTa CPU is the supported core path. Custom Transformers are uploaded
-as the documented self-contained ZIP and validated entirely from local files;
-the application does not download anything for a custom bundle or execute
-custom code. Use **Models → Import custom Transformer**; the page includes the
-required layout and manifest example. See
+as the documented self-contained ZIP and restricted to the encoder-only
+sequence-classifier allowlist. Decoder-only LLM families are unsupported. The
+application does not download anything for a custom bundle or execute custom
+code. Use **Models → Import custom Transformer**; the page includes the required
+layout and manifest example. See
 [Custom Transformers bundle](custom-model-bundle.md) for the full contract.
 
 New article extraction is part of the `models` extra. Retrieval requests

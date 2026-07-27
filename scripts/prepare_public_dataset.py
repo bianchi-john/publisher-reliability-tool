@@ -15,6 +15,7 @@ import gzip
 import hashlib
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -185,7 +186,10 @@ def validate_model_values(row: dict[str, str], row_number: int) -> None:
 
     for model, columns in PROBABILITY_GROUPS.items():
         probabilities = [float(row[column]) for column in columns]
-        if any(value < 0.0 or value > 1.0 for value in probabilities):
+        if any(
+            not math.isfinite(value) or value < 0.0 or value > 1.0
+            for value in probabilities
+        ):
             raise ValueError(f"row {row_number}: {model} probability outside [0, 1]")
         if abs(sum(probabilities) - 1.0) > 0.01:
             raise ValueError(f"row {row_number}: {model} probabilities do not sum to 1")

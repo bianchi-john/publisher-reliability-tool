@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from publisher_reliability.custom_models import (
+    _require_supported_model_type,
     _safe_extract,
     import_custom_transformer_bundle,
 )
@@ -14,6 +15,14 @@ from publisher_reliability.storage import Storage
 
 
 class CustomModelImportTest(unittest.TestCase):
+    def test_rejects_decoder_only_llm_architectures(self) -> None:
+        for model_type in ("llama", "mistral", "mixtral"):
+            with self.subTest(model_type=model_type):
+                with self.assertRaises(AppError) as raised:
+                    _require_supported_model_type(model_type)
+                self.assertEqual(raised.exception.code, "INVALID_INPUT")
+        self.assertEqual(_require_supported_model_type("deberta-v2"), "deberta-v2")
+
     def test_rejects_zip_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

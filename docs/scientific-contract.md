@@ -83,6 +83,14 @@ BERT/RoBERTa family/fold identities. Every run has one complete five-class
 probability vector. Llama/Mistral hard labels are deliberately absent because
 their class probabilities were not available.
 
+Normalization also reveals 16 canonical article identities assigned to more
+than one test fold (32 article/family memberships across BERT and RoBERTa).
+Their historical predictions remain consultable, but no fold checkpoint is
+treated as leakage-safe for a new article or publisher evaluation. Publisher
+selection excludes those identities; an explicit article or article-list
+request fails with `TRAINING_DATA_LEAKAGE`. The application never guesses a
+fold from conflicting evidence.
+
 The release-identity content digest is `prt-dataset-content-v1` as defined by
 the storage contract and covers only the original wide-format values.
 Appending a `user_evaluation` changes the physical file checksum and manifest
@@ -143,8 +151,10 @@ A user model is accepted only as the constrained PRT bundle documented in
 `custom-model-bundle.md`: ZIP container, declarative `prt-model.json`, local
 Hugging Face `config.json` and tokenizer, and exactly one
 `model.safetensors`. It must resolve through the installed
-`AutoModelForSequenceClassification` registry, declare five labels and use a
-`custom_...` family plus held-out fold `1..5`.
+`AutoModelForSequenceClassification` registry, belong to the documented
+encoder-only model-type allowlist, declare five labels, and use a `custom_...`
+family plus held-out fold `1..5`. Decoder-only Llama/Mistral/Mixtral
+architectures are outside the scientific scope.
 
 Validation is local-only and uses `trust_remote_code=false`. It rejects
 `auto_map`, Python/native modules, pickle/PyTorch checkpoint files, unsafe ZIP
@@ -187,7 +197,9 @@ For one file, artifact digest is SHA-256 of exact bytes. For a directory, reject
 symlinks, enumerate regular files as relative POSIX path/digest/size, sort by
 UTF-8 path, canonical-JSON serialize, and hash. Filesystem locator, device path,
 and cache path are excluded. A missing artifact changes availability, never the
-scientific model ID or historical runs.
+scientific model ID or historical runs. The digest is rechecked immediately
+before loading, preventing changed bytes from running under an earlier model
+identity.
 
 Mutable base/tokenizer revisions such as `main` are invalid. A local dependency
 uses `local-sha256:<directory_digest>`.
@@ -208,6 +220,8 @@ historical virtual model ID over:
 
 The bundled release uses its fixed OSF release ID. A local artifact always has
 its separate exact runnable identity; historical outputs are never relabelled.
+Only `bundled_import` and `user_import` runs establish held-out-fold evidence;
+a local inference run never changes article membership.
 
 ## 7. Prediction runs and reuse
 
@@ -281,7 +295,9 @@ Absence from the imported URL/fold registry is not proof that an arbitrary
 external article was absent from every possible training corpus. Such an input
 may be classified by a runnable local model, with leakage membership explicitly
 unknown outside the registered corpus. The application never infers training
-membership from publication date, hostname or text similarity.
+membership from publication date, hostname, text similarity, or a previous
+local inference. Evaluating an external URL with fold 1 does not assign that
+URL to test fold 1 and does not by itself block fold 2.
 
 ## 9. Required result warnings
 

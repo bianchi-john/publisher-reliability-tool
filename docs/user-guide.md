@@ -68,8 +68,9 @@ above the upload control, select the ZIP, and wait for the validation job. A
 valid bundle is installed under the managed data directory, appears as
 `compatible`, and is immediately runnable without a network model download.
 
-The model must be a five-label architecture supported by the locked
-Transformers version. The application rejects executable code, pickle/PyTorch
+The model must be a five-label encoder classifier from the allowlist documented
+in the bundle contract. Decoder-only Llama, Mistral, and Mixtral architectures
+are not supported. The application rejects executable code, pickle/PyTorch
 weights, unsafe ZIP paths, remote tokenizer dependencies, non-finite tensors,
 and state-dictionary key/shape mismatches. See
 [Custom Transformers bundle](custom-model-bundle.md) for the complete manifest

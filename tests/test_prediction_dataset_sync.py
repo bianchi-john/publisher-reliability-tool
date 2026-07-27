@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from publisher_reliability.identity import article_id, normalized_hostname, publ
 from publisher_reliability.prediction_dataset import (
     BASE_PUBLIC_COLUMNS,
     PUBLIC_COLUMNS,
+    reconcile_prediction_dataset,
     restore_user_predictions,
     sync_user_predictions,
 )
@@ -110,6 +112,21 @@ class PredictionDatasetSyncTest(unittest.TestCase):
             self.assertEqual(rows[-1]["prediction_origin"], "user_evaluation")
             self.assertEqual(rows[-1]["prediction_run_id"], "local-run")
             self.assertEqual(rows[-1]["model_id"], "local-model")
+
+            manifest_path = release / "manifest.json"
+            stale_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            stale_manifest["records"] = 1
+            stale_manifest["user_evaluation_records"] = 0
+            stale_manifest["parts"][0]["rows"] = 1
+            manifest_path.write_text(
+                json.dumps(stale_manifest, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(reconcile_prediction_dataset(release))
+            self.assertFalse(reconcile_prediction_dataset(release))
+            repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(repaired["records"], 2)
+            self.assertEqual(repaired["user_evaluation_records"], 1)
 
             with Storage(root / "restored-state") as restored:
                 self.assertEqual(restore_user_predictions(restored, release), 1)

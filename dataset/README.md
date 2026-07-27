@@ -19,6 +19,7 @@ predictions/
 | Derived articles | 19,411 |
 | Original prediction runs | 38,854 |
 | Original model/fold identities | 10 |
+| Canonical articles assigned to multiple folds | 16 |
 
 Schema version 2 uses `prediction_origin` to distinguish the two row types:
 
@@ -37,11 +38,19 @@ The original wide-format columns remain unchanged. Generic local-run fields are
 `title`, `text` and `authors` remain empty compatibility columns. Protected
 provider labels, scores and metadata are not included.
 
+The 16 canonical identities assigned to multiple folds correspond to 32
+article/family memberships across BERT and RoBERTa. Their stored predictions
+remain visible for inspection, but they are excluded from leakage-safe
+evaluation because no single held-out fold can be established.
+
 `data/state/prediction_runs.csv` is the application's authoritative operational
 ledger. After a local inference commits there, the same run is written
 idempotently to this CSV. At startup, mirrored `user_evaluation` rows can also
 restore a missing local run before the mirror is synchronized again. Repeated
-startup never duplicates a run because `prediction_run_id` is unique.
+startup never duplicates a run because `prediction_run_id` is unique. If a
+process stops after replacing the CSV but before replacing the manifest,
+startup recalculates only the mutable counts and file checksum; it does so only
+when the immutable original-row digest still matches.
 
 ## Verify
 

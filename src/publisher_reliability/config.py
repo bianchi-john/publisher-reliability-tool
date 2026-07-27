@@ -15,6 +15,16 @@ def _boolean(value: str) -> bool:
     return value == "true"
 
 
+def _integer(name: str, default: str) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError as exc:
+        raise AppError(
+            "INVALID_INPUT",
+            f"{name} must be an integer.",
+        ) from exc
+
+
 @dataclass(slots=True)
 class Config:
     port: int = 8000
@@ -32,7 +42,7 @@ class Config:
     def from_env(cls) -> "Config":
         model_roots = os.environ.get("PRT_MODELS_DIR", "./models").split(os.pathsep)
         config = cls(
-            port=int(os.environ.get("PRT_PORT", "8000")),
+            port=_integer("PRT_PORT", "8000"),
             data_dir=Path(os.environ.get("PRT_DATA_DIR", "./data")),
             models_dirs=tuple(Path(value) for value in model_roots if value),
             seed_dataset=Path(
@@ -41,11 +51,13 @@ class Config:
             offline=_boolean(os.environ.get("PRT_OFFLINE", "false")),
             device=os.environ.get("PRT_DEVICE", "auto"),
             log_level=os.environ.get("PRT_LOG_LEVEL", "info"),
-            dataset_upload_max_bytes=int(
-                os.environ.get("PRT_DATASET_UPLOAD_MAX_BYTES", "536870912")
+            dataset_upload_max_bytes=_integer(
+                "PRT_DATASET_UPLOAD_MAX_BYTES",
+                "536870912",
             ),
-            model_upload_max_bytes=int(
-                os.environ.get("PRT_MODEL_UPLOAD_MAX_BYTES", "4294967296")
+            model_upload_max_bytes=_integer(
+                "PRT_MODEL_UPLOAD_MAX_BYTES",
+                "4294967296",
             ),
             container_internal=_boolean(
                 os.environ.get("PRT_CONTAINER_INTERNAL", "false")

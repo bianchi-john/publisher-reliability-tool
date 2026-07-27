@@ -174,6 +174,104 @@ def _dataset_row(run: dict[str, str], model: dict[str, str]) -> dict[str, str]:
     return {key: str(value) for key, value in row.items()}
 
 
+def _updated_manifest(
+    manifest: dict[str, object],
+    dataset_path: Path,
+    rows: list[dict[str, str]],
+) -> dict[str, object]:
+    original_rows = [
+        row for row in rows if row["prediction_origin"] == DATASET_ORIGIN
+    ]
+    user_rows = [row for row in rows if row["prediction_origin"] == USER_ORIGIN]
+    original_digest = hashlib.sha256()
+    for row in original_rows:
+        original_digest.update(_serialized_original(row))
+    for row in user_rows:
+        _user_values(row)
+    urls = {row["url"] for row in rows}
+    return {
+        **manifest,
+        "schema_version": 2,
+        "records": len(rows),
+        "unique_urls": len(urls),
+        "duplicate_url_rows": len(rows) - len(urls),
+        "columns": PUBLIC_COLUMNS,
+        "dataset_original_records": len(original_rows),
+        "user_evaluation_records": len(user_rows),
+        "content_digest_sha256": original_digest.hexdigest(),
+        "parts": [
+            {
+                "file": "predictions.csv",
+                "rows": len(rows),
+                "bytes": dataset_path.stat().st_size,
+                "sha256": _sha256_file(dataset_path),
+            }
+        ],
+    }
+
+
+def _replace_manifest(release_dir: Path, manifest: dict[str, object]) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix="manifest-",
+        suffix=".json.tmp",
+        dir=release_dir,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as stream:
+            json.dump(manifest, stream, indent=2, ensure_ascii=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, release_dir / "manifest.json")
+        directory_fd = os.open(release_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise AppError(
+            "STORAGE_ERROR",
+            "Could not update the prediction dataset manifest.",
+        ) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def reconcile_prediction_dataset(release_dir: Path | None) -> bool:
+    """Repair only mutable manifest metadata from a valid schema-2 CSV."""
+
+    if release_dir is None or not release_dir.exists():
+        return False
+    manifest, dataset_path, rows = _read_dataset(release_dir)
+    if manifest.get("schema_version") != 2:
+        return False
+    try:
+        with dataset_path.open(encoding="utf-8", newline="") as stream:
+            header = next(csv.reader(stream))
+    except (OSError, UnicodeError, StopIteration, csv.Error) as exc:
+        raise AppError(
+            "STORAGE_ERROR",
+            "Prediction dataset header cannot be verified.",
+        ) from exc
+    if header != PUBLIC_COLUMNS:
+        raise AppError(
+            "STORAGE_ERROR",
+            "Schema-2 prediction dataset has an unsupported header.",
+        )
+    updated = _updated_manifest(manifest, dataset_path, rows)
+    if updated == manifest:
+        return False
+    if updated["content_digest_sha256"] != manifest.get("content_digest_sha256"):
+        raise AppError(
+            "STORAGE_ERROR",
+            "The immutable original prediction dataset digest has changed.",
+        )
+    _replace_manifest(release_dir, updated)
+    return True
+
+
 def sync_user_predictions(
     release_dir: Path | None,
     runs: Iterable[dict[str, str]],
@@ -183,6 +281,7 @@ def sync_user_predictions(
 
     if release_dir is None or not release_dir.exists():
         return 0
+    reconcile_prediction_dataset(release_dir)
     manifest, dataset_path, rows = _read_dataset(release_dir)
     by_run_id = {
         row["prediction_run_id"]: row
@@ -216,16 +315,6 @@ def sync_user_predictions(
     if not added and manifest.get("schema_version") == 2:
         return 0
 
-    original_rows = [
-        row for row in rows if row["prediction_origin"] == DATASET_ORIGIN
-    ]
-    user_rows = [row for row in rows if row["prediction_origin"] == USER_ORIGIN]
-    original_digest = hashlib.sha256()
-    for row in original_rows:
-        original_digest.update(_serialized_original(row))
-    for row in user_rows:
-        _user_values(row)
-
     release_dir.mkdir(parents=True, exist_ok=True)
     csv_fd, csv_name = tempfile.mkstemp(
         prefix="predictions-", suffix=".csv.tmp", dir=release_dir
@@ -245,26 +334,7 @@ def sync_user_predictions(
             stream.flush()
             os.fsync(stream.fileno())
 
-        urls = {row["url"] for row in rows}
-        updated_manifest = {
-            **manifest,
-            "schema_version": 2,
-            "records": len(rows),
-            "unique_urls": len(urls),
-            "duplicate_url_rows": len(rows) - len(urls),
-            "columns": PUBLIC_COLUMNS,
-            "dataset_original_records": len(original_rows),
-            "user_evaluation_records": len(user_rows),
-            "content_digest_sha256": original_digest.hexdigest(),
-            "parts": [
-                {
-                    "file": "predictions.csv",
-                    "rows": len(rows),
-                    "bytes": csv_temporary.stat().st_size,
-                    "sha256": _sha256_file(csv_temporary),
-                }
-            ],
-        }
+        updated_manifest = _updated_manifest(manifest, csv_temporary, rows)
         with manifest_temporary.open("w", encoding="utf-8", newline="") as stream:
             json.dump(updated_manifest, stream, indent=2, ensure_ascii=False)
             stream.write("\n")

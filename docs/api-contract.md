@@ -91,8 +91,8 @@ Returns `200 {"status":"alive"}` when the event loop responds.
 
 ### `GET /health/ready`
 
-Returns `200 {"status":"ready"}` after CSV verification, indexes, frontend,
-worker startup, and HTTP acceptance. Startup exposes no HTTP socket before that
+Returns `200 {"status":"ready"}` after CSV verification, frontend and worker
+startup, and HTTP acceptance. Startup exposes no HTTP socket before that
 point, so there is no supported live-but-not-ready startup phase. Readiness does
 not predict whether a future request has a model, saved body, or network.
 
@@ -119,8 +119,8 @@ first seen, and last updated.
 
 ### `GET /api/v1/articles/{article_id}`
 
-Returns the derived article summary and up to 20 newest run summaries. It never
-embeds saved content. Absent ID is `NOT_FOUND`.
+Returns the derived article summary and every run summary for that article,
+newest first. It never embeds saved content. Absent ID is `NOT_FOUND`.
 
 ### `GET /api/v1/prediction-runs`
 
@@ -252,8 +252,9 @@ The request is streamed to a private file and limited by
 `model_validation` job. Validation permits at most 256 regular entries and the
 same uncompressed-byte limit. It rejects traversal, links, executable/native or
 pickle/PyTorch files, `auto_map`, `trust_remote_code`, non-local tokenizer
-requirements, non-five-label configuration, non-finite tensors, and strict
-state-dictionary key/shape mismatch.
+requirements, model types outside the documented encoder allowlist,
+non-five-label configuration, non-finite tensors, and strict state-dictionary
+key/shape mismatch.
 
 Successful validation atomically moves the extracted bundle under
 `<data-dir>/managed-models/<model_id>` and registers it in `models.csv` as

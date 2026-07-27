@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import importlib.metadata
 import ipaddress
 import json
@@ -16,6 +17,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from . import __version__
+from .custom_models import directory_identity
 from .errors import AppError
 from .identity import normalize_url
 from .storage import Storage
@@ -39,6 +41,14 @@ ENGLISH_REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "User-Agent": "PublisherReliabilityTool/0.1 local-research",
 }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,10 +217,25 @@ class InferenceEngine:
 
     def _artifact_path(self, model: dict[str, str]) -> Path:
         if model["artifact_kind"] == "custom_transformer_bundle":
-            path = (self.storage.data_dir / model["artifact_locator"]).resolve()
+            candidate = self.storage.data_dir / model["artifact_locator"]
+            if candidate.is_symlink():
+                raise AppError("MODEL_NOT_AVAILABLE", "Custom model bundle is unsafe.")
+            path = candidate.resolve()
             managed = (self.storage.data_dir / "managed-models").resolve()
-            if path.parent != managed or not path.is_dir() or path.is_symlink():
+            if path.parent != managed or not path.is_dir():
                 raise AppError("MODEL_NOT_AVAILABLE", "Custom model bundle is missing.")
+            try:
+                digest = directory_identity(path)[0]
+            except OSError as exc:
+                raise AppError(
+                    "MODEL_NOT_AVAILABLE",
+                    "Custom model bundle failed its integrity check.",
+                ) from exc
+            if digest != model["artifact_sha256"]:
+                raise AppError(
+                    "MODEL_NOT_AVAILABLE",
+                    "Custom model bundle has changed since validation.",
+                )
             return path
         match = ROOT_LOCATOR.fullmatch(model["artifact_locator"])
         if match is None:
@@ -219,9 +244,17 @@ class InferenceEngine:
         if root_index not in range(len(self.model_roots)):
             raise AppError("MODEL_NOT_AVAILABLE", "Model root is no longer configured.")
         root = self.model_roots[root_index]
-        path = (root / match.group(2)).resolve()
-        if path.parent != root or not path.is_file() or path.is_symlink():
+        candidate = root / match.group(2)
+        if candidate.is_symlink():
+            raise AppError("MODEL_NOT_AVAILABLE", "Model checkpoint is unsafe.")
+        path = candidate.resolve()
+        if path.parent != root or not path.is_file():
             raise AppError("MODEL_NOT_AVAILABLE", "Model checkpoint is missing.")
+        if _sha256_file(path) != model["artifact_sha256"]:
+            raise AppError(
+                "MODEL_NOT_AVAILABLE",
+                "Model checkpoint has changed since validation.",
+            )
         return path
 
     @staticmethod
@@ -349,7 +382,10 @@ class InferenceEngine:
                 else "The pinned tokenizer could not be acquired.",
             ) from exc
         except Exception as exc:
-            raise AppError("MODEL_NOT_RUNNABLE", f"Model loading failed: {exc}") from exc
+            raise AppError(
+                "MODEL_NOT_RUNNABLE",
+                "The local model could not be loaded with its validated recipe.",
+            ) from exc
 
         selected_device = self._selected_device(torch)
         if selected_device != "cpu":
