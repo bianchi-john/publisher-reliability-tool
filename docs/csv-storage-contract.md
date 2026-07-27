@@ -29,7 +29,9 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 Only `state/*.csv` is authoritative. Articles and publishers are derived views
 over prediction runs. `dataset/predictions/predictions.csv` is an additional
 inspectable, recoverable mirror of locally inferred runs, not an eighth
-authoritative ledger. Uploads, staging files, managed model artifact bytes,
+authoritative ledger. Each mirrored user row includes the model display name,
+provenance (`paper_official`, `user_custom`, or `local_checkpoint`) and the
+official manifest-entry SHA-256 when applicable. Uploads, staging files, managed model artifact bytes,
 logs, and the writer lock are operational; losing managed artifact
 bytes disables new inference but does not lose historical scientific records.
 
@@ -143,17 +145,20 @@ Exactly one data row. Unknown schema versions fail startup.
 model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha256,official_manifest_entry_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,class_order_json,max_tokens,padding_policy,adapter_config_sha256,runtime_scientific_json,status,artifact_available,runnable,status_detail,registered_at,last_validated_at
 ```
 
-- `family`: `bert` or `roberta` for imported historical predictions; custom
-  model bundles use a validated `custom_...` slug.
+- `family`: `bert`, `roberta`, `llama`, or `mistral` for paper/local models;
+  custom model bundles use a validated `custom_...` slug.
 - `status`: `compatible`, `validated_not_runnable`, `historical_only`,
   `artifact_missing`, `dependency_missing`, `resource_unavailable`, or
   `invalid`.
-- `artifact_kind`: `pytorch_state_dict`, `custom_transformer_bundle`, or
-  `historical_virtual`.
+- `artifact_kind`: `pytorch_state_dict`, `paper_llama_state_dict_bundle`,
+  `paper_mistral_adapter_bundle`, `custom_transformer_bundle`,
+  `custom_peft_adapter_bundle`, or `historical_virtual`.
 - `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.
 - `artifact_locator` is deployment metadata and excluded from identity; API
   output reduces it to a root label and relative path.
 - Historical virtual models have no locator/artifact and are not runnable.
+- Nonempty `official_manifest_entry_sha256` is the durable paper-original
+  provenance marker. Custom models leave it empty.
 - Every output-relevant recipe, revision, tokenizer, class order, length,
   padding, adapter, dtype, and quantization setting participates in model ID.
 

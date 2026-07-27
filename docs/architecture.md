@@ -177,11 +177,12 @@ follows symlinks; a candidate containing a symlink is rejected. API clients can
 scan configured roots or upload an artifact but cannot submit arbitrary server
 paths.
 
-The internal `<data-dir>/managed-models` directory stores successful custom
-bundle uploads. Startup does not rerun their full Transformers validation; a
+The internal `<data-dir>/managed-models` directory stores successful official
+and custom imports. Startup does not rerun their full Transformers validation; a
 scan verifies the registered directory digest and marks a missing or altered
-bundle unavailable. Startup scans configured BERT/RoBERTa roots so copied,
-removed, or restored checkpoints are reflected before readiness; the UI/API
+bundle unavailable. Startup scans configured roots for BERT/RoBERTa checkpoints
+and exact OSF Llama/Mistral file sets so copied, removed, or restored
+checkpoints are reflected before readiness; the UI/API
 scan remains available for changes made while the service is running.
 
 Upload validation moves a successful artifact into that root before the
@@ -198,14 +199,14 @@ Historical runs remain browseable and aggregable when an artifact disappears.
 The exact file/directory digest is checked again before a model is loaded, so a
 checkpoint changed after scanning cannot run under its previous scientific ID.
 
-BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
-fixed PRT manifest vocabulary and an explicit allowlist of encoder-only
-sequence-classifier model types. Decoder-only LLM architectures such as Llama,
-Mistral, and Mixtral are out of scope. `auto_map`, `trust_remote_code`,
-Python/native files, and pickle weights are rejected. A valid self-contained
-custom bundle is `compatible` and runnable. Core checkpoints cache only their
-pinned official tokenizer resources on first online inference; unknown
-artifacts are reported and ignored.
+BERT and RoBERTa loaders and fixtures are core. Official Llama 3 8B and Mistral
+24B use built-in, notebook-derived QLoRA sequence-classification recipes and
+are identified by exact OSF checksums. Custom import accepts only the fixed PRT
+manifest vocabulary: an allowlisted complete encoder or a PEFT adapter for
+those two exact bases. `auto_map`, `trust_remote_code`, Python/native files, and
+pickle weights are rejected. LLM artifacts can be valid but non-runnable when
+CUDA, dependencies or pinned base access is unavailable. Unknown artifacts are
+reported and ignored.
 
 ## 10. Local HTTP boundary
 

@@ -25,11 +25,20 @@ roberta_fold_5.pt
 > A compatible checkpoint can classify new public English article URLs. Its
 > pinned official tokenizer is cached on first online use.
 
-Custom five-class Hugging Face sequence classifiers are imported from the
-Models page as self-contained `.zip` bundles. See
+The scanner also recognizes the exact official OSF filenames
+`mistral_fold_N.zip` and the pair
+`llama_fold_N.pt.z01` + `llama_fold_N.pt.z02`. It imports a complete fold only
+after checking the packaged OSF size and SHA-256 values. The same workflow is
+available from **Models → Import an original paper model from OSF**, where the
+download catalog is shown directly.
+
+Custom five-class Hugging Face sequence classifiers—including compatible Llama
+3 8B and Mistral 24B PEFT adapters—are imported from the Models page as
+self-contained `.zip` bundles and are marked as user models. See
 [`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for the exact
 safe format.
 
-The application never downloads base-model weights, manages Hugging Face
-credentials or executes code supplied by an artifact. It may acquire only the
-pinned tokenizer/configuration files required by a core checkpoint.
+The application never manages Hugging Face credentials or executes code
+supplied by an artifact. BERT/RoBERTa acquire only pinned tokenizer resources.
+Llama/Mistral inference requires the pinned base-model snapshot; authenticate
+with Hugging Face outside this application when a gated repository requires it.

@@ -44,6 +44,15 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/v1/evaluation-jobs", openapi.json()["paths"])
         self.assertIn("/api/v1/models/available", openapi.json()["paths"])
         self.assertIn("/api/v1/models/upload", openapi.json()["paths"])
+        self.assertIn("/api/v1/models/official-upload", openapi.json()["paths"])
+
+        catalog = await self.client.get("/api/v1/models/official-catalog")
+        self.assertEqual(catalog.status_code, 200)
+        self.assertEqual(len(catalog.json()["items"]), 10)
+        self.assertEqual(
+            {row["family"] for row in catalog.json()["items"]},
+            {"llama", "mistral"},
+        )
 
         missing = await self.client.get(
             "/api/v1/articles/00000000-0000-0000-0000-000000000000"

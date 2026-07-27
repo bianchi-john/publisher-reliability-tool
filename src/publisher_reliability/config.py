@@ -35,7 +35,7 @@ class Config:
     device: str = "auto"
     log_level: str = "info"
     dataset_upload_max_bytes: int = 536_870_912
-    model_upload_max_bytes: int = 4_294_967_296
+    model_upload_max_bytes: int = 8_589_934_592
     container_internal: bool = False
 
     @classmethod
@@ -57,7 +57,7 @@ class Config:
             ),
             model_upload_max_bytes=_integer(
                 "PRT_MODEL_UPLOAD_MAX_BYTES",
-                "4294967296",
+                "8589934592",
             ),
             container_internal=_boolean(
                 os.environ.get("PRT_CONTAINER_INTERNAL", "false")
@@ -75,5 +75,5 @@ class Config:
             raise AppError("INVALID_INPUT", "Invalid log level.")
         if not 0 < self.dataset_upload_max_bytes <= 536_870_912:
             raise AppError("INVALID_INPUT", "Invalid dataset upload byte limit.")
-        if not 0 < self.model_upload_max_bytes <= 4_294_967_296:
+        if not 0 < self.model_upload_max_bytes <= 8_589_934_592:
             raise AppError("INVALID_INPUT", "Invalid model upload byte limit.")

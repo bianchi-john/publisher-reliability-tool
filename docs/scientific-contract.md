@@ -129,10 +129,10 @@ Official artifacts are manually obtained from:
 The package contains `official-model-manifest-v1.json` with one immutable entry
 per official family/fold: expected artifact digest, built-in loader recipe and
 version, class order, input length/padding, output-relevant runtime options,
-base/tokenizer repositories, and immutable revisions. The application does not
-download base-model weights or execute code from an artifact. For core
-checkpoints it may cache only the official tokenizer/configuration resources
-from the manifest's immutable revision on first online inference.
+base/tokenizer repositories, and immutable revisions. The application never
+executes code from an artifact. Core BERT/RoBERTa checkpoints cache only pinned
+tokenizer resources. Llama/Mistral QLoRA inference acquires the pinned base
+snapshot through standard Hugging Face loading when it is not already cached.
 
 ### 5.1 Core CPU demo
 
@@ -145,28 +145,52 @@ Both use `torch.load(..., map_location="cpu", weights_only=True)`, strict tensor
 keys/shapes, `eval()`, and softmax over five logits. Core compatibility requires
 a frozen CPU float32 reference fixture.
 
-### 5.2 Custom Transformers bundle
+### 5.2 Official paper Llama/Mistral
+
+The official catalog contains five folds for each family:
+
+| Family | Imported artifact | Notebook-derived inference recipe |
+| --- | --- | --- |
+| Llama 3 8B | two OSF ZIP segments reconstructed as one full quantized state dictionary | `meta-llama/Meta-Llama-3-8B`, NF4 double quantization/bfloat16, LoRA r=8 α=16, dynamic truncation to 256 |
+| Mistral 24B | one OSF PEFT adapter ZIP | `mistralai/Mistral-Small-24B-Base-2501`, NF4 double quantization/bfloat16, LoRA r=16 α=32, dynamic padding and truncation to 1024 |
+
+Both are `AutoModelForSequenceClassification` models producing five logits;
+softmax yields probabilities and argmax yields one class. They are multiclass
+single-label classifiers, not prompt-based generative or multi-label systems.
+
+Paper provenance requires an exact complete filename set, published byte size
+and SHA-256. The registered model includes the manifest-entry digest and
+`paper_official` provenance. CUDA, locked PEFT/bitsandbytes dependencies and the
+pinned base snapshot are runtime requirements, not import-authentication
+requirements.
+
+The supplied training notebooks name the two base repositories but do not
+record immutable training-time commits. The revisions in the packaged manifest
+are therefore frozen reconstruction references selected on 2026-07-27, not a
+claim about the unrecorded commit used during original training. This
+limitation is retained in the scientific record instead of silently following
+each repository's moving `main` branch.
+
+### 5.3 Custom Transformers bundle
 
 A user model is accepted only as the constrained PRT bundle documented in
 `custom-model-bundle.md`: ZIP container, declarative `prt-model.json`, local
-Hugging Face `config.json` and tokenizer, and exactly one
-`model.safetensors`. It must resolve through the installed
-`AutoModelForSequenceClassification` registry, belong to the documented
-encoder-only model-type allowlist, declare five labels, and use a `custom_...`
-family plus held-out fold `1..5`. Decoder-only Llama/Mistral/Mixtral
-architectures are outside the scientific scope.
+For schema 1 it contains a Hugging Face `config.json`, local tokenizer, and
+exactly one full `model.safetensors` from the encoder allowlist. Schema 2
+contains a local tokenizer and PEFT LoRA `adapter_model.safetensors` for the
+exact Llama or Mistral base above. Both declare five classes and use a
+`custom_...` family plus held-out fold `1..5`.
 
 Validation is local-only and uses `trust_remote_code=false`. It rejects
 `auto_map`, Python/native modules, pickle/PyTorch checkpoint files, unsafe ZIP
 paths or links, unknown manifest fields, missing tokenizer resources,
-non-finite weights, and any key/shape mismatch against the architecture derived
-from `config.json`.
+non-finite weights, incompatible adapter/head metadata, and any key/shape
+mismatch against the declared architecture.
 
 The exact bundle file/digest inventory, manifest input policy, family/fold,
 training convention and loader recipe determine identity. A valid bundle is
-installed below `managed-models` and registered as
-`compatible`; its local tokenizer and safetensors weights can be used for new
-article inference without network model acquisition.
+installed below `managed-models` and registered with `user_custom` provenance.
+LLM adapters use the pinned base snapshot and may be non-runnable without CUDA.
 
 ## 6. Exact model identity
 

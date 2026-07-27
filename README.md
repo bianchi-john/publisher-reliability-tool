@@ -24,7 +24,10 @@ publisher-reliability serve
 ```
 
 The `models` extra installs the locked PyTorch, Transformers and safetensors
-dependencies required to scan checkpoints and validate custom bundles. Use
+dependencies required to scan BERT/RoBERTa checkpoints and validate custom
+encoder bundles. For Llama 3 8B or Mistral 24B QLoRA inference, use
+`uv sync --frozen --extra llm-models`; import and catalog browsing do not require
+a GPU. Use
 `uv sync --frozen` only for a lightweight stored-prediction-only environment.
 
 Open **<http://127.0.0.1:8000>**. API documentation is available at
@@ -66,18 +69,18 @@ Every newly inferred article run is first committed to
 `data/state/prediction_runs.csv`, then mirrored as one `user_evaluation` row in
 `dataset/predictions/predictions.csv`. Original rows are explicitly marked
 `dataset_original`. The mirror includes the exact model/fold, predicted label,
-all five probabilities and run provenance, and is synchronized without
+model display name, official/custom/local provenance, all five probabilities
+and run provenance, and is synchronized without
 duplicating an existing `prediction_run_id`.
 
 ## Models and new article inference
 
-The repository does not distribute model weights. The Models page safely scans
-configured roots, validates recognized BERT/RoBERTa state dictionaries and
-keeps local checkpoints separate from historical dataset identities. Compatible
-local checkpoints can retrieve and classify a new public English article URL.
-Only the small official tokenizer resources are cached on first online use,
-pinned to immutable Hugging Face revisions; base-model weights are never
-downloaded because the local checkpoint already contains them.
+The repository does not distribute model weights. The Models page scans
+configured roots for BERT/RoBERTa state dictionaries and exact official OSF
+filenames. It also accepts direct upload of one Mistral ZIP or both Llama
+segments for a fold. Llama/Mistral family and fold are inferred automatically;
+an artifact is marked **Paper original** only after its size and SHA-256 match
+the packaged OSF manifest. Historical dataset identities remain separate.
 
 Stored dataset predictions remain fully browseable by article, publisher,
 model/fold and class probability. Publisher aggregations created in the
@@ -108,13 +111,19 @@ orange/terracotta light and dark themes follow the operating-system preference
 initially and can be overridden from the persistent top bar; the choice is
 saved in the browser.
 
-The Models page also accepts a constrained custom Transformers `.zip` bundle
-using `safetensors` and a local tokenizer. It validates and registers supported
-five-class encoder-only `AutoModelForSequenceClassification` architectures
-without loading custom Python code. Decoder-only LLM families such as Llama and
-Mistral are intentionally outside scope. A successfully validated custom bundle
-is immediately runnable because it includes both its tokenizer and safetensors
-weights.
+The Models page also accepts constrained custom Transformers `.zip` bundles.
+Schema 1 supports complete encoder classifiers in `safetensors`; schema 2
+supports Llama 3 8B and Mistral 24B PEFT LoRA
+`AutoModelForSequenceClassification` adapters. Both require exactly five logits
+in class order 0–4, a local tokenizer, declared fold/training provenance and no
+custom executable code. These models and their new predictions are marked
+**User custom**.
+
+Official Llama/Mistral inference faithfully reconstructs the notebook QLoRA
+recipe (NF4, double quantization, bfloat16). It requires CUDA, the locked
+`llm-models` dependencies and access to the pinned Hugging Face base revision;
+Llama's base repository is gated. On an unsuitable machine the artifact remains
+verified and consultable with a clear non-runnable status.
 
 Official artifacts are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)

@@ -324,22 +324,24 @@ matches class and reference probabilities within absolute `1e-6`, relative
 
 ## H. Custom Transformer import
 
-### AT-046 — Valid custom Transformer bundle
+### AT-046 — Valid official and custom Transformer imports
 
-A ZIP containing the closed manifest, allowlisted five-label encoder config,
-local tokenizer, and finite `model.safetensors` passes local-only validation,
-installs under `managed-models/<model_id>`, registers exact digest/input/fold
-provenance, deletes the acquired upload and appears on Models as
-`compatible`; a single new article can create a five-probability local run with
-that exact model ID.
+An exact OSF Mistral ZIP or complete Llama segment pair passes byte-size and
+SHA-256 authentication, installs below `managed-models/<model_id>` and is
+marked `paper_official`. A custom allowlisted five-label encoder or compatible
+Llama/Mistral PEFT sequence classifier is marked `user_custom`. Both register
+exact digest/input/fold provenance and delete the upload. Runnable hardware
+produces a five-probability local run; missing CUDA is reported explicitly.
 
 ### AT-047 — Unsafe or incompatible custom bundle
 
 Traversal, absolute paths, links, decompression overflow, Python/native/pickle
 files, `auto_map`, `trust_remote_code`, unknown manifest fields, missing local
-tokenizer, decoder-only LLM model types, labels other than five, invalid fold
+tokenizer, unsupported base/model types, labels other than five, invalid fold
 convention, non-finite values, or strict key/shape mismatch fail without
 registration or an installed bundle.
+Official-looking files with a missing Llama segment, wrong byte size, or wrong
+SHA-256 also fail and never receive paper provenance.
 
 ## I. Optional stress and fault suite
 

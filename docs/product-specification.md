@@ -44,8 +44,10 @@ The MVP shall:
 - scan configured model roots and accept browser uploads of supported official
   artifacts;
 - provide BERT and RoBERTa as the core CPU demo;
-- import constrained five-class custom encoder Transformers bundles using local
-  configuration, tokenizer and `safetensors`;
+- authenticate and import the paper's Llama 3 8B and Mistral 24B checkpoints
+  using an immutable OSF filename/size/SHA-256 manifest;
+- import constrained five-class custom encoder or Llama/Mistral PEFT sequence
+  classifiers using local declarative metadata, tokenizer and `safetensors`;
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
@@ -69,7 +71,7 @@ The MVP shall:
 - dataset ZIP import, generic dataset archive manifests, API dataset import
   from a server path, or arbitrary import roots;
 - generic custom-model manifests outside the documented PRT bundle, plugins,
-  runtime code loading, arbitrary/base-weight downloads, credential management,
+  runtime code loading, arbitrary base models, credential management,
   or general-purpose cache management;
 - model training, tuning, calibration, automatic ensembling, hosted inference,
   telemetry, analytics, or production metrics;
@@ -165,16 +167,18 @@ The researcher manually downloads official artifacts and copies them below a
 configured model root. Startup scans those roots; an explicit
 `model_validation` job is also available after files change while the service
 is running. The Models page reports compatible, validated-not-runnable,
-dependency-missing, resource-unavailable, artifact-missing, custom and
+dependency-missing, resource-unavailable, artifact-missing, paper-official, custom and
 historical-only identities. On first online inference for a compatible core
 checkpoint, the application caches only its tokenizer/configuration resources
-from a pinned immutable official revision; it never downloads base weights.
+from a pinned immutable official revision.
 
-BERT/RoBERTa CPU behavior is part of the core gate. A custom upload is one
-self-contained `.zip` using the exact format in `custom-model-bundle.md`.
-Validation runs as a `model_validation` job, installs a successful bundle under
-`managed-models`, marks it compatible, and never imports executable artifact
-code.
+BERT/RoBERTa CPU behavior is part of the core gate. Exact official Llama/Mistral
+files are authenticated against the packaged OSF manifest; their QLoRA
+inference requires CUDA and a pinned Hugging Face base snapshot. A custom upload
+is one self-contained `.zip` using the exact encoder or PEFT format in
+`custom-model-bundle.md`. Validation runs as a `model_validation` job, installs
+a successful bundle under `managed-models`, preserves official-versus-custom
+provenance, and never imports executable artifact code.
 
 Evaluate never presents all historical identities as if they were installed
 checkpoints. For stored results it intersects prediction identities with local
@@ -328,7 +332,7 @@ for paragraphs, navigation and controls, without a CDN.
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
-| FR-024 | Custom Transformers import shall accept only the documented encoder-only model-type allowlist and local ZIP/config/tokenizer/safetensors contract, rejecting decoder-only LLMs, executable code, pickle, unsafe paths, invalid folds and key/shape mismatches. |
+| FR-024 | Model import shall authenticate original Llama 3 8B/Mistral 24B paper artifacts against the packaged OSF size/SHA-256 manifest and mark them `paper_official`; custom import shall accept only the documented five-class encoder or Llama/Mistral PEFT sequence-classifier contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches. |
 
 ## 10. Non-functional requirements
 

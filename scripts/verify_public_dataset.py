@@ -79,8 +79,19 @@ def validate_user_prediction(row: dict[str, str], row_number: int) -> None:
         not row["prediction_run_id"]
         or not row["model_id"]
         or not row["prediction_family"]
+        or not row["prediction_model_name"]
+        or row["prediction_model_provenance"]
+        not in {"paper_official", "user_custom", "local_checkpoint"}
     ):
         raise ValueError(f"incomplete user prediction identity at release row {row_number}")
+    official_digest = row["prediction_official_manifest_entry_sha256"]
+    if row["prediction_model_provenance"] == "paper_official":
+        if len(official_digest) != 64 or any(
+            character not in "0123456789abcdef" for character in official_digest
+        ):
+            raise ValueError(f"invalid official model digest at release row {row_number}")
+    elif official_digest:
+        raise ValueError(f"unexpected official model digest at release row {row_number}")
 
 
 def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[str, int]:

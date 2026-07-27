@@ -201,14 +201,22 @@ scientific warnings. It never retargets newer runs.
 Returns every historical/registered model with family, fold, model ID, core or
 optional support level, status, artifact availability, runnable flag, redacted
 root-relative locator, digest, recipe/version, immutable base/tokenizer
-revisions, input policy, and safe status detail. Optional `family`/`status`
+revisions, input policy, provenance (`paper_official`, `user_custom`,
+`paper_dataset`, or `local_checkpoint`), and safe status detail. Optional `family`/`status`
 filters are supported. This endpoint is also the model detail source.
+
+### `GET /api/v1/models/official-catalog`
+
+Returns the ten immutable paper-model entries for Llama 3 8B and Mistral 24B:
+display name, family, fold, pinned base revision, required OSF filenames, byte
+sizes and direct download links. Checksums remain enforced server-side.
 
 ### `POST /api/v1/models/scan`
 
 Body is `{}`. Creates a `model_validation` job that scans configured roots and
 the internal managed-model root, validates recognized official artifacts, and
-runs required fixtures. It accepts no path. Returns
+runs required fixtures. Exact official Mistral filenames and complete Llama
+`.z01`/`.z02` pairs are authenticated and imported automatically. It accepts no path. Returns
 `202 {"job_id":"uuid"}`.
 
 ### `GET /api/v1/models/available`
@@ -248,7 +256,7 @@ only from the constrained `prt-model.json`; they are not independent request
 fields.
 
 The request is streamed to a private file and limited by
-`PRT_MODEL_UPLOAD_MAX_BYTES` (default 4 GiB), then creates a
+`PRT_MODEL_UPLOAD_MAX_BYTES` (default 8 GiB), then creates a
 `model_validation` job. Validation permits at most 256 regular entries and the
 same uncompressed-byte limit. It rejects traversal, links, executable/native or
 pickle/PyTorch files, `auto_map`, `trust_remote_code`, non-local tokenizer
@@ -258,8 +266,24 @@ key/shape mismatch.
 
 Successful validation atomically moves the extracted bundle under
 `<data-dir>/managed-models/<model_id>` and registers it in `models.csv` as
-`custom_transformer_bundle`. Terminal success/failure deletes the acquired ZIP.
+`custom_transformer_bundle` or `custom_peft_adapter_bundle`. Schema 1 accepts
+the documented encoder allowlist; schema 2 accepts only compatible Llama 3 8B
+or Mistral 24B PEFT five-class sequence classifiers. Terminal success/failure deletes the acquired ZIP.
 The returned job result includes model ID, family, fold and validation status.
+
+### `POST /api/v1/models/official-upload`
+
+Multipart with `files`: one `mistral_fold_N.zip`, or both
+`llama_fold_N.pt.z01` and `llama_fold_N.pt.z02`. The combined stream is limited
+to 8 GiB. Family and fold are inferred from the complete filename set, then
+each file must match the exact published byte size and SHA-256 in
+`official-model-manifest-v1.json`.
+
+Mistral is safely extracted as a PEFT adapter. Llama's two independently zipped
+segments are streamed in order into one managed state dictionary. The model is
+registered with `paper_official` provenance and the manifest-entry digest.
+Validation can succeed with `dependency_missing` or `resource_unavailable`;
+only runnable models are offered for new inference.
 
 ## 8. Evaluation
 

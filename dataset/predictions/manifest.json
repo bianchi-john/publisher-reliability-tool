@@ -33,6 +33,9 @@
     "model_id",
     "prediction_family",
     "prediction_fold_id",
+    "prediction_model_name",
+    "prediction_model_provenance",
+    "prediction_official_manifest_entry_sha256",
     "predicted_label",
     "prob_class_0",
     "prob_class_1",
@@ -70,8 +73,8 @@
     {
       "file": "predictions.csv",
       "rows": 19429,
-      "bytes": 7652842,
-      "sha256": "2cadefe93385299418a42b0e2397fff254a4743bc170e9816f84d8d284458128"
+      "bytes": 7711221,
+      "sha256": "f85a409d2d8f3248a5650fb54b3c2577a69cdf1b73dd3a65394aaf02571224c6"
     }
   ],
   "dataset_original_records": 19429,

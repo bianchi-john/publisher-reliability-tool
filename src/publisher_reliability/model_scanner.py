@@ -7,9 +7,16 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from .custom_models import directory_identity
+from .errors import AppError
 from .identity import sha256_json
 from .inference import CORE_MODELS
+from .official_models import (
+    MANAGED_ARTIFACT_KINDS,
+    import_official_model,
+    llm_runtime_status,
+    official_manifest,
+    verify_managed_model,
+)
 from .storage import Storage, json_field, utc_now
 
 
@@ -137,6 +144,7 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
     discovered: list[dict[str, object]] = []
     rejected: list[dict[str, str]] = []
     seen_digests: set[str] = set()
+    official_registered = 0
 
     for root_index, configured_root in enumerate(roots, start=1):
         root = configured_root.resolve()
@@ -183,6 +191,41 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
                 )
             )
 
+        registered_manifest_digests = {
+            row["official_manifest_entry_sha256"]
+            for row in storage.rows["models"]
+            if row["official_manifest_entry_sha256"]
+            and row["artifact_available"] == "true"
+        }
+        for entry in official_manifest()["models"]:
+            entry_digest = sha256_json(entry)
+            if entry_digest in registered_manifest_digests:
+                continue
+            names = [str(file["name"]) for file in entry["files"]]
+            sources = [root / name for name in names]
+            if not all(
+                source.is_file() and not source.is_symlink()
+                for source in sources
+            ):
+                continue
+            try:
+                import_official_model(
+                    storage,
+                    sources,
+                    source_names=names,
+                    max_uncompressed_bytes=8_589_934_592,
+                )
+            except AppError as exc:
+                rejected.append(
+                    {
+                        "locator": f"root-{root_index}/{' + '.join(names)}",
+                        "error": exc.message,
+                    }
+                )
+            else:
+                official_registered += 1
+                registered_manifest_digests.add(entry_digest)
+
     historical = [
         row for row in storage.rows["models"] if row["artifact_kind"] == "historical_virtual"
     ]
@@ -191,44 +234,48 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
     ]
     current_by_id = {str(row["model_id"]): row for row in discovered}
     for row in previous_local:
-        if row["artifact_kind"] == "custom_transformer_bundle":
-            custom_path = storage.data_dir / row["artifact_locator"]
+        if row["artifact_kind"] in MANAGED_ARTIFACT_KINDS:
             current = dict(row)
-            if custom_path.is_dir() and not custom_path.is_symlink():
-                try:
-                    digest = directory_identity(custom_path)[0]
-                except OSError:
-                    digest = ""
-                if digest == row["artifact_sha256"]:
-                    current.update(
-                        status="compatible",
-                        artifact_available=True,
-                        runnable=True,
-                        status_detail=(
-                            "Custom Transformer bundle integrity is valid. "
-                            "Local inference is available."
-                        ),
-                        last_validated_at=timestamp,
-                    )
+            valid, problem = verify_managed_model(storage, row)
+            if valid:
+                if row["artifact_kind"] in {
+                    "paper_llama_state_dict_bundle",
+                    "paper_mistral_adapter_bundle",
+                    "custom_peft_adapter_bundle",
+                }:
+                    status, runnable, detail = llm_runtime_status()
                 else:
+                    status, runnable, detail = (
+                        "compatible",
+                        True,
+                        "Custom Transformer bundle integrity is valid. "
+                        "Local inference is available.",
+                    )
+                current.update(
+                    status=status,
+                    artifact_available=True,
+                    runnable=runnable,
+                    status_detail=detail,
+                    last_validated_at=timestamp,
+                )
+            else:
+                custom_path = storage.data_dir / row["artifact_locator"]
+                if custom_path.exists():
                     current.update(
                         status="invalid",
                         artifact_available=False,
                         runnable=False,
-                        status_detail=(
-                            "The imported custom Transformer bundle failed its "
-                            "integrity check."
-                        ),
+                        status_detail=problem,
                         last_validated_at=timestamp,
                     )
-            else:
-                current.update(
-                    status="artifact_missing",
-                    artifact_available=False,
-                    runnable=False,
-                    status_detail="The imported custom Transformer bundle is missing.",
-                    last_validated_at=timestamp,
-                )
+                else:
+                    current.update(
+                        status="artifact_missing",
+                        artifact_available=False,
+                        runnable=False,
+                        status_detail="The imported managed model bundle is missing.",
+                        last_validated_at=timestamp,
+                    )
             current_by_id[row["model_id"]] = current
             continue
         if row["model_id"] in current_by_id:
@@ -245,11 +292,12 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
             current_by_id[row["model_id"]] = missing
     storage.replace("models", [*historical, *current_by_id.values()])
     return {
-        "registered": len(discovered),
+        "registered": len(discovered) + official_registered,
+        "official_registered": official_registered,
         "rejected": rejected,
         "message": (
-            f"Validated {len(discovered)} local checkpoint(s)."
-            if discovered
+            f"Validated {len(discovered) + official_registered} local checkpoint(s)."
+            if discovered or official_registered
             else "No valid supported local checkpoints were found."
         ),
     }

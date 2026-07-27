@@ -1,25 +1,35 @@
 # Custom Transformers bundle
 
-> Safe local import contract for user-created five-class text classifiers.
+> Safe local import contract for user-created, five-class text classifiers.
 
-The Models page accepts one self-contained `.zip`. Import validates and
-registers the model; it never downloads files and never executes code from the
-bundle. A successful custom import has status `compatible` and can classify new
-article URLs because the ZIP includes its tokenizer and weights.
+Custom bundles are always marked `user_custom`. They are never relabelled as
+paper artifacts, even when their architecture or filename resembles one. An
+official paper model uses the separate OSF checksum workflow described in the
+[user guide](user-guide.md).
 
-Install the locked model-validation dependencies before starting the
-application:
+## Dependencies
+
+Encoder validation and inference:
 
 ```bash
 uv sync --frozen --extra models
 ```
 
-## Required layout
+Llama 3 8B or Mistral 24B adapter inference:
 
-Files may be at ZIP root or below one common top-level directory:
+```bash
+uv sync --frozen --extra llm-models
+```
+
+LLM bundles can be validated and registered without CUDA, but remain
+`resource_unavailable` until a CUDA device is present.
+
+## Schema 1: complete encoder classifier
+
+The ZIP contains one full, unsharded safe model:
 
 ```text
-my-model/
+my-encoder/
 ├── prt-model.json
 ├── config.json
 ├── model.safetensors
@@ -27,18 +37,7 @@ my-model/
 └── tokenizer resources
 ```
 
-Tokenizer resources are the local files produced by
-`tokenizer.save_pretrained(...)`, for example `tokenizer.json`, `vocab.txt`,
-`vocab.json`, `merges.txt`, `spiece.model`, `special_tokens_map.json`, or
-`added_tokens.json`.
-
-Exactly one unsharded `model.safetensors` is supported. Do not include
-`pytorch_model.bin`, `.pt`, pickle files, Python modules, native libraries,
-symlinks or absolute/parent paths.
-
-## Manifest
-
-`prt-model.json` has an exact, closed field vocabulary:
+Example manifest:
 
 ```json
 {
@@ -49,87 +48,85 @@ symlinks or absolute/parent paths.
   "class_order": [0, 1, 2, 3, 4],
   "max_tokens": 256,
   "padding_policy": "fixed_max_length",
-  "base_model": "local-deberta-training-recipe",
-  "base_revision": "experiment-2026-07-24",
-  "training_data": {
-    "kind": "five_fold",
-    "held_out_fold": 3
-  }
+  "base_model": "local-training-recipe",
+  "base_revision": "experiment-2026-07-27",
+  "training_data": {"kind": "five_fold", "held_out_fold": 3}
 }
 ```
 
-Rules:
+Allowed model types are `albert`, `bert`, `camembert`, `deberta`,
+`deberta-v2`, `distilbert`, `electra`, `modernbert`, `mpnet`, `rembert`,
+`roberta`, and `xlm-roberta`.
+
+## Schema 2: Llama/Mistral PEFT classifier
+
+This is a LoRA adapter for `AutoModelForSequenceClassification`, not a
+prompt-based generative model:
+
+```text
+my-adapter/
+├── prt-model.json
+├── adapter_config.json
+├── adapter_model.safetensors
+├── tokenizer_config.json
+├── tokenizer.json
+└── optional tokenizer resources
+```
+
+Mistral example:
+
+```json
+{
+  "schema_version": 2,
+  "model_kind": "peft_sequence_classifier",
+  "architecture": "mistral",
+  "display_name": "My Mistral classifier",
+  "family": "custom_mistral_experiment",
+  "fold_id": 1,
+  "class_order": [0, 1, 2, 3, 4],
+  "max_tokens": 1024,
+  "padding_policy": "dynamic_longest",
+  "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+  "base_revision": "<40-character commit SHA>",
+  "training_data": {"kind": "five_fold", "held_out_fold": 1}
+}
+```
+
+For Llama use:
+
+- `architecture`: `llama`;
+- `base_model`: `meta-llama/Meta-Llama-3-8B`;
+- `max_tokens`: at most `256`;
+- dynamic padding.
+
+For Mistral, `max_tokens` is at most `1024`. In both cases
+`base_revision` must be an immutable 40-character commit SHA. The adapter must
+declare PEFT `LORA`, task `SEQ_CLS`, a `score` or `classifier` module to save,
+compatible target modules, and a head with exactly five rows.
+
+## Shared rules and validation
 
 - `family` matches `custom_[a-z0-9][a-z0-9_-]{1,47}`;
-- `fold_id` and `training_data.held_out_fold` are the same integer `1..5`;
-- the classifier has exactly five labels in order `[0,1,2,3,4]`;
-- `max_tokens` is `8..4096`;
-- padding is `fixed_max_length` or `dynamic_longest`;
+- fold and `training_data.held_out_fold` are the same integer `1..5`;
+- class order is exactly `[0,1,2,3,4]`;
 - display name is 1–80 characters;
-- unknown manifest fields are rejected.
+- files may be at ZIP root or under one common directory;
+- unknown manifest fields, unsafe paths, links, encrypted entries, executable
+  code, native libraries, pickle and `.pt` files are rejected;
+- `auto_map` and `trust_remote_code` are rejected;
+- tokenizer resources must be local;
+- safetensor keys, shapes and finite values are checked without executing
+  artifact code;
+- the ordered file inventory determines model identity.
 
-`base_model` and `base_revision` are optional provenance strings. They do not
-cause a download.
-
-## Export example
-
-Use a supported encoder-only sequence-classifier architecture:
-
-```python
-model.save_pretrained("my-model", safe_serialization=True)
-tokenizer.save_pretrained("my-model")
-```
-
-Add `prt-model.json`, then create a ZIP:
-
-```bash
-python -m zipfile -c my-model.zip my-model/
-```
-
-Upload `my-model.zip` from Models → Import custom Transformer.
-
-The Models page includes the same three-step export instructions and a manifest
-example directly above the upload control. A standalone `.pt` file is not a
-custom bundle.
-
-## Validation
-
-The background model-validation job:
-
-1. streams the ZIP under the configured byte limit;
-2. rejects traversal, links, more than 256 files, decompression overflow and
-   executable/pickle file types;
-3. loads JSON and rejects `auto_map` or `trust_remote_code`;
-4. resolves config and tokenizer with `local_files_only=true`;
-5. accepts only `albert`, `bert`, `camembert`, `deberta`, `deberta-v2`,
-   `distilbert`, `electra`, `modernbert`, `mpnet`, `rembert`, `roberta`, or
-   `xlm-roberta`;
-6. constructs `AutoModelForSequenceClassification` from installed code and
-   requires `num_labels=5`;
-7. requires `max_tokens` not to exceed a declared positional limit;
-8. compares every safetensors key and shape with the derived architecture;
-9. rejects NaN or infinite tensor values;
-10. hashes the ordered file inventory and scientific manifest into model
-   identity;
-11. atomically installs the bundle under `data/managed-models/<model_id>`.
-
-Decoder-only LLM families, including Llama, Mistral, and Mixtral, are
-intentionally unsupported. They add memory, tokenizer, and methodological
-variability without serving the encoder-classification comparison used by the
-paper.
-
-The upload ZIP is deleted after terminal success or failure.
+The validated bundle is atomically installed below
+`data/managed-models/<model_id>`. The acquired upload is deleted after success
+or failure. Inference rechecks the installed digest before loading.
 
 ## Fold leakage
 
-The manifest asserts a five-fold training convention: model fold `N` was
-trained on the other four folds and held out fold `N`. The leakage guard can
-enforce this only when stored predictions for the same custom family establish
-an article's fold membership. The standard CSV importer currently accepts only
-BERT and RoBERTa families, so a newly named `custom_...` family normally has no
-such registry and external/dataset article membership remains unknown.
-
-For a genuinely different training corpus, the current manifest is not
-expressive enough to prove per-article exclusion. Do not mislabel such a model
-as fold-safe; extending training-provenance formats requires a new manifest
-schema and scientific review.
+The manifest states that model fold `N` held out fold `N`. The application can
+enforce this only when imported predictions establish article membership for
+the same family. For a custom family trained on another corpus, membership in
+the bundled paper dataset is unknown; the manifest is provenance, not proof
+that an arbitrary article was absent from training.

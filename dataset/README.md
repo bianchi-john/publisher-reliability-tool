@@ -25,12 +25,13 @@ Schema version 2 uses `prediction_origin` to distinguish the two row types:
 
 - `dataset_original`: one original wide-format BERT/RoBERTa dataset row;
 - `user_evaluation`: one immutable local inference run, including its model ID,
-  family, fold, predicted label, all five probabilities, action, timestamps,
-  device and software versions.
+  display name, official/custom/local provenance, family, fold, predicted label,
+  all five probabilities, action, timestamps, device and software versions.
 
 The original wide-format columns remain unchanged. Generic local-run fields are
 `prediction_run_id`, `model_id`, `prediction_family`,
-`prediction_fold_id`, `predicted_label`, `prob_class_0` through
+`prediction_fold_id`, `prediction_model_name`, `prediction_model_provenance`,
+`prediction_official_manifest_entry_sha256`, `predicted_label`, `prob_class_0` through
 `prob_class_4`, `prediction_action`, `input_source`, `content_retention`,
 `job_id`, inference timestamps, `duration_ms`, `device`,
 `software_versions_json` and `recorded_at`.
