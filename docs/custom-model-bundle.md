@@ -73,7 +73,7 @@ cause a download.
 
 ## Export example
 
-Use only a Transformers architecture supported by the locked project version:
+Use a supported encoder-only sequence-classifier architecture:
 
 ```python
 model.save_pretrained("my-model", safe_serialization=True)
@@ -101,13 +101,22 @@ The background model-validation job:
    executable/pickle file types;
 3. loads JSON and rejects `auto_map` or `trust_remote_code`;
 4. resolves config and tokenizer with `local_files_only=true`;
-5. constructs `AutoModelForSequenceClassification` from installed code;
-6. requires `num_labels=5`;
-7. compares every safetensors key and shape with the derived architecture;
-8. rejects NaN or infinite tensor values;
-9. hashes the ordered file inventory and scientific manifest into model
+5. accepts only `albert`, `bert`, `camembert`, `deberta`, `deberta-v2`,
+   `distilbert`, `electra`, `modernbert`, `mpnet`, `rembert`, `roberta`, or
+   `xlm-roberta`;
+6. constructs `AutoModelForSequenceClassification` from installed code and
+   requires `num_labels=5`;
+7. requires `max_tokens` not to exceed a declared positional limit;
+8. compares every safetensors key and shape with the derived architecture;
+9. rejects NaN or infinite tensor values;
+10. hashes the ordered file inventory and scientific manifest into model
    identity;
-10. atomically installs the bundle under `data/managed-models/<model_id>`.
+11. atomically installs the bundle under `data/managed-models/<model_id>`.
+
+Decoder-only LLM families, including Llama, Mistral, and Mixtral, are
+intentionally unsupported. They add memory, tokenizer, and methodological
+variability without serving the encoder-classification comparison used by the
+paper.
 
 The upload ZIP is deleted after terminal success or failure.
 

@@ -44,7 +44,7 @@ The MVP shall:
 - scan configured model roots and accept browser uploads of supported official
   artifacts;
 - provide BERT and RoBERTa as the core CPU demo;
-- import constrained five-class custom Transformers bundles using local
+- import constrained five-class custom encoder Transformers bundles using local
   configuration, tokenizer and `safetensors`;
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   with a requested count of 2–50;
@@ -121,31 +121,25 @@ dataset/storage, and `1` unexpected runtime failure.
 Startup order is:
 
 1. parse configuration;
-2. validate existing data/model/seed path types and permissions without
-   creating them; missing seed/model roots remain allowed;
-3. bind and retain the loopback socket without accepting requests, proving the
+2. bind and retain the loopback socket without accepting requests, proving the
    port is available before data-directory mutation;
-4. create the data directory and operational subdirectories if absent, then
+3. create the data directory and operational subdirectories if absent, then
    acquire its exclusive lock; creation occurs only after port reservation;
-5. create all seven ledgers only when `state/` is absent; an existing partial
+4. create all seven ledgers only when `state/` is absent; an existing partial
    state directory is `STORAGE_ERROR`, not a fresh store;
-6. recover a checksum-valid pending import or remove one incomplete final
-   physical record from an append-only ledger;
-7. verify the complete store before any seed/model mutation;
-8. verify/import the optional bundled release by content digest;
-9. scan configured core model roots and refresh managed-bundle integrity;
-10. restore any mirrored `user_evaluation` run absent from the authoritative
+5. load and structurally verify the complete store, marking previously running
+   jobs `PROCESS_INTERRUPTED`; malformed records fail closed and are not
+   repaired automatically;
+6. reconcile only mutable prediction-manifest metadata from a valid schema-2
+   CSV when the immutable original digest is unchanged;
+7. verify/import the optional bundled release by content digest;
+8. scan configured core model roots and refresh managed-bundle integrity;
+9. restore any mirrored `user_evaluation` run absent from the authoritative
     state ledger, then idempotently synchronize all local inference runs back
     to the prediction CSV and refresh its manifest;
-11. load lightweight indexes;
-12. leave source-free queued jobs queued; leave upload-backed queued jobs
-    queued only when every acquired source they require still exists; mark an
-    upload-backed queued job with a missing source and every `running` job
-    failed with `PROCESS_INTERRUPTED`;
-13. start the FIFO worker and accept HTTP requests; readiness is then `ready`.
-
-Recovery performs only the two actions in step 6. Any other structural
-corruption fails startup without completing, migrating, or guessing state.
+10. start the FIFO worker, requeue persisted queued jobs, and fail an
+    upload-backed job when its acquired source is missing;
+11. accept HTTP requests; readiness is then `ready`.
 
 Missing seed/models are valid empty/history-only modes. An occupied port causes
 no data mutation. Corrupt storage closes the reserved socket and starts no HTTP
@@ -153,10 +147,9 @@ server.
 
 On `SIGINT`/`SIGTERM`, new jobs stop being accepted and the worker receives a
 stop request. The process waits at most five seconds, then exits even if a
-non-cancellable retrieval, model call, or filesystem call remains. Atomic
-replacement and append-tail recovery make this equivalent to a crash at that
-boundary. On next startup the job is failed as interrupted; already committed
-runs, evaluations, and imports remain valid. No inference/upload is resumed.
+non-cancellable retrieval, model call, or filesystem call remains. On next
+startup the job is failed as interrupted; already committed rows remain valid.
+No inference/upload is resumed.
 
 ## 7. Main research workflow
 
@@ -238,6 +231,8 @@ articles assigned to held-out test fold `N` and must not evaluate known articles
 assigned to any other fold. The same rule filters publisher candidates and is
 enforced again by the backend. Unknown external URLs have no registered fold
 membership; their absence is not represented as proof of training exclusion.
+A local inference never creates fold-membership evidence for a previously
+unknown URL.
 
 Every evaluation stores the ordered article and prediction-run IDs actually
 used. A later run cannot change an earlier evaluation.
@@ -255,9 +250,11 @@ individual runs/content.
 
 The API accepts one CSV or CSV.GZ upload. It writes a private temporary file,
 computes its SHA-256, enforces the byte/row limits, parses incrementally, and
-stages only allowlisted projected values. After complete validation it publishes
-accepted immutable runs and one import record. The temporary file is then
-deleted.
+retains only allowlisted projected values in memory. After complete validation
+it replaces models, runs, and the import record in deterministic order. This is
+idempotent but not a multi-file transaction; after interruption, resubmitting
+the same user file converges without duplicate identities. The temporary file
+is deleted at terminal job cleanup.
 
 The user schema requires `url` and at least one model family's predicted class
 and fold. `title`, `text`, `authors`, source-local ID, and domain are optional;
@@ -283,21 +280,21 @@ Status is
 `queued`, `running`, `succeeded`, or `failed`. Progress is an approximate
 integer `0..100` updated at these macro phases only:
 
-- evaluation: `preparing`, `retrieving`, `inferring`, `aggregating`, `saving`;
-- import: `parsing`, `validating`, `saving` (upload reception precedes job
+- evaluation: `preparing`, then terminal `saving`;
+- import: `parsing`, then terminal `saving` (upload reception precedes job
   creation);
-- model validation: `scanning`, `validating`, `testing`, `saving`.
+- model validation: `scanning`, then terminal `saving`.
 
 One FIFO worker executes jobs. The frontend polls the job endpoint every two
 seconds; SSE, cancellation, and retry are absent. After restart, queued jobs run
 again only when every acquired source they require still exists. A queued job
 with a missing source and every running job fail as `PROCESS_INTERRUPTED`;
-temporary files are cleaned after pending-import recovery.
+terminal job handling cleans its acquired temporary upload.
 
 The UI has Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs.
-It favors provenance and scientific explanation over administration. Charts
-have adjacent semantic tables. Loading, empty, offline, missing-model, partial,
-and error states use clear English text. The persistent top bar provides a
+It favors provenance and scientific explanation over administration. Loading,
+empty, offline, missing-model, partial, and error states use clear English text.
+The persistent top bar provides a
 keyboard-accessible light/dark theme control, initially follows the operating
 system, stores an explicit browser-local preference, and does not remount or
 shift during route changes. Both palettes use a warm orange/terracotta visual
@@ -331,7 +328,7 @@ for paragraphs, navigation and controls, without a CDN.
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
-| FR-024 | Custom Transformers import shall accept only the documented local-only ZIP/config/tokenizer/safetensors contract and reject executable code, pickle, unsafe paths, invalid folds and key/shape mismatches. |
+| FR-024 | Custom Transformers import shall accept only the documented encoder-only model-type allowlist and local ZIP/config/tokenizer/safetensors contract, rejecting decoder-only LLMs, executable code, pickle, unsafe paths, invalid folds and key/shape mismatches. |
 
 ## 10. Non-functional requirements
 
@@ -340,7 +337,7 @@ for paragraphs, navigation and controls, without a CDN.
 | NFR-001 | The main workflow and module boundaries shall be understandable without distributed-systems or database-internals knowledge. |
 | NFR-002 | The UI shall remain usable with the bundled dataset on a typical four-core, 16-GiB research workstation; no hard latency SLA applies. |
 | NFR-003 | Dependency locks, dataset checksums, and core model fixtures shall make the demo reproducible. |
-| NFR-004 | CSV writes shall use one writer, fsync, and atomic replacement or append-tail recovery as documented. |
+| NFR-004 | CSV writes shall use one writer, fsync, atomic replacement for complete-file updates, and fail-closed structural verification as documented. |
 | NFR-005 | Logs and errors shall exclude editorial content, protected data, credentials, and unrestricted paths. |
 | NFR-006 | Frontend assets, both open font families and API documentation shall be bundled locally without telemetry or CDN dependencies. |
 | NFR-007 | User-visible text, errors, exports and the persistent light/dark theme control shall be English and accessible. |

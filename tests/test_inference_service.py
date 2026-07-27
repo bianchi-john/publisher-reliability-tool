@@ -5,8 +5,10 @@ from unittest.mock import patch
 
 from publisher_reliability.inference import (
     ENGLISH_REQUEST_HEADERS,
+    InferenceEngine,
     Prediction,
     RetrievedArticle,
+    _sha256_file,
     extract_english_article,
 )
 from publisher_reliability.errors import AppError
@@ -27,6 +29,26 @@ class FakeInferenceEngine:
 
 
 class InferenceServiceTest(unittest.TestCase):
+    def test_inference_rechecks_checkpoint_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            checkpoint = models / "bert_fold_1.pt"
+            checkpoint.write_bytes(b"validated checkpoint")
+            with Storage(root / "data") as storage:
+                engine = InferenceEngine(storage, model_roots=(models,))
+                model = {
+                    "artifact_kind": "pytorch_state_dict",
+                    "artifact_locator": "root-1/bert_fold_1.pt",
+                    "artifact_sha256": _sha256_file(checkpoint),
+                }
+                self.assertEqual(engine._artifact_path(model), checkpoint)
+                checkpoint.write_bytes(b"changed checkpoint")
+                with self.assertRaises(AppError) as raised:
+                    engine._artifact_path(model)
+                self.assertEqual(raised.exception.code, "MODEL_NOT_AVAILABLE")
+
     def test_newspaper_is_configured_for_english(self) -> None:
         captured: dict[str, object] = {}
 
@@ -159,6 +181,28 @@ class InferenceServiceTest(unittest.TestCase):
                 self.assertEqual(
                     service.article_summaries(article_source="dataset"),
                     [],
+                )
+
+                second_fold = dict(model)
+                second_fold.update(
+                    model_id="local-bert-fold-2",
+                    fold_id=2,
+                    display_name="BERT fold 2",
+                    artifact_locator="root-1/bert_fold_2.pt",
+                    artifact_sha256="b" * 64,
+                )
+                storage.upsert("models", "model_id", second_fold)
+                service.assert_not_training_article(
+                    second_fold,
+                    run["article_id"],
+                )
+                repeated = service.available_models(
+                    input_type="article",
+                    url="https://example.com/new",
+                )
+                self.assertEqual(
+                    {item["mode"] for item in repeated["items"] if item["eligible"]},
+                    {"stored_prediction", "new_inference"},
                 )
 
 

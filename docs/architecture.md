@@ -17,7 +17,7 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 | API | FastAPI, Pydantic v2, generated OpenAPI 3.1 |
 | Server | Uvicorn, one worker, fixed loopback binding |
 | Frontend | Bundled static HTML, CSS and browser JavaScript; local Gloock and Instrument Sans |
-| Persistence | Python `csv`, small in-memory indexes, filesystem lock |
+| Persistence | Python `csv`, in-memory row lists, filesystem lock |
 | Retrieval | `httpx` and English Newspaper3k extraction |
 | Language | `langdetect`, seed zero |
 | Models | PyTorch, Transformers and safetensors |
@@ -69,9 +69,11 @@ article runs. Original rows use `prediction_origin=dataset_original`; one local
 inference uses one `prediction_origin=user_evaluation` row identified by
 `prediction_run_id`. A run commits to `prediction_runs.csv` first, then the
 mirror rewrites `predictions.csv` and `manifest.json` through sibling temporary
-files. At startup, mirrored local rows missing from state are restored before
-all local runs are synchronized again. Thus the dataset copy can aid recovery
-but never creates a competing run ID or duplicate on restart.
+files. At startup, valid CSV content can reconcile stale mutable manifest
+metadata when the immutable original digest still matches; mirrored local rows
+missing from state are then restored before all local runs are synchronized
+again. Thus the dataset copy can aid recovery but never creates a competing run
+ID or duplicate on restart.
 
 - Immutable scientific rows (`prediction_runs.csv`, `evaluations.csv`, and
   `imports.csv`) are appended, flushed, and fsynced.
@@ -80,23 +82,20 @@ but never creates a competing run ID or duplicate on restart.
   renamed.
 - A process-wide write mutex serializes writes; a POSIX `flock` prevents a
   second process from using the directory.
-- Startup may remove one malformed, incomplete final physical CSV record from
-  an append-only ledger. Middle-row or semantic corruption fails closed.
-- Import prepares projected rows in a private staging directory. A small
-  `import.pending.json` marker names prepared final run/import/model files;
-  startup completes only those exact renames whose live target does not already
-  have the recorded digest, or fails if neither target nor prepared file
-  matches.
+- Malformed authoritative CSV fails closed; startup does not trim or infer
+  missing data.
+- Import validates the complete source, then replaces models, runs, and import
+  history in deterministic order. Repeating the same source converges without
+  duplicate identities; there is no custom transaction protocol.
 
-This special import marker is the only multi-file commit mechanism. There is no
-generic transaction ledger, record versioning, compaction, commit watermark,
-or snapshot history.
+There is no transaction ledger, record versioning, compaction, commit
+watermark, or snapshot history.
 
-In-memory indexes cover ID/URL/model lookups, latest exact-model run, publisher
-grouping, and simple list filters. They are rebuilt at startup and are never
-authoritative. Offset pagination reflects committed state at each request; a
-concurrent local write can shift later pages, which is acceptable for this
-single-user demo.
+The seven ledgers are loaded into simple in-memory row lists. Query services
+derive temporary dictionaries/groupings as needed; there is no separate index
+format or cache invalidation layer. Offset pagination reflects committed state
+at each request, so a concurrent local write can shift later pages, which is
+acceptable for this single-user demo.
 
 ## 6. Jobs
 
@@ -113,12 +112,12 @@ again rather than resuming or retrying it.
 
 Shutdown stops admission, requests the worker to stop, waits five seconds, then
 lets the process exit at its current boundary. It does not claim to cancel
-model/kernel/filesystem calls safely; the ordinary append/rename recovery rules
-handle the same state as an abrupt process stop.
+model/kernel/filesystem calls safely; the ordinary append/rename write rules
+leave already committed rows intact after an abrupt process stop.
 
 The complete startup order and the per-job macro phases are owned by the
 product specification. This architecture does not insert an HTTP-serving or
-background-worker phase before storage recovery and verification complete.
+background-worker phase before structural verification completes.
 
 ## 7. URL and publisher identity
 
@@ -187,22 +186,26 @@ scan remains available for changes made while the service is running.
 
 Upload validation moves a successful artifact into that root before the
 atomic model-ledger registration. A crash in between may leave an unregistered
-candidate. Startup ignores it; the next explicit scan may validate and register
-it. No separate upload transaction or orphan ledger is introduced.
+candidate. Startup ignores it; uploading the same deterministic bundle again
+registers the already matching artifact. No separate upload transaction or
+orphan ledger is introduced.
 
 Built-in official recipes determine scientific model identity independently of
 filesystem location. States are `compatible`, `validated_not_runnable`,
 `historical_only`, `artifact_missing`, `dependency_missing`,
 `resource_unavailable`, and `invalid`.
 Historical runs remain browseable and aggregable when an artifact disappears.
+The exact file/directory digest is checked again before a model is loaded, so a
+checkpoint changed after scanning cannot run under its previous scientific ID.
 
 BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
-fixed PRT manifest vocabulary and architectures already registered in the
-locked Transformers dependency. `auto_map`, `trust_remote_code`, Python/native
-files and pickle weights are rejected. A valid self-contained custom bundle is
-`compatible` and runnable. Core checkpoints cache only their pinned official
-tokenizer resources on first online inference; unknown artifacts are reported
-and ignored.
+fixed PRT manifest vocabulary and an explicit allowlist of encoder-only
+sequence-classifier model types. Decoder-only LLM architectures such as Llama,
+Mistral, and Mixtral are out of scope. `auto_map`, `trust_remote_code`,
+Python/native files, and pickle weights are rejected. A valid self-contained
+custom bundle is `compatible` and runnable. Core checkpoints cache only their
+pinned official tokenizer resources on first online inference; unknown
+artifacts are reported and ignored.
 
 ## 10. Local HTTP boundary
 
@@ -229,8 +232,7 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Missing seed/model/dependency | Start normally and show guidance |
 | Port occupied | Exit before data mutation |
 | Second process | Exit with `STORAGE_ERROR` |
-| Malformed incomplete final append | Back up that file and remove only the tail |
-| Other storage corruption | Exit without serving HTTP |
+| Malformed or incomplete authoritative CSV | Exit with `STORAGE_ERROR` without serving HTTP |
 | Queued upload job whose acquired source is missing | Mark `PROCESS_INTERRUPTED` |
 | Running job at restart | Mark `PROCESS_INTERRUPTED` |
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |

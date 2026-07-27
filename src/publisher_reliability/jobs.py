@@ -24,11 +24,13 @@ class JobManager:
         service: ResearchService,
         *,
         model_roots: tuple[Path, ...] = (),
+        dataset_upload_max_bytes: int = 536_870_912,
         model_upload_max_bytes: int = 4_294_967_296,
     ):
         self.storage = storage
         self.service = service
         self.model_roots = model_roots
+        self.dataset_upload_max_bytes = dataset_upload_max_bytes
         self.model_upload_max_bytes = model_upload_max_bytes
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
@@ -142,6 +144,7 @@ class JobManager:
                     self.storage,
                     source,
                     source_name=str(request.get("source_name", token)),
+                    max_decompressed_bytes=self.dataset_upload_max_bytes,
                 )
                 source.unlink(missing_ok=True)
             else:

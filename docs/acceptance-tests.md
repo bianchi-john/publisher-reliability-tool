@@ -15,7 +15,7 @@ classes or implementation call graphs.
 
 On clean Ubuntu 24.04 with locked dependencies, `publisher-reliability serve`
 validates paths, reserves the port, initializes/verifies state, imports the seed,
-loads indexes, then starts UI/API/docs on `127.0.0.1:8000`; the first accepted
+scans models, then starts UI/API/docs on `127.0.0.1:8000`; the first accepted
 readiness request is ready and no startup live-but-not-ready phase is exposed.
 
 ### AT-002 — Compose startup
@@ -45,8 +45,8 @@ On shutdown, admission stops and the process exits within five seconds even if
 non-cancellable work remains. After restart, queued evaluations and queued
 upload jobs with intact acquired sources are queued again; queued upload jobs
 without source and all jobs left running become failed with
-`PROCESS_INTERRUPTED`. Pending import recovery runs before temp cleanup, and
-committed runs/evaluations/imports remain visible even if their job is failed.
+`PROCESS_INTERRUPTED`. Committed rows remain visible even if their job is
+failed.
 
 ### AT-007 — Seven exact ledgers
 
@@ -54,10 +54,10 @@ A fresh store contains exactly the seven documented CSV ledgers with exact
 UTF-8 headers and reconstructs every persisted API resource without another
 database.
 
-### AT-008 — Interrupted final append
+### AT-008 — Corrupt final append fails closed
 
 Given one truncated final physical record in an append-only ledger, startup
-backs up that file, removes only the incomplete tail, and verifies successfully.
+returns `STORAGE_ERROR`, changes no authoritative row, and serves no endpoint.
 
 ### AT-009 — Atomic mutable-ledger replacement
 
@@ -65,13 +65,12 @@ Model, job, saved-content, and content-delete updates expose either the old or
 new valid complete file when killed before/after atomic rename; a leftover temp
 file is not treated as committed state.
 
-### AT-010 — Import marker recovery
+### AT-010 — Interrupted import is idempotent
 
-Killing import between its three prepared-file replacements causes startup to
-roll forward the exact digest-matching run/import/model files once; mismatched
-marker data fails `STORAGE_ERROR` rather than guessing. Concurrent API reads see
-the complete old in-memory generation until one complete new generation is
-published.
+Killing import between deterministic model/run/import replacements may leave
+that committed prefix visible. Restart retries an incomplete bundled import;
+resubmitting the same user source converges to one import identity and one run
+per article/model without duplicates. No custom transaction marker is claimed.
 
 ## B. Dataset and import
 
@@ -80,8 +79,8 @@ published.
 The committed schema-2 manifest verifies part size/SHA-256, the stable
 original-row content digest, empty editorial fields, 19,429
 `dataset_original` rows, BERT/RoBERTa-only original columns, complete
-five-class probability vectors for both families, and the exact count and
-shape of any `user_evaluation` rows.
+finite five-class probability vectors for both families, and the exact count
+and shape of any `user_evaluation` rows.
 
 ### AT-012 — Bundled import identity
 
@@ -327,8 +326,8 @@ matches class and reference probabilities within absolute `1e-6`, relative
 
 ### AT-046 — Valid custom Transformer bundle
 
-A ZIP containing the closed manifest, supported five-label Transformers config,
-local tokenizer and finite `model.safetensors` passes local-only validation,
+A ZIP containing the closed manifest, allowlisted five-label encoder config,
+local tokenizer, and finite `model.safetensors` passes local-only validation,
 installs under `managed-models/<model_id>`, registers exact digest/input/fold
 provenance, deletes the acquired upload and appears on Models as
 `compatible`; a single new article can create a five-probability local run with
@@ -338,8 +337,9 @@ that exact model ID.
 
 Traversal, absolute paths, links, decompression overflow, Python/native/pickle
 files, `auto_map`, `trust_remote_code`, unknown manifest fields, missing local
-tokenizer, labels other than five, invalid fold convention, non-finite values,
-or strict key/shape mismatch fail without registration or an installed bundle.
+tokenizer, decoder-only LLM model types, labels other than five, invalid fold
+convention, non-finite values, or strict key/shape mismatch fail without
+registration or an installed bundle.
 
 ## I. Optional stress and fault suite
 
@@ -351,15 +351,15 @@ demo-scale observation, not a larger-input guarantee.
 
 ### AT-049 — Filesystem interruption matrix
 
-Fault injection around immutable append, mutable rename, and the three import
-marker replacements yields either the old or documented rolled-forward state,
-never silent malformed success.
+Fault injection around immutable append and mutable rename yields either a
+complete row/file or a fail-closed store. Interrupted multi-file import is
+resolved by resubmitting the same deterministic source.
 
 ### AT-050 — Disk-full smoke
 
 Representative ENOSPC injection during upload acquisition and atomic
-replacement returns `STORAGE_ERROR`, reports no success, and leaves a store that
-passes verification after documented temp cleanup/marker recovery.
+replacement returns `STORAGE_ERROR` and reports no success. Any partial
+multi-file import is resolved by resubmitting the same source.
 
 ## J. Fold-safe evaluation availability
 
@@ -376,7 +376,12 @@ Given a known article assigned to test fold 2, local BERT/RoBERTa fold 1 are
 hidden with `TRAINING_DATA_LEAKAGE`. Direct service/API attempts to infer with
 those checkpoints also fail with that code. Publisher and explicit-list
 workflows exclude or reject the same unsafe article; fold-1 held-out articles
-remain eligible.
+remain eligible. A local inference over an external URL does not add that URL
+to the imported fold registry and therefore cannot manufacture a later leakage
+block. If normalization maps one article/family identity to more than one
+imported fold, its stored runs remain consultable but every checkpoint is
+blocked for direct evaluation and the identity is excluded from publisher
+aggregation.
 
 ### AT-053 — Availability explanation and conditional controls
 

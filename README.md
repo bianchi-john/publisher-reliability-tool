@@ -110,9 +110,11 @@ saved in the browser.
 
 The Models page also accepts a constrained custom Transformers `.zip` bundle
 using `safetensors` and a local tokenizer. It validates and registers supported
-five-class `AutoModelForSequenceClassification` architectures without loading
-custom Python code. A successfully validated custom bundle is immediately
-runnable because it includes both its tokenizer and safetensors weights.
+five-class encoder-only `AutoModelForSequenceClassification` architectures
+without loading custom Python code. Decoder-only LLM families such as Llama and
+Mistral are intentionally outside scope. A successfully validated custom bundle
+is immediately runnable because it includes both its tokenizer and safetensors
+weights.
 
 Official artifacts are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)

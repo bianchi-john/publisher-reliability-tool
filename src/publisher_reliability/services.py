@@ -75,6 +75,30 @@ class ResearchService:
             for row in self.storage.rows["prediction_runs"]
         }
 
+    def _imported_fold_registry(self) -> dict[tuple[str, str], set[int]]:
+        registry: dict[tuple[str, str], set[int]] = defaultdict(set)
+        models = self.models_by_id
+        for run in self.storage.rows["prediction_runs"]:
+            if run["origin"] not in {"bundled_import", "user_import"}:
+                continue
+            model = models.get(run["model_id"])
+            if model is not None:
+                registry[(run["article_id"], model["family"])].add(
+                    int(model["fold_id"])
+                )
+        return registry
+
+    @staticmethod
+    def _fold_is_safe(
+        model: dict[str, str],
+        article_identifier: str,
+        registry: dict[tuple[str, str], set[int]],
+    ) -> bool:
+        assigned = registry.get((article_identifier, model["family"]), set())
+        return not assigned or (
+            len(assigned) == 1 and int(model["fold_id"]) in assigned
+        )
+
     def article_summaries(
         self,
         *,
@@ -425,19 +449,28 @@ class ResearchService:
         for run in matching:
             grouped[run["model_id"]].append(run)
         models = self.models_by_id
+        fold_registry = self._imported_fold_registry()
         result: list[dict[str, object]] = []
-        represented_family_folds: set[tuple[str, int]] = set()
+        article_identifier = article_id(canonical) if input_type == "article" else ""
+        had_matching_local_identity = False
         for model_identifier, runs in grouped.items():
             model = models.get(model_identifier)
             if model is None:
                 continue
             family_fold = (model["family"], int(model["fold_id"]))
-            represented_family_folds.add(family_fold)
             local_matches = local_by_family_fold.get(family_fold, [])
             if not local_matches:
                 continue
-            article_count = len({run["article_id"] for run in runs})
-            probability_count = sum(bool(run["prob_class_0"]) for run in runs)
+            had_matching_local_identity = True
+            safe_runs = [
+                run
+                for run in runs
+                if self._fold_is_safe(model, run["article_id"], fold_registry)
+            ]
+            if not safe_runs:
+                continue
+            article_count = len({run["article_id"] for run in safe_runs})
+            probability_count = sum(bool(run["prob_class_0"]) for run in safe_runs)
             local_model = sorted(
                 local_matches,
                 key=lambda row: (row["status"] != "compatible", row["model_id"]),
@@ -452,7 +485,7 @@ class ResearchService:
                     "local_status": local_model["status"],
                     "local_runnable": local_model["runnable"] == "true",
                     "article_count": article_count,
-                    "run_count": len(runs),
+                    "run_count": len(safe_runs),
                     "probability_count": probability_count,
                     "eligible": article_count >= required,
                     "mode": "stored_prediction",
@@ -465,11 +498,19 @@ class ResearchService:
             for local_model in local_models:
                 family = local_model["family"]
                 fold_id = int(local_model["fold_id"])
-                assigned_folds = {
-                    represented_fold
-                    for represented_family, represented_fold in represented_family_folds
-                    if represented_family == family
-                }
+                assigned_folds = fold_registry.get((article_identifier, family), set())
+                if len(assigned_folds) > 1:
+                    blocked.append(
+                        {
+                            "family": family,
+                            "fold_id": fold_id,
+                            "reason": (
+                                "The canonical article appears in multiple imported "
+                                "folds, so no checkpoint is leakage-safe."
+                            ),
+                        }
+                    )
+                    continue
                 if assigned_folds and fold_id not in assigned_folds:
                     blocked.append(
                         {
@@ -484,7 +525,7 @@ class ResearchService:
                     continue
                 if (
                     local_model["model_id"] in existing_model_ids
-                    or (family, fold_id) in represented_family_folds
+                    or (assigned_folds and fold_id in assigned_folds)
                     or local_model["runnable"] != "true"
                 ):
                     continue
@@ -534,7 +575,7 @@ class ResearchService:
                     f"{eligible_count} local checkpoint(s) have enough leakage-safe "
                     "stored predictions for this request."
                 )
-        elif result:
+        elif result or (input_type == "publisher" and had_matching_local_identity):
             code = "INSUFFICIENT_SAFE_ARTICLES"
             message = (
                 "Matching local checkpoints exist, but the publisher has fewer safe "
@@ -548,10 +589,16 @@ class ResearchService:
             )
         elif blocked:
             code = "TRAINING_DATA_LEAKAGE"
-            message = (
-                "The available local checkpoint fold was trained on this dataset article. "
-                "Evaluation is blocked to prevent training-data leakage."
-            )
+            if any("multiple imported folds" in row["reason"] for row in blocked):
+                message = (
+                    "This canonical article appears in multiple imported folds, so no "
+                    "checkpoint can be considered leakage-safe."
+                )
+            else:
+                message = (
+                    "The available local checkpoint fold was trained on this dataset "
+                    "article. Evaluation is blocked to prevent training-data leakage."
+                )
         else:
             code = "NO_MATCHING_LOCAL_MODEL"
             message = (
@@ -571,20 +618,30 @@ class ResearchService:
         }
 
     def assert_not_training_article(
-        self, model: dict[str, str], article_identifier: str
+        self,
+        model: dict[str, str],
+        article_identifier: str,
+        fold_registry: dict[tuple[str, str], set[int]] | None = None,
     ) -> None:
-        """Block a local fold from inferring over dataset rows used for its training."""
+        """Reject known training exposure or ambiguous imported fold membership."""
 
-        if model["artifact_kind"] == "historical_virtual":
-            return
         family = model["family"]
-        assigned_folds = {
-            int(candidate["fold_id"])
-            for run in self.storage.rows["prediction_runs"]
-            if run["article_id"] == article_identifier
-            for candidate in [self.models_by_id.get(run["model_id"], {})]
-            if candidate.get("family") == family and candidate.get("fold_id")
-        }
+        registry = (
+            fold_registry
+            if fold_registry is not None
+            else self._imported_fold_registry()
+        )
+        assigned_folds = registry.get((article_identifier, family), set())
+        if len(assigned_folds) > 1:
+            raise AppError(
+                "TRAINING_DATA_LEAKAGE",
+                "The article has ambiguous membership in multiple imported folds.",
+                {
+                    "model_family": family,
+                    "model_fold": int(model["fold_id"]),
+                    "article_test_folds": sorted(assigned_folds),
+                },
+            )
         if assigned_folds and int(model["fold_id"]) not in assigned_folds:
             raise AppError(
                 "TRAINING_DATA_LEAKAGE",
@@ -676,9 +733,12 @@ class ResearchService:
         if not isinstance(input_value, dict):
             raise AppError("INVALID_INPUT", "Evaluation input is required.")
         input_type = input_value.get("type")
+        fold_registry = self._imported_fold_registry()
         if input_type == "article":
             canonical = normalize_url(str(input_value.get("url", "")))
-            self.assert_not_training_article(model, article_id(canonical))
+            self.assert_not_training_article(
+                model, article_id(canonical), fold_registry
+            )
             run = (
                 self._latest_run(article_id(canonical), model_identifier)
                 if action == "reuse"
@@ -734,7 +794,9 @@ class ResearchService:
                 raise AppError("INVALID_INPUT", "All articles must share one publisher.")
             selected = []
             for canonical in canonical_urls:
-                self.assert_not_training_article(model, article_id(canonical))
+                self.assert_not_training_article(
+                    model, article_id(canonical), fold_registry
+                )
                 run = (
                     self._latest_run(article_id(canonical), model_identifier)
                     if action == "reuse"
@@ -774,7 +836,10 @@ class ResearchService:
                     run["normalized_hostname"] == hostname
                     and run["model_id"] == model_identifier
                 ):
-                    self.assert_not_training_article(model, run["article_id"])
+                    if not self._fold_is_safe(
+                        model, run["article_id"], fold_registry
+                    ):
+                        continue
                     current = candidates.get(run["article_id"])
                     if current is None or newest_runs([current, run])[0] is run:
                         candidates[run["article_id"]] = run

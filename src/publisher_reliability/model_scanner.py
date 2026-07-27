@@ -201,12 +201,18 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
                     digest = ""
                 if digest == row["artifact_sha256"]:
                     current.update(
+                        status="compatible",
                         artifact_available=True,
+                        runnable=True,
+                        status_detail=(
+                            "Custom Transformer bundle integrity is valid. "
+                            "Local inference is available."
+                        ),
                         last_validated_at=timestamp,
                     )
                 else:
                     current.update(
-                        status="artifact_invalid",
+                        status="invalid",
                         artifact_available=False,
                         runnable=False,
                         status_detail=(

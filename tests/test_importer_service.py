@@ -11,6 +11,122 @@ from publisher_reliability.storage import Storage
 
 
 class ImporterServiceTest(unittest.TestCase):
+    def test_ambiguous_imported_fold_membership_is_never_evaluated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fields = [
+                "url",
+                "bert_predicted_label",
+                "bert_fold_id",
+                *[f"bert_prob_class_{index}" for index in range(5)],
+            ]
+            with Storage(root / "data") as storage:
+                for fold_id in (1, 2):
+                    source = root / f"fold-{fold_id}.csv"
+                    with source.open("w", encoding="utf-8", newline="") as stream:
+                        writer = csv.DictWriter(stream, fieldnames=fields)
+                        writer.writeheader()
+                        writer.writerow(
+                            {
+                                "url": "https://example.com/ambiguous",
+                                "bert_predicted_label": "1",
+                                "bert_fold_id": str(fold_id),
+                                **{
+                                    f"bert_prob_class_{class_id}": (
+                                        "1" if class_id == 1 else "0"
+                                    )
+                                    for class_id in range(5)
+                                },
+                            }
+                        )
+                    import_csv(storage, source)
+
+                historical = next(
+                    row
+                    for row in storage.rows["models"]
+                    if row["family"] == "bert" and row["fold_id"] == "1"
+                )
+                local_model = {
+                    **historical,
+                    "model_id": "local-bert-fold-1",
+                    "artifact_kind": "pytorch_state_dict",
+                    "artifact_locator": "models/bert_fold_1.pt",
+                    "artifact_sha256": "a" * 64,
+                    "status": "validated_not_runnable",
+                    "artifact_available": True,
+                    "runnable": False,
+                }
+                storage.upsert("models", "model_id", local_model)
+                service = ResearchService(storage, offline=True)
+                identifier = storage.rows["prediction_runs"][0]["article_id"]
+
+                with self.assertRaises(AppError) as raised:
+                    service.assert_not_training_article(local_model, identifier)
+                self.assertEqual(raised.exception.code, "TRAINING_DATA_LEAKAGE")
+                self.assertEqual(
+                    raised.exception.details["article_test_folds"], [1, 2]
+                )
+
+                availability = service.available_models(
+                    input_type="article",
+                    url="https://example.com/ambiguous",
+                )
+                self.assertEqual(availability["items"], [])
+                self.assertEqual(
+                    availability["availability"]["code"],
+                    "TRAINING_DATA_LEAKAGE",
+                )
+
+    def test_import_enforces_decompressed_byte_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "too-large.csv"
+            source.write_text(
+                "url,bert_predicted_label,bert_fold_id,"
+                "bert_prob_class_0,bert_prob_class_1,bert_prob_class_2,"
+                "bert_prob_class_3,bert_prob_class_4\n",
+                encoding="utf-8",
+            )
+            with Storage(root / "data") as storage:
+                with self.assertRaises(AppError) as raised:
+                    import_csv(
+                        storage,
+                        source,
+                        max_decompressed_bytes=32,
+                    )
+                self.assertEqual(raised.exception.code, "PAYLOAD_TOO_LARGE")
+
+    def test_import_rejects_non_finite_probabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "non-finite.csv"
+            fields = [
+                "url",
+                "bert_predicted_label",
+                "bert_fold_id",
+                *[f"bert_prob_class_{index}" for index in range(5)],
+            ]
+            with source.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "url": "https://example.com/article",
+                        "bert_predicted_label": "0",
+                        "bert_fold_id": "1",
+                        "bert_prob_class_0": "NaN",
+                        "bert_prob_class_1": "0",
+                        "bert_prob_class_2": "0",
+                        "bert_prob_class_3": "0",
+                        "bert_prob_class_4": "0",
+                    }
+                )
+            with Storage(root / "data") as storage:
+                with self.assertRaises(AppError) as raised:
+                    import_csv(storage, source)
+                self.assertEqual(raised.exception.code, "IMPORT_INVALID")
+                self.assertEqual(storage.rows["prediction_runs"], [])
+
     def test_import_requires_complete_probability_vector(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

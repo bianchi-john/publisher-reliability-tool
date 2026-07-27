@@ -3,6 +3,7 @@ const stateBadge = document.querySelector("#system-state");
 const themeToggle = document.querySelector("#theme-toggle");
 const warning = "Predictions are estimates, not fact checks. Softmax values are not necessarily calibrated confidence.";
 const THEME_KEY = "prt-theme";
+let routeController = null;
 
 function applyTheme(theme, persist = false) {
   const selected = theme === "dark" ? "dark" : "light";
@@ -49,7 +50,11 @@ function articleSourceBadges(row) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const requestOptions = {...options};
+  if (!requestOptions.signal && routeController) {
+    requestOptions.signal = routeController.signal;
+  }
+  const response = await fetch(path, requestOptions);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status})`);
   return body;
@@ -245,7 +250,7 @@ async function waitForJob(jobId, output) {
     output.textContent = `${job.phase || job.status} · ${job.progress}%`;
     if (job.status === "succeeded") return job;
     if (job.status === "failed") throw new Error(job.error_message || "Model scan failed.");
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
   throw new Error("Model scan is still running; inspect it on the Jobs page.");
 }
@@ -273,7 +278,7 @@ function renderModelTables(items) {
 
 async function models() {
   content.innerHTML = pageHead("Checkpoint inventory", "Models",
-    "Core BERT/RoBERTa checkpoints are scanned automatically. User-created Transformers are imported as a self-contained safe bundle.",
+    "Core BERT/RoBERTa checkpoints are scanned automatically. User-created encoder classifiers are imported as a self-contained safe bundle.",
     `<button id="scan">Rescan model directories</button>`) + `
     <section class="card full"><h2>Import custom Transformer</h2>
       <ol>
@@ -282,7 +287,7 @@ async function models() {
         <li>Select that ZIP below. A standalone <span class="mono">.pt</span> file is not a custom bundle.</li>
       </ol>
       <details><summary>Required files and manifest example</summary>
-        <p class="muted">Required: prt-model.json, config.json, model.safetensors, tokenizer_config.json, plus all tokenizer resources.</p>
+        <p class="muted">Required: prt-model.json, config.json, model.safetensors, tokenizer_config.json, plus all tokenizer resources. Decoder-only LLMs such as Llama and Mistral are outside this paper's scope.</p>
         <pre class="mono">${escapeHtml(`{
   "schema_version": 1,
   "display_name": "My custom classifier",
@@ -559,15 +564,24 @@ const routes = {
 };
 
 async function route() {
+  routeController?.abort();
+  const controller = new AbortController();
+  routeController = controller;
   const current = parseLocation();
   document.querySelectorAll("nav [data-page]").forEach(link => {
     const activePage = current.page === "article" ? "articles" : current.page === "publisher" ? "publishers" : current.page;
     link.classList.toggle("active", link.dataset.page === activePage);
   });
   content.setAttribute("aria-busy", "true");
-  try { await (routes[current.page] || dashboard)(current.id, current.params); }
-  catch (error) { content.innerHTML = pageHead("Request failed", "Unable to load this view", "") + `<p class="error">${escapeHtml(error.message)}</p>`; }
-  finally { content.setAttribute("aria-busy", "false"); }
+  try {
+    await (routes[current.page] || dashboard)(current.id, current.params);
+  } catch (error) {
+    if (error.name === "AbortError" || routeController !== controller) return;
+    content.innerHTML = pageHead("Request failed", "Unable to load this view", "") + `<p class="error">${escapeHtml(error.message)}</p>`;
+  } finally {
+    if (routeController === controller) content.setAttribute("aria-busy", "false");
+  }
+  if (routeController !== controller) return;
   window.scrollTo({top: 0, left: 0, behavior: "auto"});
   content.focus({preventScroll: true});
 }

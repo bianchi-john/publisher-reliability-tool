@@ -30,7 +30,7 @@ Only `state/*.csv` is authoritative. Articles and publishers are derived views
 over prediction runs. `dataset/predictions/predictions.csv` is an additional
 inspectable, recoverable mirror of locally inferred runs, not an eighth
 authoritative ledger. Uploads, staging files, managed model artifact bytes,
-indexes, logs, and the writer lock are operational; losing managed artifact
+logs, and the writer lock are operational; losing managed artifact
 bytes disables new inference but does not lose historical scientific records.
 
 A fresh store exists only when `state/` is absent. The application then creates
@@ -76,44 +76,30 @@ IDs and immutable rows are never reused for another scientific result.
 One process holds `.writer.lock`; a process mutex serializes all writes.
 
 Immutable ledgers (`prediction_runs.csv`, `evaluations.csv`, `imports.csv`) use
-one complete CSV record append followed by flush/fsync. A malformed incomplete
-final physical record can therefore be backed up and removed at startup. A
-malformed middle record, duplicate immutable ID, invalid reference, or invalid
-scientific value is `STORAGE_ERROR` and is not guessed or repaired.
-
-Tail recovery is planned read-only: the verifier first confirms that every
-other complete record/file is valid and that the malformed bytes are only the
-last logical record. It mutates nothing if another error exists. Likewise, a
-pending-import marker and every available target/prepared digest are validated
-as one recovery plan before the first roll-forward rename.
+one complete CSV record append followed by flush/fsync. Any malformed record,
+including a truncated final record, is `STORAGE_ERROR`; startup does not guess,
+trim, or silently repair authoritative state.
 
 Small mutable ledgers (`models.csv`, `jobs.csv`, `local_content.csv`) are loaded
 as keyed maps. An update writes the complete new ledger to `<name>.tmp`, verifies
 it, flushes/fsyncs it, and replaces the live file atomically. A leftover valid
-temporary file is ignored and removed at startup because the live filename is
-the only committed mutable state.
+temporary file is not authoritative because the live filename is the only
+committed mutable state.
 
-Import is the one multi-file operation. Parsing writes projected rows under a
-private staging directory. After full conflict validation, the importer writes
-complete replacement candidates for `prediction_runs.csv`, `imports.csv`, and
-`models.csv`, fsyncs them, and writes `staging/import.pending.json` containing
-the import ID, three target names, and their SHA-256 digests. It then replaces
-the three targets and removes the marker. On startup, each target that already
-has its recorded digest is complete; otherwise its still-present prepared file
-must match and is installed. If neither copy matches, startup fails closed.
-This small, import-specific roll-forward rule replaces a generic transaction
-system.
-
-During the three normal replacements the process write mutex is held and API
-reads continue using the previous immutable in-memory index generation. Only
-after all replacements and fsyncs succeed does one pointer swap expose the new
-runs/import/models together. A crash exposes no HTTP process; startup completes
-marker recovery before rebuilding indexes.
+Import deliberately avoids a transaction protocol. The complete source is
+parsed and conflict-checked first; then `models.csv`, `prediction_runs.csv`, and
+`imports.csv` are replaced in that order. Model, run, and import identities are
+deterministic, so submitting the same complete source again converges without
+duplicate scientific rows. An interruption can leave a prefix of those three
+replacements visible. The bundled source is retried automatically at startup
+when its import row is absent; an interrupted user import is retried by
+uploading the same file again. This limited behavior is intentional for a
+single-user paper prototype.
 
 Minimum commit units are deliberately explicit:
 
-- import: the marker-controlled replacement of runs, imports, and historical
-  models;
+- import: three deterministic complete-file replacements after full source
+  validation;
 - new prediction: one append-only prediction-run row followed by an idempotent
   schema-2 dataset mirror update keyed by `prediction_run_id`;
 - publisher evaluation: one append-only evaluation row referencing already
@@ -132,10 +118,11 @@ sibling temporary file, flushed/fsynced and replaced; `manifest.json` is then
 refreshed with the new part checksum and origin counts. The original dataset
 content digest is calculated only over the legacy scientific columns of
 `dataset_original` rows, so local additions do not change the release identity.
-Startup imports only original rows, restores any missing
-`user_evaluation` run into state, and synchronizes state back to the mirror.
-Repeated synchronization adds nothing when a `prediction_run_id` is already
-present.
+At startup, valid schema-2 CSV content may repair stale mutable manifest
+metadata only when the immutable original digest is unchanged. Startup then
+imports only original rows, restores any missing `user_evaluation` run into
+state, and synchronizes state back to the mirror. Repeated synchronization adds
+nothing when a `prediction_run_id` is already present.
 
 No compaction, record versions, tombstones, transaction ledger, commit
 sequence, or pagination snapshot is part of schema version 1.
@@ -264,8 +251,8 @@ The persisted job-type registry is: `evaluation`, `dataset_import`,
   `PROCESS_INTERRUPTED`. A queued evaluation remains queued. A queued upload-
   based import/model validation remains queued only while its opaque relative
   acquired-source identifier resolves to the expected private file; otherwise
-  it also fails `PROCESS_INTERRUPTED`. Running-job and orphan upload files are
-  deleted after pending-import recovery.
+  it fails `PROCESS_INTERRUPTED` when dequeued. Terminal job cleanup deletes its
+  acquired upload.
 
 A validated model upload is first atomically moved below `managed-models/` and
 then registered by a complete `models.csv` replacement. A stop between these
@@ -310,21 +297,24 @@ resolution finishes over the complete staged source before the three-file
 publish, so a late conflict cannot leave an earlier occurrence visible.
 
 The default user upload limit is 512 MiB and 300,000 source rows. Parsing is
-incremental, but the demo may use disk staging and bounded in-memory conflict
-maps; arbitrary multi-gigabyte operation is not supported.
+incremental at the CSV reader boundary, while candidates and conflict maps are
+bounded in memory by that row limit; arbitrary multi-gigabyte operation is not
+supported.
 CLI/import processing never opens a source path for writing and preserves its
 bytes and modification time.
 
 ## 7. Verification, backup, and recovery
 
-Startup/storage verify checks exact headers, UTF-8/CSV structure, ID derivation,
-unique IDs, model/run/evaluation references, probabilities, JSON types, and the
-import marker. It rebuilds disposable indexes only after these checks pass.
+Startup/storage verify checks exact headers, UTF-8/CSV structure, unique
+identifiers, and model/run/evaluation references. Scientific numeric values,
+URL identities, and JSON payloads are validated by their ingestion/service
+boundaries; the dataset verifier additionally checks probabilities, origin
+counts, and checksums. Structural corruption fails closed.
 
 A backup is a stopped-server copy of the complete data directory. Restore means
 placing that copy at the configured path and running `storage verify`. The
-application creates a timestamped copy only before trimming a malformed final
-append record. It does not rotate, compact, or rewrite backups.
+application does not trim malformed records, rotate backups, or compact
+ledgers.
 
 Purge affects active `local_content.csv` only. Users must manually delete any
 backup or external copy that should no longer contain saved title/body.

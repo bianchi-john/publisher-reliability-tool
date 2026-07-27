@@ -53,6 +53,8 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
             "At least two compatible article predictions are required.",
         )
     classes = [int(run["predicted_class"]) for run in selected]
+    if any(value not in range(5) for value in classes):
+        raise AppError("STORAGE_ERROR", "A prediction contains an invalid class.")
 
     if method == "majority_vote":
         counts = Counter(classes)
@@ -85,7 +87,19 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
                     "PROBABILITIES_REQUIRED",
                     "This aggregation method requires complete probabilities.",
                 )
-            vectors.append([float(value) for value in values])
+            vector = [float(value) for value in values]
+            if (
+                any(
+                    not math.isfinite(value) or value < 0 or value > 1
+                    for value in vector
+                )
+                or abs(sum(vector) - 1) > 1e-5
+            ):
+                raise AppError(
+                    "STORAGE_ERROR",
+                    "A prediction contains an invalid probability vector.",
+                )
+            vectors.append(vector)
         means = [
             sum(vector[index] for vector in vectors) / len(vectors)
             for index in range(5)
@@ -101,4 +115,3 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
         }
 
     raise AppError("INVALID_INPUT", "Unknown aggregation method.")
-

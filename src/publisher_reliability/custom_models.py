@@ -28,6 +28,31 @@ REQUIRED_FILES = {
     "prt-model.json",
     "tokenizer_config.json",
 }
+SUPPORTED_CUSTOM_MODEL_TYPES = {
+    "albert",
+    "bert",
+    "camembert",
+    "deberta",
+    "deberta-v2",
+    "distilbert",
+    "electra",
+    "modernbert",
+    "mpnet",
+    "rembert",
+    "roberta",
+    "xlm-roberta",
+}
+
+
+def _require_supported_model_type(model_type: object) -> str:
+    value = str(model_type)
+    if value not in SUPPORTED_CUSTOM_MODEL_TYPES:
+        raise AppError(
+            "INVALID_INPUT",
+            "Custom models must use a supported encoder-only classifier architecture.",
+            {"supported_model_types": sorted(SUPPORTED_CUSTOM_MODEL_TYPES)},
+        )
+    return value
 
 
 def _json_file(path: Path) -> dict[str, object]:
@@ -113,7 +138,9 @@ def _safe_extract(
 def directory_identity(root: Path) -> tuple[str, list[dict[str, object]]]:
     entries = []
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
-        if not path.is_file() or path.is_symlink():
+        if path.is_symlink():
+            raise OSError("Managed model bundles cannot contain symbolic links.")
+        if not path.is_file():
             continue
         digest = hashlib.sha256()
         with path.open("rb") as stream:
@@ -173,7 +200,7 @@ def _manifest(root: Path) -> dict[str, object]:
     return manifest
 
 
-def _validate_transformer(root: Path) -> dict[str, object]:
+def _validate_transformer(root: Path, *, max_tokens: int) -> dict[str, object]:
     missing = sorted(name for name in REQUIRED_FILES if not (root / name).is_file())
     if missing:
         raise AppError(
@@ -203,8 +230,18 @@ def _validate_transformer(root: Path) -> dict[str, object]:
             local_files_only=True,
             trust_remote_code=False,
         )
+        _require_supported_model_type(config.model_type)
         if config.num_labels != 5:
             raise ValueError("configuration must declare exactly five labels")
+        maximum_positions = getattr(config, "max_position_embeddings", None)
+        if (
+            isinstance(maximum_positions, int)
+            and maximum_positions > 0
+            and max_tokens > maximum_positions
+        ):
+            raise ValueError(
+                f"max_tokens exceeds the architecture limit ({maximum_positions})"
+            )
         AutoTokenizer.from_pretrained(
             root,
             local_files_only=True,
@@ -264,7 +301,10 @@ def import_custom_transformer_bundle(
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
         manifest = _manifest(root)
-        validation = _validate_transformer(root)
+        validation = _validate_transformer(
+            root,
+            max_tokens=int(manifest["max_tokens"]),
+        )
         artifact_digest, entries = directory_identity(root)
         identity = {
             "identity_kind": "custom_transformer_bundle",

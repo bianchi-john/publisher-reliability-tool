@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,11 +35,41 @@ from .storage import Storage, json_field, utc_now
 
 
 FAMILIES = ("bert", "roberta")
+MAX_SOURCE_LINE_CHARS = 16 * 1024 * 1024
 EDITORIAL_COLUMNS = {"title", "text", "authors"}
 PROTECTED_COLUMNS = {
     "score", "country", "language", "topics", "paywall",
     "opinion_advocacy", "label",
 }
+
+
+class LimitedTextLines:
+    """Yield bounded physical CSV lines while counting decompressed UTF-8 bytes."""
+
+    def __init__(self, stream: TextIO, max_bytes: int):
+        self.stream = stream
+        self.max_bytes = max_bytes
+        self.bytes_read = 0
+
+    def __iter__(self) -> "LimitedTextLines":
+        return self
+
+    def __next__(self) -> str:
+        line = self.stream.readline(MAX_SOURCE_LINE_CHARS + 1)
+        if line == "":
+            raise StopIteration
+        if len(line) > MAX_SOURCE_LINE_CHARS:
+            raise AppError(
+                "PAYLOAD_TOO_LARGE",
+                "Dataset contains a physical CSV line larger than 16 MiB.",
+            )
+        self.bytes_read += len(line.encode("utf-8"))
+        if self.bytes_read > self.max_bytes:
+            raise AppError(
+                "PAYLOAD_TOO_LARGE",
+                "Dataset exceeds the decompressed byte limit.",
+            )
+        return line
 
 
 @dataclass(slots=True)
@@ -283,7 +314,10 @@ def _parse_candidates(
                     "IMPORT_INVALID", f"Row {source_rows} has invalid probabilities."
                 ) from exc
             if (
-                any(value < 0 or value > 1 for value in probabilities)
+                any(
+                    not math.isfinite(value) or value < 0 or value > 1
+                    for value in probabilities
+                )
                 or abs(sum(probabilities) - 1) > 1e-5
             ):
                 raise AppError(
@@ -314,6 +348,7 @@ def import_csv(
     release_id: str | None = None,
     known_content_digest: str | None = None,
     max_rows: int = 300_000,
+    max_decompressed_bytes: int = 536_870_912,
     legacy_bare_percent: bool = False,
 ) -> dict[str, str]:
     started = utc_now()
@@ -321,7 +356,9 @@ def import_csv(
     kind = source_kind or ("csv_gz" if source.name.lower().endswith(".csv.gz") else "csv")
     try:
         with open_csv(source) as stream:
-            reader = csv.DictReader(stream)
+            reader = csv.DictReader(
+                LimitedTextLines(stream, max_decompressed_bytes)
+            )
             if reader.fieldnames is None:
                 raise AppError("IMPORT_INVALID", "Dataset has no header.")
             candidates, source_rows, protected, digest_bytes = _parse_candidates(

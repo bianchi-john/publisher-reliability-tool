@@ -21,7 +21,11 @@ from .errors import AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
 from .model_scanner import scan_model_roots
-from .prediction_dataset import restore_user_predictions, sync_user_predictions
+from .prediction_dataset import (
+    reconcile_prediction_dataset,
+    restore_user_predictions,
+    sync_user_predictions,
+)
 from .services import ResearchService, paginate
 from .storage import Storage
 
@@ -88,33 +92,41 @@ def error_response(exc: AppError, request_id: str | None = None) -> JSONResponse
 def create_app(config: Config | None = None) -> FastAPI:
     settings = config or Config.from_env()
     storage = Storage(settings.data_dir)
-    bundled_import = import_bundled_release(storage, settings.seed_dataset)
-    startup_model_scan = scan_model_roots(storage, settings.models_dirs)
-    restored_user_predictions = restore_user_predictions(
-        storage,
-        settings.seed_dataset,
-    )
-    mirrored_user_predictions = sync_user_predictions(
-        settings.seed_dataset,
-        storage.rows["prediction_runs"],
-        {row["model_id"]: row for row in storage.rows["models"]},
-    )
-    service = ResearchService(
-        storage,
-        offline=settings.offline,
-        model_roots=settings.models_dirs,
-        device=settings.device,
-        prediction_dataset_dir=settings.seed_dataset,
-    )
-    jobs = JobManager(
-        storage,
-        service,
-        model_roots=(
-            *settings.models_dirs,
-            storage.data_dir / "managed-models",
-        ),
-        model_upload_max_bytes=settings.model_upload_max_bytes,
-    )
+    try:
+        reconciled_prediction_dataset = reconcile_prediction_dataset(
+            settings.seed_dataset
+        )
+        bundled_import = import_bundled_release(storage, settings.seed_dataset)
+        startup_model_scan = scan_model_roots(storage, settings.models_dirs)
+        restored_user_predictions = restore_user_predictions(
+            storage,
+            settings.seed_dataset,
+        )
+        mirrored_user_predictions = sync_user_predictions(
+            settings.seed_dataset,
+            storage.rows["prediction_runs"],
+            {row["model_id"]: row for row in storage.rows["models"]},
+        )
+        service = ResearchService(
+            storage,
+            offline=settings.offline,
+            model_roots=settings.models_dirs,
+            device=settings.device,
+            prediction_dataset_dir=settings.seed_dataset,
+        )
+        jobs = JobManager(
+            storage,
+            service,
+            model_roots=(
+                *settings.models_dirs,
+                storage.data_dir / "managed-models",
+            ),
+            dataset_upload_max_bytes=settings.dataset_upload_max_bytes,
+            model_upload_max_bytes=settings.model_upload_max_bytes,
+        )
+    except Exception:
+        storage.close()
+        raise
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -134,6 +146,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.service = service
     app.state.jobs = jobs
     app.state.bundled_import = bundled_import
+    app.state.reconciled_prediction_dataset = reconciled_prediction_dataset
     app.state.startup_model_scan = startup_model_scan
     app.state.restored_user_predictions = restored_user_predictions
     app.state.mirrored_user_predictions = mirrored_user_predictions
@@ -406,8 +419,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             raise
         finally:
             await file.close()
-        return {
-            "job_id": jobs.submit(
+        try:
+            job_id = jobs.submit(
                 "model_validation",
                 {
                     "source_upload_id": token,
@@ -415,7 +428,10 @@ def create_app(config: Config | None = None) -> FastAPI:
                     "bundle_kind": "custom_transformer",
                 },
             )
-        }
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        return {"job_id": job_id}
 
     @app.post("/api/v1/evaluation-jobs", status_code=202)
     async def evaluation_job(body: EvaluationRequest):
@@ -479,12 +495,15 @@ def create_app(config: Config | None = None) -> FastAPI:
             raise
         finally:
             await file.close()
-        return {
-            "job_id": jobs.submit(
+        try:
+            job_id = jobs.submit(
                 "dataset_import",
                 {"source_upload_id": token, "source_name": filename},
             )
-        }
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        return {"job_id": job_id}
 
     @app.get("/api/v1/aggregation-methods")
     async def aggregation_methods():
