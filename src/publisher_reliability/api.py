@@ -6,6 +6,7 @@ import shutil
 import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, Union
 
@@ -24,7 +25,6 @@ from .jobs import JobManager
 from .model_scanner import scan_model_roots
 from .official_models import official_catalog
 from .prediction_dataset import (
-    reconcile_prediction_dataset,
     restore_user_predictions,
     sync_user_predictions,
 )
@@ -91,17 +91,37 @@ def error_response(exc: AppError, request_id: str | None = None) -> JSONResponse
     )
 
 
-def create_app(
-    config: Config | None = None,
-    *,
+@dataclass(frozen=True)
+class Workspace:
+    """Persistent state and services, opened once when the application starts."""
+
+    storage: Storage
+    service: ResearchService
+    jobs: JobManager
+    bundled_import: dict[str, str] | None
+    startup_model_scan: dict[str, object]
+    restored_user_predictions: object
+    mirrored_user_predictions: object
+
+
+def _open_workspace(
+    settings: Config,
     on_scan_progress: Callable[[str], None] | None = None,
-) -> FastAPI:
-    settings = config or Config.from_env()
+) -> Workspace:
+    """Open the data directory and bring it in step with what is on disk.
+
+    The order is deliberate. The bundled release is imported before checkpoints are
+    scanned, so the scan reconciles local files against a ledger that already holds the
+    historical model identities. User predictions are restored from their private
+    mirror file before that mirror is rewritten from the ledger, so runs created in an
+    earlier session survive a restart instead of being overwritten.
+
+    Any failure closes the storage lock again: a half-opened workspace would keep the
+    data directory locked against the next attempt.
+    """
+
     storage = Storage(settings.data_dir)
     try:
-        reconciled_prediction_dataset = reconcile_prediction_dataset(
-            settings.seed_dataset
-        )
         bundled_import = import_bundled_release(storage, settings.seed_dataset)
         startup_model_scan = scan_model_roots(
             storage, settings.models_dirs, on_progress=on_scan_progress
@@ -135,6 +155,29 @@ def create_app(
     except Exception:
         storage.close()
         raise
+    return Workspace(
+        storage=storage,
+        service=service,
+        jobs=jobs,
+        bundled_import=bundled_import,
+        startup_model_scan=startup_model_scan,
+        restored_user_predictions=restored_user_predictions,
+        mirrored_user_predictions=mirrored_user_predictions,
+    )
+
+
+def create_app(
+    config: Config | None = None,
+    *,
+    on_scan_progress: Callable[[str], None] | None = None,
+) -> FastAPI:
+    """Build the loopback-only application over a freshly opened workspace."""
+
+    settings = config or Config.from_env()
+    workspace = _open_workspace(settings, on_scan_progress)
+    storage = workspace.storage
+    service = workspace.service
+    jobs = workspace.jobs
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -153,14 +196,16 @@ def create_app(
     app.state.storage = storage
     app.state.service = service
     app.state.jobs = jobs
-    app.state.bundled_import = bundled_import
-    app.state.reconciled_prediction_dataset = reconciled_prediction_dataset
-    app.state.startup_model_scan = startup_model_scan
-    app.state.restored_user_predictions = restored_user_predictions
-    app.state.mirrored_user_predictions = mirrored_user_predictions
+    app.state.bundled_import = workspace.bundled_import
+    app.state.startup_model_scan = workspace.startup_model_scan
+    app.state.restored_user_predictions = workspace.restored_user_predictions
+    app.state.mirrored_user_predictions = workspace.mirrored_user_predictions
 
     @app.middleware("http")
     async def local_host_boundary(request: Request, call_next):
+        # The socket already listens on loopback only; matching the Host header as well
+        # defeats DNS rebinding, where a public name resolves to 127.0.0.1 and a remote
+        # page then drives this API through the user's own browser.
         host = request.headers.get("host", "")
         expected = f"127.0.0.1:{settings.port}"
         if host != expected:
@@ -189,6 +234,8 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def internal_error_handler(request: Request, _exc: Exception):
+        # The cause is deliberately dropped: a traceback or path would leak local
+        # filesystem layout into an HTTP response.
         return error_response(
             AppError("INTERNAL_ERROR", "The request failed unexpectedly."),
             getattr(request.state, "request_id", None),
@@ -225,7 +272,7 @@ def create_app(
             "schema_version": SCHEMA_VERSION,
             "offline": settings.offline,
             "device": settings.device,
-            "bundled_import": bundled_import,
+            "bundled_import": workspace.bundled_import,
             "ledger_counts": counts,
             "derived_counts": {
                 "articles": len(
@@ -264,7 +311,7 @@ def create_app(
         sort: Literal["updated_desc", "url_asc"] = "updated_desc",
     ):
         return PlainTextResponse(
-            service.export_articles(
+            service.export_predictions(
                 q=q,
                 publisher=publisher,
                 model_id=model_id,
@@ -274,7 +321,9 @@ def create_app(
                 sort=sort,
             ),
             media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": 'attachment; filename="articles.csv"'},
+            headers={
+                "Content-Disposition": 'attachment; filename="article-predictions.csv"'
+            },
         )
 
     @app.get("/api/v1/articles")
@@ -413,8 +462,11 @@ def create_app(
                 "INVALID_INPUT",
                 "Custom model upload must be a self-contained .zip bundle.",
             )
+        # A generated token, never the client's filename, names the temporary file.
         token = f"{uuid.uuid4()}.model.zip"
         destination = storage.data_dir / "uploads" / token
+        # Counted while streaming: the declared Content-Length cannot be trusted, and
+        # the upload must stop at the limit rather than after the disk is full.
         total = 0
         try:
             with destination.open("xb") as output:
@@ -432,6 +484,7 @@ def create_app(
         finally:
             await file.close()
         try:
+            # If the job cannot be queued, the acquired file would otherwise be orphaned.
             job_id = jobs.submit(
                 "model_validation",
                 {

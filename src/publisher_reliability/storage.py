@@ -112,6 +112,13 @@ class Storage:
         self.close()
 
     def _initialize_or_validate(self) -> None:
+        """Create the seven ledgers, or refuse to open a directory that is not them.
+
+        Partial or unexpected state fails closed rather than being repaired: silently
+        recreating a missing ledger would hide data loss behind an apparently healthy
+        start, and the ledgers are the only record this workspace keeps.
+        """
+
         if not self.state_dir.exists():
             self.state_dir.mkdir()
             for name, header in HEADERS.items():
@@ -152,6 +159,13 @@ class Storage:
         return self.state_dir / f"{name}.csv"
 
     def reload(self) -> None:
+        """Read every ledger into memory, rejecting any file that is not intact.
+
+        The whole dataset is small enough to hold in memory, which keeps reads simple
+        and lets a malformed row stop startup instead of surfacing much later as a
+        confusing query result.
+        """
+
         loaded: dict[str, list[dict[str, str]]] = {}
         for name in HEADERS:
             try:
@@ -170,6 +184,13 @@ class Storage:
 
     @staticmethod
     def _validate_unique_ids(rows: dict[str, list[dict[str, str]]]) -> None:
+        """Enforce the referential rules a database would normally provide.
+
+        Identifiers must be unique, and a run or evaluation must point at records that
+        exist: a prediction whose model is gone could no longer be reproduced, which is
+        the one property this tool exists to guarantee.
+        """
+
         keys = {
             "models": "model_id",
             "prediction_runs": "prediction_run_id",
@@ -203,6 +224,13 @@ class Storage:
         return {name: len(rows) for name, rows in self.rows.items()}
 
     def append(self, name: str, row: dict[str, object]) -> None:
+        """Add one row to an append-only ledger and flush it to disk.
+
+        Scientific records are never edited in place, so history stays auditable. The
+        explicit fsync means a completed prediction survives a crash immediately after
+        it was reported, rather than sitting in a buffer.
+        """
+
         if name not in IMMUTABLE:
             raise ValueError("append is reserved for immutable ledgers")
         normalized = self._normalized_row(name, row)
@@ -220,6 +248,13 @@ class Storage:
                 raise AppError("STORAGE_ERROR", f"Could not append {name}.csv.") from exc
 
     def replace(self, name: str, rows: Iterable[dict[str, object]]) -> None:
+        """Rewrite a whole ledger atomically.
+
+        The new content is written to a temporary file, flushed, and only then renamed
+        over the original, so a crash leaves either the complete old file or the
+        complete new one: a reader can never observe a half-written ledger.
+        """
+
         if name not in MUTABLE and name not in IMMUTABLE:
             raise ValueError("unknown ledger")
         normalized = [self._normalized_row(name, row) for row in rows]
@@ -243,6 +278,12 @@ class Storage:
                 raise AppError("STORAGE_ERROR", f"Could not replace {name}.csv.") from exc
 
     def upsert(self, name: str, key: str, row: dict[str, object]) -> None:
+        """Insert or update one row of a mutable ledger.
+
+        Only derived state (models, jobs, saved content) is mutable; the immutable
+        ledgers reject this path so a prediction can never be rewritten after the fact.
+        """
+
         if name not in MUTABLE:
             raise ValueError("upsert is reserved for mutable ledgers")
         value = str(row[key])

@@ -10,6 +10,7 @@ import json
 import re
 import socket
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -216,6 +217,13 @@ class InferenceEngine:
         self._loaded_device = "cpu"
 
     def _artifact_path(self, model: dict[str, str]) -> Path:
+        """Resolve a model's artifact and re-verify its digest before every load.
+
+        The locator is relative to a configured root and is re-checked here, so a
+        symlink, an escape outside the root, or a file edited since registration is
+        refused rather than loaded under an identity it no longer matches.
+        """
+
         if model["artifact_kind"] in MANAGED_ARTIFACT_KINDS:
             candidate = self.storage.data_dir / model["artifact_locator"]
             if candidate.is_symlink():
@@ -283,12 +291,238 @@ class InferenceEngine:
             return "cuda"
         return "cpu"
 
-    def _load(self, model_row: dict[str, str]) -> tuple[object, object, str]:
+    def _release_loaded_model(self) -> None:
+        """Drop the resident model before loading another one.
+
+        Only one checkpoint stays in memory at a time: two encoders, let alone a
+        quantized 24B adapter, do not fit beside each other on the workstation this
+        demo targets.
+        """
+
+        import torch
+
+        self._model = None
+        self._tokenizer = None
+        self._loaded_model_id = ""
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _load_custom_bundle(self, path: Path) -> tuple[object, object, bool]:
+        """Load a user-supplied Transformers bundle from its installed directory.
+
+        Everything is read locally with remote code disabled, so an imported bundle
+        can never execute its own Python or reach the network at load time.
+        """
+
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            path,
+            local_files_only=True,
+            trust_remote_code=False,
+        )
+        loaded_model = AutoModelForSequenceClassification.from_pretrained(
+            path,
+            local_files_only=True,
+            trust_remote_code=False,
+            use_safetensors=True,
+        )
+        return loaded_model, tokenizer, False
+
+    def _load_quantized_adapter(
+        self, model_row: dict[str, str], path: Path
+    ) -> tuple[object, object, bool]:
+        """Load a Llama or Mistral LoRA adapter over its pinned 4-bit base model.
+
+        The base weights are never redistributed with this tool: they are fetched from
+        the exact pinned revision and cached locally, and the adapter is applied on
+        top. Accelerate places the quantized base across devices itself, which is why
+        the caller is told not to move the model afterwards.
+        """
+
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        if not torch.cuda.is_available():
+            raise AppError(
+                "MODEL_NOT_RUNNABLE",
+                "Llama and Mistral QLoRA inference requires a CUDA GPU.",
+            )
+        try:
+            from peft import LoraConfig, PeftModel, get_peft_model
+            from transformers import BitsAndBytesConfig
+        except ImportError as exc:
+            raise AppError(
+                "MODEL_NOT_RUNNABLE",
+                "Install the project 'llm-models' extra for Llama/Mistral inference.",
+            ) from exc
+        dependency_cache = self.storage.data_dir / "model-dependencies"
+        dependency_cache.mkdir(exist_ok=True)
+        quantization = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        tokenizer_source: str | Path = (
+            path
+            if model_row["artifact_kind"] in {
+                "paper_mistral_adapter_bundle",
+                "custom_peft_adapter_bundle",
+            }
+            else model_row["tokenizer_source"]
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_source,
+            revision=(
+                None
+                if isinstance(tokenizer_source, Path)
+                else model_row["tokenizer_revision"]
+            ),
+            cache_dir=dependency_cache,
+            local_files_only=(
+                True if isinstance(tokenizer_source, Path) else self.offline
+            ),
+            trust_remote_code=False,
+        )
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        loaded_model = AutoModelForSequenceClassification.from_pretrained(
+            model_row["base_model"],
+            revision=model_row["base_revision"],
+            cache_dir=dependency_cache,
+            local_files_only=self.offline,
+            trust_remote_code=False,
+            num_labels=5,
+            quantization_config=quantization,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
+        loaded_model.config.pad_token_id = tokenizer.pad_token_id
+        if model_row["artifact_kind"] == "paper_llama_state_dict_bundle":
+            loaded_model = get_peft_model(
+                loaded_model,
+                LoraConfig(
+                    r=8,
+                    lora_alpha=16,
+                    target_modules=[
+                        "q_proj",
+                        "k_proj",
+                        "v_proj",
+                        "o_proj",
+                        "gate_proj",
+                        "down_proj",
+                        "up_proj",
+                    ],
+                    lora_dropout=0.05,
+                    bias="none",
+                    task_type="SEQ_CLS",
+                ),
+            )
+            state = torch.load(
+                path / "model.pt",
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            )
+            loaded_model.load_state_dict(state, strict=True)
+        else:
+            loaded_model = PeftModel.from_pretrained(
+                loaded_model,
+                path,
+                is_trainable=False,
+            )
+        uses_device_map = True
+        return loaded_model, tokenizer, True
+
+    def _load_core_checkpoint(
+        self,
+        model_row: dict[str, str],
+        path: Path,
+        progress: Callable[[str], None],
+    ) -> tuple[object, object, bool]:
+        """Load a BERT or RoBERTa state dict into a freshly built architecture.
+
+        The architecture is constructed on the meta device and the weights are then
+        assigned from a memory-mapped file, so a multi-gigabyte checkpoint is never
+        held twice. Only the small tokenizer and configuration come from the pinned
+        remote revision; base-model weights are never downloaded.
+        """
+
+        import torch
+        from transformers import (
+            AutoTokenizer,
+            BertConfig,
+            BertForSequenceClassification,
+            RobertaConfig,
+            RobertaForSequenceClassification,
+        )
+
+        family = model_row["family"]
+        recipe = CORE_MODELS[family]
+        dependency_cache = self.storage.data_dir / "model-dependencies"
+        dependency_cache.mkdir(exist_ok=True)
+        progress("preparing the pinned tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(
+            recipe["base_model"],
+            revision=recipe["revision"],
+            cache_dir=dependency_cache,
+            local_files_only=self.offline,
+            trust_remote_code=False,
+        )
+        progress("loading the model weights")
+        if family == "bert":
+            config = BertConfig(num_labels=5)
+            model_class = BertForSequenceClassification
+        else:
+            config = RobertaConfig(
+                vocab_size=50265,
+                hidden_size=1024,
+                num_hidden_layers=24,
+                num_attention_heads=16,
+                intermediate_size=4096,
+                max_position_embeddings=514,
+                type_vocab_size=1,
+                num_labels=5,
+            )
+            model_class = RobertaForSequenceClassification
+        with torch.device("meta"):
+            loaded_model = model_class(config)
+        state = torch.load(
+            path,
+            map_location="cpu",
+            weights_only=True,
+            mmap=True,
+        )
+        loaded_model.load_state_dict(state, strict=True, assign=True)
+        self._materialize_transformer_buffers(loaded_model, config)
+        return loaded_model, tokenizer, False
+
+    def _load(
+        self,
+        model_row: dict[str, str],
+        on_progress: Callable[[str], None] | None = None,
+    ) -> tuple[object, object, str]:
+        """Return the model, tokenizer and device for one identity, loading if needed.
+
+        The checkpoint digest is re-verified on every load, so a file edited after it
+        was registered can never quietly produce a prediction under the old identity.
+        """
+
+        def progress(phase: str) -> None:
+            if on_progress is not None:
+                on_progress(phase)
+
         if self._loaded_model_id == model_row["model_id"]:
             return self._model, self._tokenizer, self._loaded_device
         try:
             import torch
-            from transformers import (
+
+            # Imported here as well as in the loaders below so that a missing or
+            # incomplete install fails with one actionable message instead of a
+            # generic loader error further down.
+            from transformers import (  # noqa: F401
                 AutoModelForSequenceClassification,
                 AutoTokenizer,
                 BertConfig,
@@ -302,160 +536,25 @@ class InferenceEngine:
                 "Install the project 'models' extra to run local inference.",
             ) from exc
 
-        self._model = None
-        self._tokenizer = None
-        self._loaded_model_id = ""
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self._release_loaded_model()
 
+        progress("verifying the checkpoint digest")
         path = self._artifact_path(model_row)
-        family = model_row["family"]
-        uses_device_map = False
         try:
             if model_row["artifact_kind"] == "custom_transformer_bundle":
-                tokenizer = AutoTokenizer.from_pretrained(
-                    path,
-                    local_files_only=True,
-                    trust_remote_code=False,
-                )
-                loaded_model = AutoModelForSequenceClassification.from_pretrained(
-                    path,
-                    local_files_only=True,
-                    trust_remote_code=False,
-                    use_safetensors=True,
-                )
+                loaded_model, tokenizer, uses_device_map = self._load_custom_bundle(path)
             elif model_row["artifact_kind"] in {
                 "paper_llama_state_dict_bundle",
                 "paper_mistral_adapter_bundle",
                 "custom_peft_adapter_bundle",
             }:
-                if not torch.cuda.is_available():
-                    raise AppError(
-                        "MODEL_NOT_RUNNABLE",
-                        "Llama and Mistral QLoRA inference requires a CUDA GPU.",
-                    )
-                try:
-                    from peft import LoraConfig, PeftModel, get_peft_model
-                    from transformers import BitsAndBytesConfig
-                except ImportError as exc:
-                    raise AppError(
-                        "MODEL_NOT_RUNNABLE",
-                        "Install the project 'llm-models' extra for Llama/Mistral inference.",
-                    ) from exc
-                dependency_cache = self.storage.data_dir / "model-dependencies"
-                dependency_cache.mkdir(exist_ok=True)
-                quantization = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_compute_dtype=torch.bfloat16,
+                loaded_model, tokenizer, uses_device_map = self._load_quantized_adapter(
+                    model_row, path
                 )
-                tokenizer_source: str | Path = (
-                    path
-                    if model_row["artifact_kind"] in {
-                        "paper_mistral_adapter_bundle",
-                        "custom_peft_adapter_bundle",
-                    }
-                    else model_row["tokenizer_source"]
+            elif model_row["family"] in CORE_MODELS:
+                loaded_model, tokenizer, uses_device_map = self._load_core_checkpoint(
+                    model_row, path, progress
                 )
-                tokenizer = AutoTokenizer.from_pretrained(
-                    tokenizer_source,
-                    revision=(
-                        None
-                        if isinstance(tokenizer_source, Path)
-                        else model_row["tokenizer_revision"]
-                    ),
-                    cache_dir=dependency_cache,
-                    local_files_only=(
-                        True if isinstance(tokenizer_source, Path) else self.offline
-                    ),
-                    trust_remote_code=False,
-                )
-                if tokenizer.pad_token_id is None:
-                    tokenizer.pad_token = tokenizer.eos_token
-                loaded_model = AutoModelForSequenceClassification.from_pretrained(
-                    model_row["base_model"],
-                    revision=model_row["base_revision"],
-                    cache_dir=dependency_cache,
-                    local_files_only=self.offline,
-                    trust_remote_code=False,
-                    num_labels=5,
-                    quantization_config=quantization,
-                    device_map="auto",
-                    torch_dtype=torch.bfloat16,
-                )
-                loaded_model.config.pad_token_id = tokenizer.pad_token_id
-                if model_row["artifact_kind"] == "paper_llama_state_dict_bundle":
-                    loaded_model = get_peft_model(
-                        loaded_model,
-                        LoraConfig(
-                            r=8,
-                            lora_alpha=16,
-                            target_modules=[
-                                "q_proj",
-                                "k_proj",
-                                "v_proj",
-                                "o_proj",
-                                "gate_proj",
-                                "down_proj",
-                                "up_proj",
-                            ],
-                            lora_dropout=0.05,
-                            bias="none",
-                            task_type="SEQ_CLS",
-                        ),
-                    )
-                    state = torch.load(
-                        path / "model.pt",
-                        map_location="cpu",
-                        weights_only=True,
-                        mmap=True,
-                    )
-                    loaded_model.load_state_dict(state, strict=True)
-                else:
-                    loaded_model = PeftModel.from_pretrained(
-                        loaded_model,
-                        path,
-                        is_trainable=False,
-                    )
-                uses_device_map = True
-            elif family in CORE_MODELS:
-                recipe = CORE_MODELS[family]
-                dependency_cache = self.storage.data_dir / "model-dependencies"
-                dependency_cache.mkdir(exist_ok=True)
-                tokenizer = AutoTokenizer.from_pretrained(
-                    recipe["base_model"],
-                    revision=recipe["revision"],
-                    cache_dir=dependency_cache,
-                    local_files_only=self.offline,
-                    trust_remote_code=False,
-                )
-                if family == "bert":
-                    config = BertConfig(num_labels=5)
-                    model_class = BertForSequenceClassification
-                else:
-                    config = RobertaConfig(
-                        vocab_size=50265,
-                        hidden_size=1024,
-                        num_hidden_layers=24,
-                        num_attention_heads=16,
-                        intermediate_size=4096,
-                        max_position_embeddings=514,
-                        type_vocab_size=1,
-                        num_labels=5,
-                    )
-                    model_class = RobertaForSequenceClassification
-                with torch.device("meta"):
-                    loaded_model = model_class(config)
-                state = torch.load(
-                    path,
-                    map_location="cpu",
-                    weights_only=True,
-                    mmap=True,
-                )
-                loaded_model.load_state_dict(state, strict=True, assign=True)
-                self._materialize_transformer_buffers(loaded_model, config)
             else:
                 raise AppError(
                     "MODEL_NOT_RUNNABLE",
@@ -464,6 +563,7 @@ class InferenceEngine:
         except AppError:
             raise
         except OSError as exc:
+            # Only the pinned tokenizer and configuration are ever fetched remotely.
             code = "NETWORK_REQUIRED" if self.offline else "NETWORK_ERROR"
             raise AppError(
                 code,
@@ -477,6 +577,8 @@ class InferenceEngine:
                 "The local model could not be loaded with its validated recipe.",
             ) from exc
 
+        # A device-mapped model is already placed by accelerate; moving it would undo
+        # that placement and can exhaust GPU memory.
         selected_device = "cuda" if uses_device_map else self._selected_device(torch)
         if selected_device != "cpu" and not uses_device_map:
             loaded_model = loaded_model.to(selected_device)
@@ -487,8 +589,25 @@ class InferenceEngine:
         self._loaded_device = selected_device
         return loaded_model, tokenizer, selected_device
 
-    def predict(self, model_row: dict[str, str], text: str) -> Prediction:
-        model, tokenizer, device = self._load(model_row)
+    def predict(
+        self,
+        model_row: dict[str, str],
+        text: str,
+        *,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> Prediction:
+        """Classify one article text and return five calibrated-looking probabilities.
+
+        Tokenization follows the identity recorded for the model rather than library
+        defaults, because the maximum length and padding policy are part of what makes
+        a prediction reproducible. The result is rejected unless it is five finite
+        probabilities summing to one: a model that returns anything else is not the
+        classifier this identity claims.
+        """
+
+        model, tokenizer, device = self._load(model_row, on_progress)
+        if on_progress is not None:
+            on_progress("classifying the article text")
         import torch
 
         max_tokens = int(model_row.get("max_tokens") or 256)

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,9 +18,27 @@ from publisher_reliability.storage import HEADERS, Storage
 
 
 class FakeInferenceEngine:
-    def predict(self, _model: dict[str, str], text: str) -> Prediction:
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+
+    def predict(
+        self,
+        _model: dict[str, str],
+        text: str,
+        *,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> Prediction:
         if "article body" not in text:
             raise AssertionError("unexpected extracted text")
+        if on_progress is not None:
+            for phase in (
+                "verifying the checkpoint digest",
+                "preparing the pinned tokenizer",
+                "loading the model weights",
+                "classifying the article text",
+            ):
+                on_progress(phase)
+                self.phases.append(phase)
         return Prediction(
             predicted_class=2,
             probabilities=(0.05, 0.1, 0.7, 0.1, 0.05),
@@ -145,6 +164,7 @@ class InferenceServiceTest(unittest.TestCase):
                     title="Example",
                     text="English article body " * 40,
                 )
+                reported: list[tuple[str, int]] = []
                 with patch(
                     "publisher_reliability.services.fetch_article",
                     return_value=retrieved,
@@ -160,7 +180,27 @@ class InferenceServiceTest(unittest.TestCase):
                             "content_retention": "discard",
                         },
                         "inference-job",
+                        on_progress=lambda phase, progress: reported.append(
+                            (phase, progress)
+                        ),
                     )
+
+                self.assertEqual(
+                    [phase for phase, _ in reported],
+                    [
+                        "checking the selected model",
+                        "retrieving and extracting the article page",
+                        "verifying the checkpoint digest",
+                        "preparing the pinned tokenizer",
+                        "loading the model weights",
+                        "classifying the article text",
+                        "saving the prediction",
+                        "saving the result",
+                    ],
+                )
+                percentages = [progress for _, progress in reported]
+                self.assertEqual(percentages, sorted(percentages))
+                self.assertTrue(all(0 < value < 100 for value in percentages))
 
                 self.assertFalse(result["reused"])
                 self.assertEqual(result["predicted_class"], 2)

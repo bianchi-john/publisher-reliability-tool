@@ -40,6 +40,12 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        """Read configuration from the environment, with demo-friendly defaults.
+
+        Every value has a working default so the tool starts with no configuration at
+        all; the environment only has to name what differs from the bundled layout.
+        """
+
         model_roots = os.environ.get("PRT_MODELS_DIR", "./models").split(os.pathsep)
         config = cls(
             port=_integer("PRT_PORT", "8000"),

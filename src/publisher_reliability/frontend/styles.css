@@ -65,8 +65,25 @@ a { color: inherit; }
 }
 .brand strong { font-family: "Times New Roman", Times, serif; font-weight: 400; }
 .brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
-.system-state { padding: 7px 11px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 13px; }
+.topbar-actions { position: relative; display: flex; align-items: center; gap: 10px; }
+.system-state {
+  min-height: auto; padding: 7px 11px; border: none; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+}
+.system-state:hover, .system-state[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
+.system-popover {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 20;
+  width: min(320px, 90vw); padding: 16px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); box-shadow: var(--shadow);
+}
+.popover-section { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--row-line); }
+.popover-section:last-of-type { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.popover-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 4px 0; font-size: 13px; }
+.popover-row span { color: var(--muted); }
+.popover-link { display: block; margin-top: 10px; color: var(--accent); font-weight: 650; text-decoration: none; }
+@media (max-width: 480px) {
+  .system-popover { position: fixed; top: 76px; right: 16px; left: 16px; width: auto; }
+}
 .shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 112px); }
 nav { padding: 28px 18px; border-right: 1px solid var(--line); }
 nav a { display: block; padding: 10px 13px; margin-bottom: 3px; border-radius: 9px; text-decoration: none; color: var(--nav-ink); }
@@ -87,6 +104,8 @@ p { max-width: 760px; }
 .muted, .empty { color: var(--muted); }
 .warning { padding: 16px 18px; border-left: 4px solid var(--warning); border-radius: 8px; background: var(--warning-bg); color: var(--warning-ink); }
 .toolbar, form .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+form .row + .row, form .row + .notice, form .notice + .row { margin-top: 18px; }
+form .row.evaluation-actions { align-items: center; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 label { display: grid; gap: 5px; color: var(--nav-ink); font-size: 13px; font-weight: 600; }
 label small { max-width: 330px; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
 input, select, textarea, button {
@@ -149,6 +168,23 @@ tr:last-child td { border-bottom: 0; }
 .probability-track span { display: block; height: 100%; border-radius: inherit; background: var(--track-fill); }
 .probability-result.predicted .probability-track span { background: var(--accent); }
 .notice { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
+.notice-warning { border-color: var(--warning); background: var(--warning-bg); color: var(--warning-ink); }
+.error-card {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 18px;
+  padding: 14px 16px; border: 1px solid var(--red); border-radius: 10px;
+  background: var(--failed-bg); color: var(--red); font-weight: 650;
+}
+.error-card:first-child { margin-top: 0; }
+.error-icon {
+  display: grid; place-items: center; flex: none; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--red); color: var(--on-accent); font-size: 12px; font-weight: 800;
+}
+#evaluation-result:not(:empty) { margin-top: 34px; }
+.progress-card { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.progress-card:first-child { margin-top: 0; }
+.progress-message { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--nav-ink); font-weight: 650; }
+.progress-track { height: 10px; overflow: hidden; border-radius: 999px; background: var(--track); }
+.progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s ease; }
 .section-block { margin-top: 30px; }
 .section-block > summary { cursor: pointer; margin-bottom: 16px; font: 400 20px/1.25 "Times New Roman", Times, serif; }
 .detail-link { color: var(--accent); font-weight: 650; text-decoration-thickness: 1px; text-underline-offset: 3px; }

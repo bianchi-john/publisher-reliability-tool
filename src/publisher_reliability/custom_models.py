@@ -82,6 +82,14 @@ def _safe_extract(
     *,
     max_uncompressed_bytes: int,
 ) -> Path:
+    """Extract an uploaded ZIP, refusing anything that could escape or exhaust disk.
+
+    A bundle arrives from outside the tool, so the archive is treated as hostile:
+    absolute paths, parent traversal, backslashes, symlinks, special files, encrypted
+    entries and excessive nesting are all rejected before a byte is written, and the
+    uncompressed total is capped so a small archive cannot fill the disk.
+    """
+
     try:
         archive = zipfile.ZipFile(source)
     except (OSError, zipfile.BadZipFile) as exc:
@@ -168,6 +176,14 @@ def directory_identity(root: Path) -> tuple[str, list[dict[str, object]]]:
 
 
 def _manifest(root: Path) -> dict[str, object]:
+    """Read and check the bundle's own description of itself.
+
+    The manifest is what makes an imported model reproducible: it pins the base model
+    and revision, the class order and the tokenization settings. Unknown fields are
+    refused rather than ignored, so a bundle written for a newer contract cannot be
+    loaded under the wrong assumptions.
+    """
+
     manifest = _json_file(root / "prt-model.json")
     allowed = {
         "schema_version", "display_name", "family", "fold_id", "class_order",
@@ -252,6 +268,13 @@ def _validate_peft_adapter(
     *,
     manifest: dict[str, object],
 ) -> dict[str, object]:
+    """Check a LoRA sequence-classification adapter against its declared architecture.
+
+    An adapter is only meaningful over the exact base model named in the manifest, so
+    its target modules and five-row classification head are verified here. Remote code
+    mappings are forbidden: loading must never execute Python that arrived in an upload.
+    """
+
     missing = sorted(name for name in REQUIRED_ADAPTER_FILES if not (root / name).is_file())
     if missing:
         raise AppError(
@@ -344,6 +367,13 @@ def _validate_peft_adapter(
 
 
 def _validate_transformer(root: Path, *, max_tokens: int) -> dict[str, object]:
+    """Check a self-contained encoder bundle before it is installed.
+
+    Weights must be safetensors rather than pickled tensors, the tokenizer must be
+    local, and the head must expose exactly five classes in the declared order;
+    anything else could not produce predictions comparable with the released ones.
+    """
+
     missing = sorted(name for name in REQUIRED_FILES if not (root / name).is_file())
     if missing:
         raise AppError(

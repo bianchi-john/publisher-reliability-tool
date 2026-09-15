@@ -27,13 +27,17 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 ```
 
 Only `state/*.csv` is authoritative. Articles and publishers are derived views
-over prediction runs. `dataset/predictions/predictions.csv` is an additional
+over prediction runs. `dataset/predictions/user-predictions.csv` is an additional
 inspectable, recoverable mirror of locally inferred runs, not an eighth
-authoritative ledger. Each mirrored user row includes the model display name,
-provenance (`paper_official`, `user_custom`, or `local_checkpoint`) and the
-official manifest-entry SHA-256 when applicable. Uploads, staging files, managed model artifact bytes,
-logs, and the writer lock are operational; losing managed artifact
-bytes disables new inference but does not lose historical scientific records.
+authoritative ledger. It is private to the machine that created it — listed in
+`.gitignore` and never part of the tracked repository — and is entirely separate
+from the released `dataset/predictions/predictions.csv`, which the application
+never modifies after it ships. Each mirrored user row includes the model
+display name, provenance (`paper_official`, `user_custom`, or
+`local_checkpoint`) and the official manifest-entry SHA-256 when applicable.
+Uploads, staging files, managed model artifact bytes, logs, and the writer lock
+are operational; losing managed artifact bytes disables new inference but does
+not lose historical scientific records.
 
 A fresh store exists only when `state/` is absent. The application then creates
 the directory and all seven header files as one initialization step. If
@@ -103,7 +107,7 @@ Minimum commit units are deliberately explicit:
 - import: three deterministic complete-file replacements after full source
   validation;
 - new prediction: one append-only prediction-run row followed by an idempotent
-  schema-2 dataset mirror update keyed by `prediction_run_id`;
+  private user-prediction mirror update keyed by `prediction_run_id`;
 - publisher evaluation: one append-only evaluation row referencing already
   committed runs;
 - content save/delete: one complete `local_content.csv` replacement;
@@ -115,16 +119,14 @@ commits but before its job-success rewrite, the scientific record remains valid
 and the recovered job is `PROCESS_INTERRUPTED`. Already committed article runs
 or content from a failed multi-article evaluation are not rolled back.
 
-For the prediction mirror, `predictions.csv` is completely rewritten to a
-sibling temporary file, flushed/fsynced and replaced; `manifest.json` is then
-refreshed with the new part checksum and origin counts. The original dataset
-content digest is calculated only over the legacy scientific columns of
-`dataset_original` rows, so local additions do not change the release identity.
-At startup, valid schema-2 CSV content may repair stale mutable manifest
-metadata only when the immutable original digest is unchanged. Startup then
-imports only original rows, restores any missing `user_evaluation` run into
-state, and synchronizes state back to the mirror. Repeated synchronization adds
-nothing when a `prediction_run_id` is already present.
+For the prediction mirror, `user-predictions.csv` is completely rewritten to a
+sibling temporary file in the same directory, flushed/fsynced and replaced. The
+released `predictions.csv` and its `manifest.json` are never rewritten by the
+running application; only the release-preparation script produces them.
+Startup imports the released rows, restores any `user_evaluation` run present
+in the mirror but missing from state, and synchronizes state back to the
+mirror. Repeated synchronization adds nothing when a `prediction_run_id` is
+already present.
 
 No compaction, record versions, tombstones, transaction ledger, commit
 sequence, or pagination snapshot is part of schema version 1.

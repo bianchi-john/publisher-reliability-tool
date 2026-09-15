@@ -18,7 +18,25 @@ from .services import ResearchService
 from .storage import Storage, json_field, utc_now
 
 
+# Opening and terminal phase per job type. Evaluation reports many more phases in
+# between (see ResearchService.evaluate); the other two are short enough that an
+# opening and a terminal phase describe them honestly.
+START_AND_TERMINAL_PHASE = {
+    "evaluation": ("preparing", "saving"),
+    "dataset_import": ("parsing", "saving"),
+    "model_validation": ("scanning", "saving"),
+}
+
+
 class JobManager:
+    """Runs long operations on one background thread, one at a time.
+
+    A single FIFO worker is deliberate: evaluations load multi-gigabyte checkpoints,
+    and running two at once would exhaust memory on the workstation this demo targets.
+    Every state change is persisted, so a job interrupted by a restart is visible as
+    failed rather than silently lost.
+    """
+
     def __init__(
         self,
         storage: Storage,
@@ -44,6 +62,12 @@ class JobManager:
                 self._queue.put(row["job_id"])
 
     def submit(self, job_type: str, request: dict[str, object]) -> str:
+        """Persist a queued job, then hand it to the worker.
+
+        The row is written before the job is queued, so a job the API has accepted is
+        always visible afterwards, even if the process stops immediately.
+        """
+
         if job_type not in {"evaluation", "dataset_import", "model_validation"}:
             raise AppError("INVALID_INPUT", "Unknown job type.")
         if self._stop.is_set():
@@ -116,6 +140,8 @@ class JobManager:
                 self._queue.task_done()
 
     def _execute(self, identifier: str) -> None:
+        """Run one queued job to a terminal state, recording why it failed if it did."""
+
         row = next(
             (row for row in self.storage.rows["jobs"] if row["job_id"] == identifier),
             None,
@@ -123,85 +149,25 @@ class JobManager:
         if row is None or row["status"] != "queued":
             return
         request = json.loads(row["request_json"])
-        phases = {
-            "evaluation": ("preparing", "saving"),
-            "dataset_import": ("parsing", "saving"),
-            "model_validation": ("scanning", "saving"),
-        }
-        self._update(row, status="running", phase=phases[row["job_type"]][0], progress=10)
+        opening, terminal = START_AND_TERMINAL_PHASE[row["job_type"]]
+        self._update(row, status="running", phase=opening, progress=10)
         try:
             if row["job_type"] == "evaluation":
-                result = self.service.evaluate(request, identifier)
-            elif row["job_type"] == "dataset_import":
-                token = str(request["source_upload_id"])
-                if Path(token).name != token:
-                    raise AppError("INVALID_INPUT", "Invalid upload token.")
-                source = self.storage.data_dir / "uploads" / token
-                if not source.is_file():
-                    raise AppError(
-                        "PROCESS_INTERRUPTED", "The acquired dataset source is missing."
-                    )
-                result = import_csv(
-                    self.storage,
-                    source,
-                    source_name=str(request.get("source_name", token)),
-                    max_decompressed_bytes=self.dataset_upload_max_bytes,
+                result = self.service.evaluate(
+                    request,
+                    identifier,
+                    on_progress=lambda phase, progress: self._update(
+                        row, status="running", phase=phase, progress=progress
+                    ),
                 )
-                source.unlink(missing_ok=True)
+            elif row["job_type"] == "dataset_import":
+                result = self._run_dataset_import(request)
             else:
-                tokens = request.get("source_upload_ids")
-                token = request.get("source_upload_id")
-                if isinstance(tokens, list):
-                    if not tokens or any(
-                        not isinstance(value, str) or Path(value).name != value
-                        for value in tokens
-                    ):
-                        raise AppError("INVALID_INPUT", "Invalid official upload tokens.")
-                    sources = [
-                        self.storage.data_dir / "uploads" / str(value)
-                        for value in tokens
-                    ]
-                    if any(not source.is_file() for source in sources):
-                        raise AppError(
-                            "PROCESS_INTERRUPTED",
-                            "An acquired official model file is missing.",
-                        )
-                    names = request.get("source_names")
-                    if (
-                        not isinstance(names, list)
-                        or len(names) != len(sources)
-                        or any(not isinstance(value, str) for value in names)
-                    ):
-                        raise AppError("INVALID_INPUT", "Official source names are invalid.")
-                    result = import_official_model(
-                        self.storage,
-                        sources,
-                        source_names=names,
-                        max_uncompressed_bytes=self.model_upload_max_bytes,
-                    )
-                    for source in sources:
-                        source.unlink(missing_ok=True)
-                elif isinstance(token, str):
-                    if Path(token).name != token:
-                        raise AppError("INVALID_INPUT", "Invalid upload token.")
-                    source = self.storage.data_dir / "uploads" / token
-                    if not source.is_file():
-                        raise AppError(
-                            "PROCESS_INTERRUPTED",
-                            "The acquired custom model source is missing.",
-                        )
-                    result = import_custom_transformer_bundle(
-                        self.storage,
-                        source,
-                        max_uncompressed_bytes=self.model_upload_max_bytes,
-                    )
-                    source.unlink(missing_ok=True)
-                else:
-                    result = scan_model_roots(self.storage, self.model_roots)
+                result = self._run_model_validation(request)
             self._update(
                 row,
                 status="succeeded",
-                phase=phases[row["job_type"]][1],
+                phase=terminal,
                 progress=100,
                 result_json=json_field(result),
                 finished_at=utc_now(),
@@ -218,6 +184,7 @@ class JobManager:
                 finished_at=utc_now(),
             )
         except Exception:
+            # The cause stays out of the job row: it may name a local path.
             self._cleanup_upload(row, request)
             self._update(
                 row,
@@ -228,6 +195,92 @@ class JobManager:
                 error_message="The operation failed unexpectedly.",
                 finished_at=utc_now(),
             )
+
+    def _acquired_upload(self, token: object, missing_message: str) -> Path:
+        """Resolve one upload token to the private temporary file the API wrote.
+
+        The token must remain a bare filename: a path separator would let a request
+        reach outside the uploads directory.
+        """
+
+        if not isinstance(token, str) or Path(token).name != token:
+            raise AppError("INVALID_INPUT", "Invalid upload token.")
+        source = self.storage.data_dir / "uploads" / token
+        if not source.is_file():
+            raise AppError("PROCESS_INTERRUPTED", missing_message)
+        return source
+
+    def _run_dataset_import(self, request: dict[str, object]) -> dict[str, object]:
+        """Import one acquired CSV or CSV.GZ upload and drop its temporary source."""
+
+        token = str(request["source_upload_id"])
+        source = self._acquired_upload(token, "The acquired dataset source is missing.")
+        result = import_csv(
+            self.storage,
+            source,
+            source_name=str(request.get("source_name", token)),
+            max_decompressed_bytes=self.dataset_upload_max_bytes,
+        )
+        source.unlink(missing_ok=True)
+        return result
+
+    def _run_model_validation(self, request: dict[str, object]) -> dict[str, object]:
+        """Import an official or custom bundle, or rescan the configured model roots.
+
+        The three shapes are told apart by what the API acquired beforehand: several
+        official files, one custom ZIP, or nothing at all for a plain rescan.
+        """
+
+        tokens = request.get("source_upload_ids")
+        token = request.get("source_upload_id")
+        if isinstance(tokens, list):
+            return self._import_official_upload(tokens, request.get("source_names"))
+        if isinstance(token, str):
+            source = self._acquired_upload(
+                token, "The acquired custom model source is missing."
+            )
+            result = import_custom_transformer_bundle(
+                self.storage,
+                source,
+                max_uncompressed_bytes=self.model_upload_max_bytes,
+            )
+            source.unlink(missing_ok=True)
+            return result
+        return scan_model_roots(self.storage, self.model_roots)
+
+    def _import_official_upload(
+        self, tokens: list[object], names: object
+    ) -> dict[str, object]:
+        """Reassemble one original paper model from the files the API acquired.
+
+        Every token and name is validated before any file is opened, because a Llama
+        checkpoint arrives as two segments that only mean something together.
+        """
+
+        if not tokens or any(
+            not isinstance(value, str) or Path(value).name != value for value in tokens
+        ):
+            raise AppError("INVALID_INPUT", "Invalid official upload tokens.")
+        sources = [self.storage.data_dir / "uploads" / str(value) for value in tokens]
+        if any(not source.is_file() for source in sources):
+            raise AppError(
+                "PROCESS_INTERRUPTED", "An acquired official model file is missing."
+            )
+        if (
+            not isinstance(names, list)
+            or len(names) != len(sources)
+            or any(not isinstance(value, str) for value in names)
+        ):
+            raise AppError("INVALID_INPUT", "Official source names are invalid.")
+        result = import_official_model(
+            self.storage,
+            sources,
+            source_names=names,
+            max_uncompressed_bytes=self.model_upload_max_bytes,
+        )
+        for source in sources:
+            source.unlink(missing_ok=True)
+        return result
 
     def _update(self, row: dict[str, str], **values: object) -> None:
         updated = dict(row)

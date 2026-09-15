@@ -88,9 +88,10 @@ docker compose up --build
 
 The read-only models directory may remain owned by the user if UID 10001 can
 read it. The dataset mount is intentionally writable: local inference rows are
-mirrored to `dataset/predictions/predictions.csv`, and its manifest checksum and
-origin counts are refreshed. `docker compose down` preserves both bind-mounted
-locations.
+mirrored to `dataset/predictions/user-predictions.csv`, a private file that is
+never part of the tracked release and is listed in `.gitignore`. The released
+`predictions.csv` and its manifest are never modified by the running
+application. `docker compose down` preserves both bind-mounted locations.
 
 GPU examples may be documented in a separate optional
 `compose.gpu.example.yaml`; they are not part of the required Compose path or
@@ -105,7 +106,7 @@ Precedence is CLI, environment, default. No configuration file is loaded.
 | `PRT_PORT` | `8000` | Integer `1..65535` |
 | `PRT_DATA_DIR` | `./data` | Created after port reservation if absent; existing directory or parent must be writable; one process lock |
 | `PRT_MODELS_DIR` | `./models` | `:`-separated readable roots; missing allowed |
-| `PRT_SEED_DATASET` | `./dataset/predictions` | Official manifest plus writable user-prediction mirror; missing allowed |
+| `PRT_SEED_DATASET` | `./dataset/predictions` | Official manifest plus a writable, git-ignored user-prediction mirror file; missing allowed |
 | `PRT_OFFLINE` | `false` | Lowercase boolean |
 | `PRT_DEVICE` | `auto` | `auto`, `cpu`, `cuda` |
 | `PRT_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |

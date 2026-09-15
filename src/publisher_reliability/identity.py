@@ -22,6 +22,13 @@ BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 def canonical_json(value: object) -> str:
+    """Serialize a value so that equal content always produces equal bytes.
+
+    Sorted keys and fixed separators make the result reproducible across processes
+    and Python versions, which is what lets a hash over this text act as a stable
+    identity rather than a coincidence of dictionary ordering.
+    """
+
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -30,6 +37,20 @@ def sha256_json(value: object) -> str:
 
 
 def normalize_url(raw_url: str) -> str:
+    """Reduce a URL to the one spelling used as this article's identity.
+
+    Two links to the same article must collapse to the same string, or the workspace
+    would store duplicate predictions for one page. Normalization therefore lowercases
+    the scheme and host, applies IDNA so an internationalized domain has one ASCII
+    form, drops a redundant default port, supplies the root path, and removes campaign
+    and tracking parameters that never change which article is addressed.
+
+    Everything else is preserved deliberately: path case, trailing slash, remaining
+    query order and duplicates can all be significant to the origin server, so the
+    function refuses to guess. Invalid, non-HTTP, credential-bearing, and non-DNS URLs
+    are rejected rather than repaired.
+    """
+
     if not isinstance(raw_url, str):
         raise AppError("INVALID_URL", "URL must be a string.")
     value = raw_url.strip()
@@ -85,6 +106,8 @@ def normalize_url(raw_url: str) -> str:
 
 
 def normalized_hostname(canonical_url: str) -> str:
+    """Return the publisher host, treating a leading ``www.`` as the same outlet."""
+
     host = urlsplit(canonical_url).hostname
     if host is None:
         raise AppError("INVALID_URL", "URL has no hostname.")
@@ -93,6 +116,12 @@ def normalized_hostname(canonical_url: str) -> str:
 
 
 def article_id(canonical_url: str) -> str:
+    """Derive the article identity from its canonical URL.
+
+    UUIDv5 is deterministic, so the same article keeps the same identifier across
+    imports, restarts and machines without a central registry to consult.
+    """
+
     return str(uuid.uuid5(NAMESPACE, f"article:{canonical_url}"))
 
 
@@ -101,10 +130,21 @@ def publisher_id(hostname: str) -> str:
 
 
 def imported_run_id(article: str, model: str, import_identifier: str) -> str:
+    """Derive a stable run identity for an imported prediction.
+
+    Re-importing the same dataset reproduces the same run identifiers, which is what
+    makes an interrupted or repeated import converge instead of duplicating rows.
+    """
+
     value = f"prediction-run:{article}:{model}:import:{import_identifier}"
     return str(uuid.uuid5(NAMESPACE, value))
 
 
 def import_id(content_sha256: str, schema_version: str = "1") -> str:
+    """Identify an import by what it contains, not by when or how it arrived.
+
+    The same records delivered as CSV or CSV.GZ, today or tomorrow, are one import.
+    """
+
     return str(uuid.uuid5(NAMESPACE, f"import:{content_sha256}:{schema_version}"))
 

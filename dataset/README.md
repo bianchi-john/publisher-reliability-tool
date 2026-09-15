@@ -1,32 +1,39 @@
 # Prediction dataset
 
-> This directory contains the project’s prediction dataset: the original public
-> model outputs plus an append-style mirror of article evaluations created
-> locally by the user. It contains no ground-truth labels or article content.
+> This directory contains the project's released prediction dataset:
+> `predictions.csv` and `manifest.json` are the original public model outputs,
+> tracked in the repository and never modified after release. A separate,
+> private, git-ignored file — `user-predictions.csv` — mirrors article
+> evaluations a user creates locally, so that a user's own reading and
+> evaluation history never enters version control. Neither file contains
+> ground-truth labels or article content.
 
 ## Contents
 
 ```text
 predictions/
-├── manifest.json      # schema, counts and SHA-256 checksums
-└── predictions.csv    # Original predictions and local user evaluations
+├── manifest.json          # schema, counts and SHA-256 checksums of predictions.csv
+├── predictions.csv        # Tracked: original dataset_original rows only
+└── user-predictions.csv   # Private, git-ignored: local user_evaluation rows
+                            # (present only after a local evaluation)
 ```
 
 | Measure | Value |
 | --- | ---: |
 | Original dataset rows | 19,429 |
-| Current user-evaluation rows | See `manifest.json` |
 | Derived articles | 19,411 |
 | Original prediction runs | 38,854 |
 | Original model/fold identities | 10 |
 | Canonical articles assigned to multiple folds | 16 |
 
-Schema version 2 uses `prediction_origin` to distinguish the two row types:
+`prediction_origin` distinguishes the two row shapes that share one column set:
 
-- `dataset_original`: one original wide-format BERT/RoBERTa dataset row;
+- `dataset_original`: one original wide-format BERT/RoBERTa dataset row, found
+  only in the tracked `predictions.csv`;
 - `user_evaluation`: one immutable local inference run, including its model ID,
   display name, official/custom/local provenance, family, fold, predicted label,
-  all five probabilities, action, timestamps, device and software versions.
+  all five probabilities, action, timestamps, device and software versions,
+  found only in the private `user-predictions.csv`.
 
 The original wide-format columns remain unchanged. Generic local-run fields are
 `prediction_run_id`, `model_id`, `prediction_family`,
@@ -46,12 +53,12 @@ evaluation because no single held-out fold can be established.
 
 `data/state/prediction_runs.csv` is the application's authoritative operational
 ledger. After a local inference commits there, the same run is written
-idempotently to this CSV. At startup, mirrored `user_evaluation` rows can also
-restore a missing local run before the mirror is synchronized again. Repeated
-startup never duplicates a run because `prediction_run_id` is unique. If a
-process stops after replacing the CSV but before replacing the manifest,
-startup recalculates only the mutable counts and file checksum; it does so only
-when the immutable original-row digest still matches.
+idempotently to `user-predictions.csv`. At startup, mirrored `user_evaluation`
+rows can also restore a missing local run before the mirror is synchronized
+again. Repeated startup never duplicates a run because `prediction_run_id` is
+unique. The tracked `predictions.csv` and `manifest.json` are never rewritten
+by the running application; only [Rebuild the public release](#rebuild-the-public-release)
+produces them.
 
 ## Verify
 
@@ -66,9 +73,11 @@ python3 scripts/verify_public_dataset.py dataset/predictions
 ```
 
 Verification checks the schema, origin counts, row counts, part size, SHA-256
-and content digest without changing application state. The stable content
-digest covers only `dataset_original` rows; the part checksum and total/user
-counts are refreshed whenever a local prediction is added.
+and content digest without changing application state. `predictions.csv`
+contains only `dataset_original` rows and is immutable after release, so every
+one of these values is fixed; a `user-predictions.csv` file beside it, if
+present, is recognized as the private local mirror and is not part of what
+gets verified.
 
 ## Import format
 
@@ -101,10 +110,12 @@ The generator never modifies the source file.
 
 ## Write access
 
-The application needs write access to `predictions.csv` and `manifest.json` to
-mirror new user evaluations. The Compose configuration therefore mounts
-`./dataset` read/write. For native use, the account running the application
-must be able to replace files inside `dataset/predictions`.
+The application needs write access to `dataset/predictions` to create and
+update its private `user-predictions.csv` mirror; it never writes
+`predictions.csv` or `manifest.json`. The Compose configuration therefore
+mounts `./dataset` read/write. For native use, the account running the
+application must be able to create and replace files inside
+`dataset/predictions`.
 
 ## License
 

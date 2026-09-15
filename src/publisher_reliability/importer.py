@@ -113,6 +113,13 @@ def _serialized_projection(row: dict[str, str]) -> bytes:
 
 
 def verify_manifest(release_dir: Path) -> dict[str, object]:
+    """Check a bundled release against its manifest before anything is imported.
+
+    Part sizes, per-part checksums, row counts and the overall content digest are all
+    confirmed first, so a truncated or edited release fails loudly instead of quietly
+    importing fewer predictions than the paper describes.
+    """
+
     try:
         manifest = json.loads(
             (release_dir / "manifest.json").read_text(encoding="utf-8")
@@ -226,6 +233,68 @@ def _model_row(
     }
 
 
+def _family_prediction(
+    raw: dict[str, str], family: str, row_number: int
+) -> tuple[int, int, tuple[float, ...]] | None:
+    """Read one family's prediction from a source row, or None when it is absent.
+
+    A row may carry BERT, RoBERTa, both, or neither. A completely absent pair is
+    legitimate and skipped, but a half-present one is rejected: a label without its
+    fold could never be checked against the leakage guard, so importing it would
+    create a prediction that can never be used honestly.
+
+    All five probabilities are required and must form a valid distribution, because a
+    partial vector would silently exclude the row from the aggregation method that
+    needs complete probabilities.
+    """
+
+    label_raw = (raw.get(f"{family}_predicted_label") or "").strip()
+    fold_raw = (raw.get(f"{family}_fold_id") or "").strip()
+    if not label_raw and not fold_raw:
+        return None
+    if not label_raw or not fold_raw:
+        raise AppError(
+            "IMPORT_INVALID",
+            f"Row {row_number} has an incomplete {family} label/fold pair.",
+        )
+    try:
+        label, fold = int(label_raw), int(fold_raw)
+    except ValueError as exc:
+        raise AppError(
+            "IMPORT_INVALID", f"Row {row_number} has a non-integer label or fold."
+        ) from exc
+    if label not in range(5) or fold not in range(1, 6):
+        raise AppError(
+            "IMPORT_INVALID", f"Row {row_number} has an out-of-range label or fold."
+        )
+
+    probability_values = [
+        (raw.get(f"{family}_prob_class_{index}") or "").strip() for index in range(5)
+    ]
+    if not all(probability_values):
+        raise AppError(
+            "IMPORT_INVALID",
+            f"Row {row_number} requires all five {family} probabilities.",
+        )
+    try:
+        probabilities = tuple(float(value) for value in probability_values)
+    except ValueError as exc:
+        raise AppError(
+            "IMPORT_INVALID", f"Row {row_number} has invalid probabilities."
+        ) from exc
+    if (
+        any(
+            not math.isfinite(value) or value < 0 or value > 1
+            for value in probabilities
+        )
+        or abs(sum(probabilities) - 1) > 1e-5
+    ):
+        raise AppError(
+            "IMPORT_INVALID", f"Row {row_number} has an invalid probability vector."
+        )
+    return fold, label, probabilities
+
+
 def _parse_candidates(
     rows: Iterator[dict[str, str]],
     fieldnames: list[str],
@@ -233,6 +302,18 @@ def _parse_candidates(
     max_rows: int,
     legacy_bare_percent: bool = False,
 ) -> tuple[list[Candidate], int, set[str], bytes]:
+    """Project source rows onto the fields this tool is allowed to keep.
+
+    Only the public columns survive, and editorial ones are blanked, so protected
+    ground truth and article text cannot enter the ledgers even when the source file
+    contains them. The names of the discarded columns are returned so the import
+    record can state exactly what was dropped.
+
+    The digest is computed over the projection rather than the original bytes: the
+    same predictions delivered as CSV or CSV.GZ, with or without extra columns, are
+    then recognised as one import instead of being duplicated.
+    """
+
     candidates: list[Candidate] = []
     source_rows = 0
     protected = (set(fieldnames) - set(PUBLIC_COLUMNS)) | (
@@ -278,51 +359,10 @@ def _parse_candidates(
 
         row_has_model = False
         for family in represented:
-            label_name = f"{family}_predicted_label"
-            fold_name = f"{family}_fold_id"
-            label_raw = (raw.get(label_name) or "").strip()
-            fold_raw = (raw.get(fold_name) or "").strip()
-            if not label_raw and not fold_raw:
+            prediction = _family_prediction(raw, family, source_rows)
+            if prediction is None:
                 continue
-            if not label_raw or not fold_raw:
-                raise AppError(
-                    "IMPORT_INVALID",
-                    f"Row {source_rows} has an incomplete {family} label/fold pair.",
-                )
-            try:
-                label, fold = int(label_raw), int(fold_raw)
-            except ValueError as exc:
-                raise AppError(
-                    "IMPORT_INVALID", f"Row {source_rows} has a non-integer label or fold."
-                ) from exc
-            if label not in range(5) or fold not in range(1, 6):
-                raise AppError(
-                    "IMPORT_INVALID", f"Row {source_rows} has an out-of-range label or fold."
-                )
-
-            probability_names = [f"{family}_prob_class_{index}" for index in range(5)]
-            probability_values = [(raw.get(name) or "").strip() for name in probability_names]
-            if not all(probability_values):
-                raise AppError(
-                    "IMPORT_INVALID",
-                    f"Row {source_rows} requires all five {family} probabilities.",
-                )
-            try:
-                probabilities = tuple(float(value) for value in probability_values)
-            except ValueError as exc:
-                raise AppError(
-                    "IMPORT_INVALID", f"Row {source_rows} has invalid probabilities."
-                ) from exc
-            if (
-                any(
-                    not math.isfinite(value) or value < 0 or value > 1
-                    for value in probabilities
-                )
-                or abs(sum(probabilities) - 1) > 1e-5
-            ):
-                raise AppError(
-                    "IMPORT_INVALID", f"Row {source_rows} has an invalid probability vector."
-                )
+            fold, label, probabilities = prediction
             candidates.append(
                 Candidate(
                     source_rows, canonical, art_id, hostname, pub_id,
@@ -351,6 +391,15 @@ def import_csv(
     max_decompressed_bytes: int = 536_870_912,
     legacy_bare_percent: bool = False,
 ) -> dict[str, str]:
+    """Import one CSV or CSV.GZ of predictions, identified by what it contains.
+
+    Re-importing the same content is a no-op that returns the existing import, which is
+    what makes an interrupted import safe to retry. Rows conflicting with an earlier
+    output for the same article and model are rejected individually and reported in the
+    import warnings, rather than failing the whole file or silently overwriting a
+    published prediction.
+    """
+
     started = utc_now()
     transport_digest = sha256_file(source)
     kind = source_kind or ("csv_gz" if source.name.lower().endswith(".csv.gz") else "csv")
@@ -492,6 +541,12 @@ def import_csv(
 
 
 def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str] | None:
+    """Import the release shipped with the tool, once, after verifying its manifest.
+
+    Startup calls this every time; the content digest makes every run after the first
+    a no-op, so a restart never duplicates the bundled predictions.
+    """
+
     if not release_dir.exists():
         return None
     manifest = verify_manifest(release_dir)

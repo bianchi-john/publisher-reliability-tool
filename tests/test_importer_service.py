@@ -223,6 +223,35 @@ class ImporterServiceTest(unittest.TestCase):
                 self.assertEqual(article["dataset_run_count"], 1)
                 self.assertEqual(article["local_run_count"], 0)
 
+                exported = list(
+                    csv.DictReader(
+                        service.export_predictions(sort="url_asc").splitlines()
+                    )
+                )
+                self.assertEqual(len(exported), 2)
+                self.assertEqual(
+                    [row["url"] for row in exported],
+                    [
+                        "https://example.com/article-1",
+                        "https://example.com/article-2",
+                    ],
+                )
+                first = exported[0]
+                self.assertEqual(first["prediction_family"], "bert")
+                self.assertEqual(first["prediction_fold_id"], "1")
+                self.assertEqual(first["prediction_model_name"], "BERT fold 1 (historical)")
+                self.assertEqual(first["prediction_model_provenance"], "paper_dataset")
+                self.assertEqual(first["prediction_origin"], "user_import")
+                self.assertEqual(first["predicted_label"], "1")
+                self.assertEqual(
+                    [first[f"prob_class_{index}"] for index in range(5)],
+                    ["0.0", "1.0", "0.0", "0.0", "0.0"],
+                )
+                self.assertTrue(first["prediction_run_id"])
+                self.assertTrue(first["model_id"])
+                self.assertNotIn("private title", service.export_predictions())
+                self.assertNotIn("private author", service.export_predictions())
+
                 article_availability = service.available_models(
                     input_type="article",
                     url="https://example.com/article-1",
@@ -256,6 +285,17 @@ class ImporterServiceTest(unittest.TestCase):
                 self.assertEqual(
                     unknown["availability"]["code"],
                     "NEW_ARTICLE_REQUIRES_INFERENCE",
+                )
+
+                unknown_publisher = service.available_models(
+                    input_type="publisher",
+                    url="https://not-in-dataset.example/",
+                    requested_count=2,
+                )
+                self.assertEqual(unknown_publisher["items"], [])
+                self.assertEqual(
+                    unknown_publisher["availability"]["code"],
+                    "PUBLISHER_NOT_IN_DATASET",
                 )
 
                 trained_model = dict(local_model)
@@ -302,6 +342,57 @@ class ImporterServiceTest(unittest.TestCase):
                 self.assertEqual(
                     len(json.loads(evaluation["prediction_run_ids_json"])), 2
                 )
+
+                # An explicit article list aggregates exactly the named articles and is
+                # never partial, unlike a publisher request bounded by a requested count.
+                listed = service.evaluate(
+                    {
+                        "input": {
+                            "type": "article_list",
+                            "urls": [
+                                "https://example.com/article-1",
+                                "https://example.com/article-2",
+                            ],
+                        },
+                        "model_id": model_id,
+                        "aggregation_method": "majority_vote",
+                    },
+                    "article-list-job",
+                )
+                self.assertEqual(listed["used_count"], 2)
+                self.assertFalse(listed["partial"])
+                listed_row = next(
+                    row
+                    for row in storage.rows["evaluations"]
+                    if row["evaluation_id"] == listed["evaluation_id"]
+                )
+                self.assertEqual(listed_row["input_mode"], "article_list")
+                self.assertEqual(listed_row["requested_count"], "2")
+                self.assertEqual(listed_row["normalized_hostname"], "example.com")
+
+                for bad_input, expected in (
+                    ({"type": "article_list", "urls": ["https://example.com/a"]},
+                     "Article list must contain 2 to 50 URLs."),
+                    ({"type": "article_list", "urls": [
+                        "https://example.com/article-1",
+                        "https://example.com/article-1",
+                     ]}, "Article URLs must be distinct."),
+                    ({"type": "article_list", "urls": [
+                        "https://example.com/article-1",
+                        "https://other.example/article-2",
+                     ]}, "All articles must share one publisher."),
+                ):
+                    with self.assertRaises(AppError) as rejected:
+                        service.evaluate(
+                            {
+                                "input": bad_input,
+                                "model_id": model_id,
+                                "aggregation_method": "majority_vote",
+                            },
+                            "article-list-reject",
+                        )
+                    self.assertEqual(rejected.exception.code, "INVALID_INPUT")
+                    self.assertEqual(rejected.exception.message, expected)
 
 
 if __name__ == "__main__":

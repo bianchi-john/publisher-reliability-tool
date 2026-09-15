@@ -37,9 +37,10 @@ The MVP shall:
 - import user CSV or CSV.GZ files after safe projection and validation;
 - persist essential models, runs, evaluations, imports, jobs, and explicitly
   saved local content in seven inspectable CSV ledgers;
-- mirror every locally inferred article run into
-  `dataset/predictions/predictions.csv` with an explicit user/original origin,
-  exact label, probabilities and provenance;
+- mirror every locally inferred article run into a private, git-ignored
+  `dataset/predictions/user-predictions.csv` with explicit origin, exact label,
+  probabilities and provenance, entirely separate from the tracked
+  `predictions.csv` release, which the application never modifies;
 - derive article and publisher views from persisted prediction runs;
 - scan configured model roots and accept browser uploads of supported official
   artifacts;
@@ -97,7 +98,7 @@ publisher-reliability storage verify
 | `--port` | `8000` | Loopback port `1..65535` |
 | `--data-dir` | `./data` | CSV state, lock, temporary uploads, logs |
 | `--models-dir` | `./models` | Repeatable configured model root |
-| `--seed-dataset` | `./dataset/predictions` | Bundled manifest and writable local-prediction mirror; missing is allowed |
+| `--seed-dataset` | `./dataset/predictions` | Bundled manifest and a writable, git-ignored local-prediction mirror file; missing is allowed |
 | `--offline` | false | Deny all application HTTP retrieval |
 | `--device` | `auto` | `auto`, `cpu`, or `cuda` |
 | `--log-level` | `info` | `debug`, `info`, `warning`, `error` |
@@ -132,16 +133,16 @@ Startup order is:
 5. load and structurally verify the complete store, marking previously running
    jobs `PROCESS_INTERRUPTED`; malformed records fail closed and are not
    repaired automatically;
-6. reconcile only mutable prediction-manifest metadata from a valid schema-2
-   CSV when the immutable original digest is unchanged;
-7. verify/import the optional bundled release by content digest;
-8. scan configured core model roots and refresh managed-bundle integrity;
-9. restore any mirrored `user_evaluation` run absent from the authoritative
-    state ledger, then idempotently synchronize all local inference runs back
-    to the prediction CSV and refresh its manifest;
-10. start the FIFO worker, requeue persisted queued jobs, and fail an
+6. verify/import the optional bundled release by content digest;
+7. scan configured core model roots and refresh managed-bundle integrity;
+8. restore any run present in the private, git-ignored user-prediction mirror
+   but absent from the authoritative state ledger, then idempotently
+   synchronize all local inference runs back to that same mirror file; the
+   released `predictions.csv` and its manifest are never written by the
+   running application;
+9. start the FIFO worker, requeue persisted queued jobs, and fail an
     upload-backed job when its acquired source is missing;
-11. accept HTTP requests; readiness is then `ready`.
+10. accept HTTP requests; readiness is then `ready`.
 
 Missing seed/models are valid empty/history-only modes. An occupied port causes
 no data mutation. Corrupt storage closes the reserved socket and starts no HTTP
@@ -219,10 +220,10 @@ safe articles when the requested count cannot be met; false requires the full
 count.
 
 After single-article completion, the new immutable run is appended to the
-authoritative state ledger and mirrored to
-`dataset/predictions/predictions.csv` as
-`prediction_origin=user_evaluation`. The row stores one exact run rather than
-overwriting the original wide BERT/RoBERTa fields. Evaluate keeps a prominent result card on the
+authoritative state ledger and mirrored to a private, git-ignored
+`dataset/predictions/user-predictions.csv` as
+`prediction_origin=user_evaluation`. The row stores one exact run and never
+touches the tracked release. Evaluate keeps a prominent result card on the
 page with the predicted `Class 0..4`, all five decimal/percentage
 probabilities, exact model/fold, stored-versus-new origin, run ID, and a link to
 the complete article history. A recent-local-runs table remains available after
@@ -282,21 +283,29 @@ Only operations that can take noticeable time are jobs.
 The persisted job-type registry is: `evaluation`, `dataset_import`, `model_validation`.
 Status is
 `queued`, `running`, `succeeded`, or `failed`. Progress is an approximate
-integer `0..100` updated at these macro phases only:
+integer `0..100` that only ever moves forward. Phases are readable English
+sentences, not opaque codes:
 
-- evaluation: `preparing`, then terminal `saving`;
+- evaluation reports every step that can take noticeable time, so the interface
+  is never frozen on one value: checking the selected model, retrieving and
+  extracting the page, verifying and loading the checkpoint, classifying the
+  text, then saving. Reuse of a stored prediction and publisher aggregation
+  report their own shorter sequences;
 - import: `parsing`, then terminal `saving` (upload reception precedes job
   creation);
 - model validation: `scanning`, then terminal `saving`.
 
-One FIFO worker executes jobs. The frontend polls the job endpoint every two
-seconds; SSE, cancellation, and retry are absent. After restart, queued jobs run
+One FIFO worker executes jobs. The frontend polls the job endpoint about once
+per second while a job runs; SSE, cancellation, and retry are absent. After restart, queued jobs run
 again only when every acquired source they require still exists. A queued job
 with a missing source and every running job fail as `PROCESS_INTERRUPTED`;
 terminal job handling cleans its acquired temporary upload.
 
-The UI has Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs.
-It favors provenance and scientific explanation over administration. Loading,
+The UI has Evaluate, Articles, Publishers, Models, and Jobs. Evaluate is the
+default and first navigation item. The top-bar status control (`Ready ·
+local`/`Ready · offline`) opens a small popover with workspace counts and
+runtime details, replacing a dedicated dashboard page. It favors provenance
+and scientific explanation over administration. Loading,
 empty, offline, missing-model, partial, and error states use clear English text.
 The persistent top bar does not remount or shift during route changes. The UI
 uses a single warm orange/terracotta light visual system with no theme

@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
@@ -17,6 +18,41 @@ from .identity import article_id, normalize_url, normalized_hostname, publisher_
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
 from .prediction_dataset import sync_user_predictions
 from .storage import Storage, json_field, utc_now
+
+
+INFERENCE_PHASES = {
+    "verifying the checkpoint digest": 40,
+    "preparing the pinned tokenizer": 55,
+    "loading the model weights": 65,
+    "classifying the article text": 78,
+}
+
+PREDICTION_EXPORT_COLUMNS = [
+    "article_id",
+    "url",
+    "domain",
+    "publisher_id",
+    "prediction_origin",
+    "prediction_run_id",
+    "model_id",
+    "prediction_family",
+    "prediction_fold_id",
+    "prediction_model_name",
+    "prediction_model_provenance",
+    "prediction_official_manifest_entry_sha256",
+    "predicted_label",
+    *[f"prob_class_{index}" for index in range(5)],
+    "prediction_action",
+    "input_source",
+    "content_retention",
+    "job_id",
+    "inference_started_at",
+    "inference_completed_at",
+    "duration_ms",
+    "device",
+    "software_versions_json",
+    "recorded_at",
+]
 
 
 def _effective_time(run: dict[str, str]) -> str:
@@ -128,6 +164,15 @@ class ResearchService:
         article_source: str | None = None,
         sort: str = "updated_desc",
     ) -> list[dict[str, object]]:
+        """Derive the article list from prediction runs; there is no article table.
+
+        An article exists because something predicted on it, so the runs are the source
+        of truth and the summary is recomputed rather than cached. Note that the source
+        type is decided from every run of the article, not from the filtered subset: a
+        dataset article stays a dataset article even when the current filter only shows
+        its user evaluation.
+        """
+
         if article_source not in {None, "dataset", "user_evaluation"}:
             raise AppError("INVALID_INPUT", "Unknown article source filter.")
         origin_counts: dict[str, Counter[str]] = defaultdict(Counter)
@@ -267,6 +312,13 @@ class ResearchService:
     def publisher_summaries(
         self, *, q: str | None = None, model_id: str | None = None
     ) -> list[dict[str, object]]:
+        """Derive publishers from the hostnames present in prediction runs.
+
+        Counting stored predictions and created aggregations separately matters: a
+        publisher with thousands of article predictions and no aggregation is the
+        normal state, not an empty one.
+        """
+
         runs: dict[str, list[dict[str, str]]] = defaultdict(list)
         for run in self.storage.rows["prediction_runs"]:
             if q and q.lower() not in run["normalized_hostname"].lower():
@@ -437,33 +489,118 @@ class ResearchService:
         requested_count: int = 2,
         allow_partial: bool = False,
     ) -> dict[str, object]:
-        """Explain availability and return locally present, leakage-safe stored models."""
+        """Explain availability and return locally present, leakage-safe stored models.
+
+        The interface never offers a checkpoint it cannot honour, so this answers two
+        questions at once: which options are genuinely selectable, and why the rest are
+        not. The explanation carries as much weight as the list, because "nothing is
+        available" has several unrelated causes: no checkpoint installed, too few
+        held-out articles for the requested count, or a leakage guard that rejects
+        every installed fold.
+        """
 
         canonical = normalize_url(url)
-        if input_type == "article":
-            matching = [
-                row
-                for row in self.storage.rows["prediction_runs"]
-                if row["article_id"] == article_id(canonical)
-            ]
-            required = 1
-        elif input_type == "publisher":
-            hostname = normalized_hostname(canonical)
-            matching = [
-                row
-                for row in self.storage.rows["prediction_runs"]
-                if row["normalized_hostname"] == hostname
-            ]
-            required = 2 if allow_partial else max(2, requested_count)
-        else:
-            raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
-
+        matching, required = self._runs_for_input(
+            input_type, canonical, requested_count, allow_partial
+        )
         local_models = [
             model
             for model in self.storage.rows["models"]
             if model["artifact_kind"] != "historical_virtual"
             and model["artifact_available"] == "true"
         ]
+        fold_registry = self._imported_fold_registry()
+
+        options, had_local_identity = self._stored_prediction_options(
+            matching, local_models, fold_registry, required
+        )
+        blocked: list[dict[str, object]] = []
+        if input_type == "article":
+            new_options, blocked = self._new_inference_options(
+                local_models,
+                fold_registry,
+                article_id(canonical),
+                {str(row["model_id"]) for row in options},
+            )
+            options.extend(new_options)
+
+        # Selectable options first, stored reuse before new inference, then a stable
+        # family/fold order so the selector does not reshuffle between refreshes.
+        options.sort(
+            key=lambda row: (
+                not bool(row["eligible"]),
+                str(row["mode"]),
+                str(row["family"]),
+                int(row["fold_id"]),
+            )
+        )
+        code, message = self._availability_verdict(
+            input_type=input_type,
+            options=options,
+            local_model_count=len(local_models),
+            input_known=bool(matching),
+            had_local_identity=had_local_identity,
+            blocked=blocked,
+        )
+        return {
+            "items": options,
+            "availability": {
+                "code": code,
+                "message": message,
+                "input_known": bool(matching),
+                "local_checkpoint_count": len(local_models),
+                "eligible_model_count": sum(bool(row["eligible"]) for row in options),
+                "blocked_training_models": blocked,
+            },
+        }
+
+    def _runs_for_input(
+        self,
+        input_type: str,
+        canonical_url: str,
+        requested_count: int,
+        allow_partial: bool,
+    ) -> tuple[list[dict[str, str]], int]:
+        """Stored runs describing this input, and how many safe articles it needs.
+
+        An article needs one compatible run. A publisher needs at least two, because a
+        single article is not an aggregate; asking for more than the available count is
+        only permitted when the caller accepts a partial result.
+        """
+
+        if input_type == "article":
+            identifier = article_id(canonical_url)
+            matching = [
+                row
+                for row in self.storage.rows["prediction_runs"]
+                if row["article_id"] == identifier
+            ]
+            return matching, 1
+        if input_type == "publisher":
+            hostname = normalized_hostname(canonical_url)
+            matching = [
+                row
+                for row in self.storage.rows["prediction_runs"]
+                if row["normalized_hostname"] == hostname
+            ]
+            return matching, 2 if allow_partial else max(2, requested_count)
+        raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
+
+    def _stored_prediction_options(
+        self,
+        matching: list[dict[str, str]],
+        local_models: list[dict[str, str]],
+        fold_registry: dict[tuple[str, str], set[int]],
+        required: int,
+    ) -> tuple[list[dict[str, object]], bool]:
+        """Options that reuse stored runs, and whether any family/fold exists locally.
+
+        A stored run is offered only when the same family and fold is installed here,
+        so the workspace never promises a reproduction it cannot perform. The returned
+        flag separates "no installed checkpoint matches these runs" from "one matches
+        but too few of its articles are leakage-safe", which are reported differently.
+        """
+
         local_by_family_fold: dict[tuple[str, int], list[dict[str, str]]] = defaultdict(list)
         for model in local_models:
             local_by_family_fold[(model["family"], int(model["fold_id"]))].append(model)
@@ -471,20 +608,20 @@ class ResearchService:
         grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
         for run in matching:
             grouped[run["model_id"]].append(run)
+
         models = self.models_by_id
-        fold_registry = self._imported_fold_registry()
-        result: list[dict[str, object]] = []
-        article_identifier = article_id(canonical) if input_type == "article" else ""
-        had_matching_local_identity = False
+        options: list[dict[str, object]] = []
+        had_local_identity = False
         for model_identifier, runs in grouped.items():
             model = models.get(model_identifier)
             if model is None:
                 continue
-            family_fold = (model["family"], int(model["fold_id"]))
-            local_matches = local_by_family_fold.get(family_fold, [])
+            local_matches = local_by_family_fold.get(
+                (model["family"], int(model["fold_id"])), []
+            )
             if not local_matches:
                 continue
-            had_matching_local_identity = True
+            had_local_identity = True
             safe_runs = [
                 run
                 for run in runs
@@ -492,13 +629,13 @@ class ResearchService:
             ]
             if not safe_runs:
                 continue
-            article_count = len({run["article_id"] for run in safe_runs})
-            probability_count = sum(bool(run["prob_class_0"]) for run in safe_runs)
+            # Prefer a compatible checkpoint; the ID breaks ties so the choice is stable.
             local_model = sorted(
                 local_matches,
                 key=lambda row: (row["status"] != "compatible", row["model_id"]),
             )[0]
-            result.append(
+            article_count = len({run["article_id"] for run in safe_runs})
+            options.append(
                 {
                     "model_id": model_identifier,
                     "local_model_id": local_model["model_id"],
@@ -510,137 +647,158 @@ class ResearchService:
                     "local_runnable": local_model["runnable"] == "true",
                     "article_count": article_count,
                     "run_count": len(safe_runs),
-                    "probability_count": probability_count,
+                    "probability_count": sum(
+                        bool(run["prob_class_0"]) for run in safe_runs
+                    ),
                     "eligible": article_count >= required,
                     "mode": "stored_prediction",
                 }
             )
+        return options, had_local_identity
 
-        blocked = []
-        if input_type == "article":
-            existing_model_ids = {str(row["model_id"]) for row in result}
-            for local_model in local_models:
-                family = local_model["family"]
-                fold_id = int(local_model["fold_id"])
-                assigned_folds = fold_registry.get((article_identifier, family), set())
-                if len(assigned_folds) > 1:
-                    blocked.append(
-                        {
-                            "family": family,
-                            "fold_id": fold_id,
-                            "reason": (
-                                "The canonical article appears in multiple imported "
-                                "folds, so no checkpoint is leakage-safe."
-                            ),
-                        }
-                    )
-                    continue
-                if assigned_folds and fold_id not in assigned_folds:
-                    blocked.append(
-                        {
-                            "family": family,
-                            "fold_id": fold_id,
-                            "reason": (
-                                "The article belongs to another held-out fold, so "
-                                "this checkpoint was trained on it."
-                            ),
-                        }
-                    )
-                    continue
-                if (
-                    local_model["model_id"] in existing_model_ids
-                    or (assigned_folds and fold_id in assigned_folds)
-                    or local_model["runnable"] != "true"
-                ):
-                    continue
-                result.append(
+    def _new_inference_options(
+        self,
+        local_models: list[dict[str, str]],
+        fold_registry: dict[tuple[str, str], set[int]],
+        article_identifier: str,
+        already_offered: set[str],
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        """Checkpoints that may classify this article now, and those the guard blocks.
+
+        Only single articles reach this path, because a publisher result aggregates
+        stored predictions and never retrieves a page. A checkpoint is blocked when the
+        imported folds show it was trained on this article, or when the article belongs
+        to several folds at once and no choice can be defended as held out.
+        """
+
+        options: list[dict[str, object]] = []
+        blocked: list[dict[str, object]] = []
+        for local_model in local_models:
+            family = local_model["family"]
+            fold_id = int(local_model["fold_id"])
+            assigned_folds = fold_registry.get((article_identifier, family), set())
+            if len(assigned_folds) > 1:
+                blocked.append(
                     {
-                        "model_id": local_model["model_id"],
-                        "local_model_id": local_model["model_id"],
                         "family": family,
                         "fold_id": fold_id,
-                        "display_name": local_model["display_name"],
-                        "provenance": self.model_provenance(local_model),
-                        "local_status": local_model["status"],
-                        "local_runnable": True,
-                        "article_count": 0,
-                        "run_count": 0,
-                        "probability_count": 0,
-                        "eligible": True,
-                        "mode": "new_inference",
+                        "reason": (
+                            "The canonical article appears in multiple imported "
+                            "folds, so no checkpoint is leakage-safe."
+                        ),
                     }
                 )
-        result.sort(
-            key=lambda row: (
-                not bool(row["eligible"]),
-                str(row["mode"]),
-                str(row["family"]),
-                int(row["fold_id"]),
-            )
-        )
-
-        eligible_count = sum(bool(row["eligible"]) for row in result)
-        if not local_models:
-            code = "NO_LOCAL_CHECKPOINTS"
-            message = (
-                "No validated local checkpoint is available. Add a supported model "
-                "under Models and scan the configured directories."
-            )
-        elif result and eligible_count:
-            code = "AVAILABLE"
-            if input_type == "article" and any(
-                row["eligible"] and row["mode"] == "new_inference" for row in result
+                continue
+            if assigned_folds and fold_id not in assigned_folds:
+                blocked.append(
+                    {
+                        "family": family,
+                        "fold_id": fold_id,
+                        "reason": (
+                            "The article belongs to another held-out fold, so "
+                            "this checkpoint was trained on it."
+                        ),
+                    }
+                )
+                continue
+            # Skip a checkpoint already offered as stored reuse, one whose held-out
+            # fold makes the stored run the honest answer, and one that cannot run here.
+            if (
+                local_model["model_id"] in already_offered
+                or (assigned_folds and fold_id in assigned_folds)
+                or local_model["runnable"] != "true"
             ):
-                message = (
+                continue
+            options.append(
+                {
+                    "model_id": local_model["model_id"],
+                    "local_model_id": local_model["model_id"],
+                    "family": family,
+                    "fold_id": fold_id,
+                    "display_name": local_model["display_name"],
+                    "provenance": self.model_provenance(local_model),
+                    "local_status": local_model["status"],
+                    "local_runnable": True,
+                    "article_count": 0,
+                    "run_count": 0,
+                    "probability_count": 0,
+                    "eligible": True,
+                    "mode": "new_inference",
+                }
+            )
+        return options, blocked
+
+    @staticmethod
+    def _availability_verdict(
+        *,
+        input_type: str,
+        options: list[dict[str, object]],
+        local_model_count: int,
+        input_known: bool,
+        had_local_identity: bool,
+        blocked: list[dict[str, object]],
+    ) -> tuple[str, str]:
+        """Name the one reason that explains this outcome, most specific cause first."""
+
+        eligible_count = sum(bool(row["eligible"]) for row in options)
+        if not local_model_count:
+            return (
+                "NO_LOCAL_CHECKPOINTS",
+                "No validated local checkpoint is available. Add a supported model "
+                "under Models and scan the configured directories.",
+            )
+        if options and eligible_count:
+            if input_type == "article" and any(
+                row["eligible"] and row["mode"] == "new_inference" for row in options
+            ):
+                return (
+                    "AVAILABLE",
                     f"{eligible_count} model option(s) are available. Options marked "
-                    "'new inference' will retrieve and classify this page locally."
+                    "'new inference' will retrieve and classify this page locally.",
                 )
-            else:
-                message = (
-                    f"{eligible_count} local checkpoint(s) have enough leakage-safe "
-                    "stored predictions for this request."
-                )
-        elif result or (input_type == "publisher" and had_matching_local_identity):
-            code = "INSUFFICIENT_SAFE_ARTICLES"
-            message = (
+            return (
+                "AVAILABLE",
+                f"{eligible_count} local checkpoint(s) have enough leakage-safe "
+                "stored predictions for this request.",
+            )
+        if options or (input_type == "publisher" and had_local_identity):
+            return (
+                "INSUFFICIENT_SAFE_ARTICLES",
                 "Matching local checkpoints exist, but the publisher has fewer safe "
-                "held-out predictions than the requested article count."
+                "held-out predictions than the requested article count.",
             )
-        elif input_type == "article" and not matching:
-            code = "NEW_ARTICLE_REQUIRES_INFERENCE"
-            message = (
+        if input_type == "article" and not input_known:
+            return (
+                "NEW_ARTICLE_REQUIRES_INFERENCE",
                 "This URL is not present in the imported prediction dataset. It requires "
-                "a new inference run, but no runnable local model is available."
+                "a new inference run, but no runnable local model is available.",
             )
-        elif blocked:
-            code = "TRAINING_DATA_LEAKAGE"
-            if any("multiple imported folds" in row["reason"] for row in blocked):
-                message = (
+        if input_type == "publisher" and not input_known:
+            return (
+                "PUBLISHER_NOT_IN_DATASET",
+                "This publisher has no stored predictions in the imported dataset. "
+                "Publisher evaluation only aggregates existing article predictions; it "
+                "does not crawl the site or infer missing articles. Use Single article "
+                "to classify one new page, or check Publishers for a hostname that is "
+                "already present.",
+            )
+        if blocked:
+            if any("multiple imported folds" in str(row["reason"]) for row in blocked):
+                return (
+                    "TRAINING_DATA_LEAKAGE",
                     "This canonical article appears in multiple imported folds, so no "
-                    "checkpoint can be considered leakage-safe."
+                    "checkpoint can be considered leakage-safe.",
                 )
-            else:
-                message = (
-                    "The available local checkpoint fold was trained on this dataset "
-                    "article. Evaluation is blocked to prevent training-data leakage."
-                )
-        else:
-            code = "NO_MATCHING_LOCAL_MODEL"
-            message = (
-                "Stored predictions exist, but none matches a family and fold currently "
-                "available as a local checkpoint under Models."
+            return (
+                "TRAINING_DATA_LEAKAGE",
+                "The available local checkpoint fold was trained on this dataset "
+                "article. Evaluation is blocked to prevent training-data leakage.",
             )
-        return {
-            "items": result,
-            "availability": {
-                "code": code,
-                "message": message,
-                "input_known": bool(matching),
-                "local_checkpoint_count": len(local_models),
-                "eligible_model_count": eligible_count,
-                "blocked_training_models": blocked,
-            },
-        }
+        return (
+            "NO_MATCHING_LOCAL_MODEL",
+            "Stored predictions exist, but none matches a family and fold currently "
+            "available as a local checkpoint under Models.",
+        )
 
     def assert_not_training_article(
         self,
@@ -729,21 +887,129 @@ class ResearchService:
             "backup_notice": "User backups and external copies are unchanged.",
         }
 
-    def export_articles(self, **filters: object) -> str:
-        columns = [
-            "article_id", "canonical_url", "publisher_id", "normalized_hostname",
-            "model_count", "run_count", "latest_prediction_run_id",
-            "latest_model_id", "latest_predicted_class", "source_type",
-            "dataset_run_count", "local_run_count", "has_user_evaluation",
-            "content_saved", "first_seen_at", "updated_at",
-        ]
+    def export_predictions(
+        self,
+        *,
+        q: str | None = None,
+        publisher: str | None = None,
+        model_id: str | None = None,
+        predicted_class: int | None = None,
+        origin: str | None = None,
+        article_source: str | None = None,
+        sort: str = "updated_desc",
+    ) -> str:
+        """Export one row per stored prediction run, keeping one article's runs adjacent."""
+
+        if article_source not in {None, "dataset", "user_evaluation"}:
+            raise AppError("INVALID_INPUT", "Unknown article source filter.")
+        if sort not in {"url_asc", "updated_desc"}:
+            raise AppError("INVALID_INPUT", "Unknown article sort.")
+
+        source_types: dict[str, str] = {}
+        for run in self.storage.rows["prediction_runs"]:
+            if run["origin"] in {"bundled_import", "user_import"}:
+                source_types[run["article_id"]] = "dataset"
+            elif run["article_id"] not in source_types:
+                source_types[run["article_id"]] = "user_evaluation"
+
+        models = self.models_by_id
+        selected: list[dict[str, str]] = []
+        for run in self.storage.rows["prediction_runs"]:
+            if model_id and run["model_id"] != model_id:
+                continue
+            if predicted_class is not None and run["predicted_class"] != str(predicted_class):
+                continue
+            if origin and run["origin"] != origin:
+                continue
+            if publisher and run["normalized_hostname"] != publisher:
+                continue
+            if q and q.lower() not in run["canonical_url"].lower():
+                continue
+            if article_source and source_types[run["article_id"]] != article_source:
+                continue
+            selected.append(run)
+
+        def model_order(run: dict[str, str]) -> tuple[str, int, str]:
+            model = models.get(run["model_id"], {})
+            fold = str(model.get("fold_id", ""))
+            return (
+                str(model.get("family", "")),
+                int(fold) if fold.isdigit() else 0,
+                run["prediction_run_id"],
+            )
+
+        selected.sort(key=lambda run: (run["canonical_url"], *model_order(run)))
+        if sort == "updated_desc":
+            updated_at: dict[str, str] = {}
+            for run in selected:
+                article = run["article_id"]
+                updated_at[article] = max(updated_at.get(article, ""), _effective_time(run))
+            selected.sort(key=lambda run: updated_at[run["article_id"]], reverse=True)
+
         output = io.StringIO(newline="")
-        writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
+        writer = csv.DictWriter(
+            output, fieldnames=PREDICTION_EXPORT_COLUMNS, lineterminator="\n"
+        )
         writer.writeheader()
-        writer.writerows(self.article_summaries(**filters))
+        for run in selected:
+            model = models.get(run["model_id"], {})
+            writer.writerow(
+                {
+                    "article_id": run["article_id"],
+                    "url": run["canonical_url"],
+                    "domain": run["normalized_hostname"],
+                    "publisher_id": run["publisher_id"],
+                    "prediction_origin": run["origin"],
+                    "prediction_run_id": run["prediction_run_id"],
+                    "model_id": run["model_id"],
+                    "prediction_family": model.get("family", ""),
+                    "prediction_fold_id": model.get("fold_id", ""),
+                    "prediction_model_name": model.get("display_name", ""),
+                    "prediction_model_provenance": (
+                        self.model_provenance(model) if model else ""
+                    ),
+                    "prediction_official_manifest_entry_sha256": model.get(
+                        "official_manifest_entry_sha256", ""
+                    ),
+                    "predicted_label": run["predicted_class"],
+                    **{
+                        f"prob_class_{index}": run[f"prob_class_{index}"]
+                        for index in range(5)
+                    },
+                    "prediction_action": run["action"],
+                    "input_source": run["input_source"],
+                    "content_retention": run["content_retention"],
+                    "job_id": run["job_id"],
+                    "inference_started_at": run["inference_started_at"],
+                    "inference_completed_at": run["inference_completed_at"],
+                    "duration_ms": run["duration_ms"],
+                    "device": run["device"],
+                    "software_versions_json": run["software_versions_json"],
+                    "recorded_at": run["recorded_at"],
+                }
+            )
         return output.getvalue()
 
-    def evaluate(self, request: dict[str, object], job_id: str) -> dict[str, object]:
+    def evaluate(
+        self,
+        request: dict[str, object],
+        job_id: str,
+        *,
+        on_progress: Callable[[str, int], None] | None = None,
+    ) -> dict[str, object]:
+        """Run one evaluation, reporting named phases so a caller can show real progress.
+
+        ``on_progress`` receives a human-readable phase and a 0-100 percentage at each
+        step that can take noticeable time (retrieval, checkpoint loading, inference,
+        persistence), because a job that reports only its start and end leaves the
+        interface frozen for several seconds.
+        """
+
+        def report(phase: str, progress: int) -> None:
+            if on_progress is not None:
+                on_progress(phase, progress)
+
+        report("checking the selected model", 8)
         model_identifier = str(request["model_id"])
         model = self.models_by_id.get(model_identifier)
         if model is None:
@@ -759,8 +1025,165 @@ class ResearchService:
             raise AppError("INVALID_INPUT", "Evaluation input is required.")
         input_type = input_value.get("type")
         fold_registry = self._imported_fold_registry()
+
+        # A single article yields one prediction; the other two modes combine several
+        # predictions into one publisher-level result and share the aggregation tail.
         if input_type == "article":
-            canonical = normalize_url(str(input_value.get("url", "")))
+            return self._evaluate_article(
+                input_value,
+                model,
+                model_identifier,
+                fold_registry,
+                job_id=job_id,
+                action=action,
+                retention=retention,
+                report=report,
+            )
+
+        method = str(request.get("aggregation_method", ""))
+        if method not in {"majority_vote", "ordinal_mean", "mean_probabilities"}:
+            raise AppError("INVALID_INPUT", "Aggregation method is required.")
+
+        if input_type == "article_list":
+            selected, hostname, requested, partial = self._runs_for_article_list(
+                input_value,
+                model,
+                model_identifier,
+                fold_registry,
+                job_id=job_id,
+                action=action,
+                retention=retention,
+                report=report,
+            )
+            input_mode = "article_list"
+        elif input_type == "publisher":
+            selected, hostname, requested, partial = self._runs_for_publisher(
+                input_value,
+                model,
+                model_identifier,
+                fold_registry,
+                action=action,
+                report=report,
+            )
+            input_mode = "publisher"
+        else:
+            raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
+
+        return self._store_aggregation(
+            selected=selected,
+            method=method,
+            hostname=hostname,
+            requested=requested,
+            partial=partial,
+            input_mode=input_mode,
+            model_identifier=model_identifier,
+            job_id=job_id,
+            report=report,
+        )
+
+    def _evaluate_article(
+        self,
+        input_value: dict[str, object],
+        model: dict[str, str],
+        model_identifier: str,
+        fold_registry: dict[tuple[str, str], set[int]],
+        *,
+        job_id: str,
+        action: str,
+        retention: str,
+        report: Callable[[str, int], None],
+    ) -> dict[str, object]:
+        """Reuse the stored prediction for one article, or create a new one.
+
+        Reuse is the default because an immutable run already answers the question and
+        costs no retrieval; ``recompute`` is the explicit way to ask for a fresh run,
+        which is then stored alongside the earlier one rather than replacing it.
+        """
+
+        canonical = normalize_url(str(input_value.get("url", "")))
+        self.assert_not_training_article(model, article_id(canonical), fold_registry)
+        run = (
+            self._latest_run(article_id(canonical), model_identifier)
+            if action == "reuse"
+            else None
+        )
+        if run is None:
+            run = self._create_inference_run(
+                model,
+                canonical,
+                job_id=job_id,
+                action=action,
+                retention=retention,
+                report=report,
+            )
+            reused = False
+        else:
+            report("reusing the stored prediction", 60)
+            if retention == "save_local":
+                # Saving the body still requires retrieval, and the page may have moved
+                # since the stored run: refuse rather than attach a different article.
+                report("retrieving the article page", 70)
+                retrieved = fetch_article(canonical, offline=self.offline)
+                if article_id(retrieved.canonical_url) != run["article_id"]:
+                    raise AppError(
+                        "INVALID_URL",
+                        "Retrieved canonical URL differs from the stored prediction.",
+                    )
+                self._save_content(retrieved)
+            reused = True
+        report("saving the result", 92)
+        return {
+            "article_id": run["article_id"],
+            "canonical_url": run["canonical_url"],
+            "prediction_run_id": run["prediction_run_id"],
+            "predicted_class": int(run["predicted_class"]),
+            "probabilities": [
+                float(run[f"prob_class_{index}"]) for index in range(5)
+            ],
+            "model_id": model_identifier,
+            "family": model["family"],
+            "fold_id": int(model["fold_id"]),
+            "model_display_name": model["display_name"],
+            "model_provenance": self.model_provenance(model),
+            "origin": run["origin"],
+            "reused": reused,
+        }
+
+    def _runs_for_article_list(
+        self,
+        input_value: dict[str, object],
+        model: dict[str, str],
+        model_identifier: str,
+        fold_registry: dict[tuple[str, str], set[int]],
+        *,
+        job_id: str,
+        action: str,
+        retention: str,
+        report: Callable[[str, int], None],
+    ) -> tuple[list[dict[str, str]], str, int, bool]:
+        """Collect one run per explicitly listed article, inferring the missing ones.
+
+        Every URL must belong to the same publisher, because the result is attributed
+        to that publisher; mixing hostnames would produce an aggregate that describes
+        no single source.
+        """
+
+        raw_urls = input_value.get("urls")
+        if not isinstance(raw_urls, list) or not 2 <= len(raw_urls) <= 50:
+            raise AppError("INVALID_INPUT", "Article list must contain 2 to 50 URLs.")
+        canonical_urls = [normalize_url(str(url)) for url in raw_urls]
+        if len(set(canonical_urls)) != len(canonical_urls):
+            raise AppError("INVALID_INPUT", "Article URLs must be distinct.")
+        hostnames = {normalized_hostname(url) for url in canonical_urls}
+        if len(hostnames) != 1:
+            raise AppError("INVALID_INPUT", "All articles must share one publisher.")
+
+        selected = []
+        for position, canonical in enumerate(canonical_urls, start=1):
+            report(
+                f"processing article {position} of {len(canonical_urls)}",
+                10 + round(70 * (position - 1) / len(canonical_urls)),
+            )
             self.assert_not_training_article(
                 model, article_id(canonical), fold_registry
             )
@@ -777,111 +1200,85 @@ class ResearchService:
                     action=action,
                     retention=retention,
                 )
-                reused = False
-            else:
-                if retention == "save_local":
-                    retrieved = fetch_article(canonical, offline=self.offline)
-                    if article_id(retrieved.canonical_url) != run["article_id"]:
-                        raise AppError(
-                            "INVALID_URL",
-                            "Retrieved canonical URL differs from the stored prediction.",
-                        )
-                    self._save_content(retrieved)
-                reused = True
-            return {
-                "article_id": run["article_id"],
-                "canonical_url": run["canonical_url"],
-                "prediction_run_id": run["prediction_run_id"],
-                "predicted_class": int(run["predicted_class"]),
-                "probabilities": [
-                    float(run[f"prob_class_{index}"]) for index in range(5)
-                ],
-                "model_id": model_identifier,
-                "family": model["family"],
-                "fold_id": int(model["fold_id"]),
-                "model_display_name": model["display_name"],
-                "model_provenance": self.model_provenance(model),
-                "origin": run["origin"],
-                "reused": reused,
-            }
+            selected.append(run)
+        # Every requested article contributed, so the result is never partial.
+        return selected, hostnames.pop(), len(selected), False
 
-        method = str(request.get("aggregation_method", ""))
-        if method not in {"majority_vote", "ordinal_mean", "mean_probabilities"}:
-            raise AppError("INVALID_INPUT", "Aggregation method is required.")
+    def _runs_for_publisher(
+        self,
+        input_value: dict[str, object],
+        model: dict[str, str],
+        model_identifier: str,
+        fold_registry: dict[tuple[str, str], set[int]],
+        *,
+        action: str,
+        report: Callable[[str, int], None],
+    ) -> tuple[list[dict[str, str]], str, int, bool]:
+        """Select the newest leakage-safe stored runs already held for one publisher.
 
-        if input_type == "article_list":
-            raw_urls = input_value.get("urls")
-            if not isinstance(raw_urls, list) or not 2 <= len(raw_urls) <= 50:
-                raise AppError("INVALID_INPUT", "Article list must contain 2 to 50 URLs.")
-            canonical_urls = [normalize_url(str(url)) for url in raw_urls]
-            if len(set(canonical_urls)) != len(canonical_urls):
-                raise AppError("INVALID_INPUT", "Article URLs must be distinct.")
-            hostnames = {normalized_hostname(url) for url in canonical_urls}
-            if len(hostnames) != 1:
-                raise AppError("INVALID_INPUT", "All articles must share one publisher.")
-            selected = []
-            for canonical in canonical_urls:
-                self.assert_not_training_article(
-                    model, article_id(canonical), fold_registry
-                )
-                run = (
-                    self._latest_run(article_id(canonical), model_identifier)
-                    if action == "reuse"
-                    else None
-                )
-                if run is None:
-                    run = self._create_inference_run(
-                        model,
-                        canonical,
-                        job_id=job_id,
-                        action=action,
-                        retention=retention,
-                    )
-                selected.append(run)
-            requested = len(selected)
-            partial = False
-            input_mode = "article_list"
-            hostname = hostnames.pop()
-        elif input_type == "publisher":
-            if action == "recompute":
-                raise AppError(
-                    "INVALID_INPUT",
-                    "Publisher recompute requires an explicit article list.",
-                )
-            canonical = normalize_url(str(input_value.get("url", "")))
-            hostname = normalized_hostname(canonical)
-            try:
-                requested = int(input_value.get("requested_article_count", 0))
-            except (TypeError, ValueError) as exc:
-                raise AppError("INVALID_INPUT", "Requested count must be an integer.") from exc
-            if not 2 <= requested <= 50:
-                raise AppError("INVALID_INPUT", "Requested count must be between 2 and 50.")
-            allow_partial = bool(input_value.get("allow_partial", False))
-            candidates: dict[str, dict[str, str]] = {}
-            for run in self.storage.rows["prediction_runs"]:
-                if (
-                    run["normalized_hostname"] == hostname
-                    and run["model_id"] == model_identifier
-                ):
-                    if not self._fold_is_safe(
-                        model, run["article_id"], fold_registry
-                    ):
-                        continue
-                    current = candidates.get(run["article_id"])
-                    if current is None or newest_runs([current, run])[0] is run:
-                        candidates[run["article_id"]] = run
-            selected = newest_runs(candidates.values())[:requested]
-            if len(selected) < 2 or (len(selected) < requested and not allow_partial):
-                raise AppError(
-                    "INSUFFICIENT_ARTICLES",
-                    "The publisher does not have enough compatible stored predictions.",
-                )
-            partial = len(selected) < requested
-            input_mode = "publisher"
-        else:
-            raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
+        This mode never retrieves anything: it aggregates predictions that exist, which
+        is why an unknown publisher simply has too few of them rather than triggering a
+        crawl. One run per article keeps a single heavily re-evaluated page from
+        dominating the aggregate.
+        """
 
+        if action == "recompute":
+            raise AppError(
+                "INVALID_INPUT",
+                "Publisher recompute requires an explicit article list.",
+            )
+        canonical = normalize_url(str(input_value.get("url", "")))
+        hostname = normalized_hostname(canonical)
+        try:
+            requested = int(input_value.get("requested_article_count", 0))
+        except (TypeError, ValueError) as exc:
+            raise AppError("INVALID_INPUT", "Requested count must be an integer.") from exc
+        if not 2 <= requested <= 50:
+            raise AppError("INVALID_INPUT", "Requested count must be between 2 and 50.")
+        allow_partial = bool(input_value.get("allow_partial", False))
+
+        report("selecting leakage-safe stored predictions", 40)
+        candidates: dict[str, dict[str, str]] = {}
+        for run in self.storage.rows["prediction_runs"]:
+            if (
+                run["normalized_hostname"] == hostname
+                and run["model_id"] == model_identifier
+            ):
+                if not self._fold_is_safe(model, run["article_id"], fold_registry):
+                    continue
+                current = candidates.get(run["article_id"])
+                if current is None or newest_runs([current, run])[0] is run:
+                    candidates[run["article_id"]] = run
+        selected = newest_runs(candidates.values())[:requested]
+        if len(selected) < 2 or (len(selected) < requested and not allow_partial):
+            raise AppError(
+                "INSUFFICIENT_ARTICLES",
+                "The publisher does not have enough compatible stored predictions.",
+            )
+        return selected, hostname, requested, len(selected) < requested
+
+    def _store_aggregation(
+        self,
+        *,
+        selected: list[dict[str, str]],
+        method: str,
+        hostname: str,
+        requested: int,
+        partial: bool,
+        input_mode: str,
+        model_identifier: str,
+        job_id: str,
+        report: Callable[[str, int], None],
+    ) -> dict[str, object]:
+        """Combine the selected runs into one publisher result and record it.
+
+        The contributing run IDs are stored with the result so the aggregate can be
+        recomputed and audited later; the evaluation itself is append-only.
+        """
+
+        report("aggregating the selected predictions", 75)
         calculation = aggregate(selected, method)
+        report("saving the aggregation", 92)
         evaluation_id = str(uuid.uuid4())
         probabilities = calculation["probabilities"] or ("", "", "", "", "")
         row: dict[str, object] = {
@@ -949,7 +1346,21 @@ class ResearchService:
         job_id: str,
         action: str,
         retention: str,
+        report: Callable[[str, int], None] | None = None,
     ) -> dict[str, str]:
+        """Retrieve, classify and persist one new prediction.
+
+        The leakage guard is checked twice on purpose: once against the URL the user
+        supplied and again against the canonical URL that retrieval actually resolved
+        to, because a redirect can land on a dataset article the checkpoint was trained
+        on. The run is written to the ledger first and mirrored into the prediction
+        dataset afterwards, so the authoritative record exists even if the mirror fails.
+        """
+
+        def progress(phase: str, value: int) -> None:
+            if report is not None:
+                report(phase, value)
+
         if (
             model["artifact_kind"] == "historical_virtual"
             or model["artifact_available"] != "true"
@@ -961,10 +1372,16 @@ class ResearchService:
             )
         started = utc_now()
         started_clock = time.monotonic()
+        progress("retrieving and extracting the article page", 20)
         retrieved = fetch_article(canonical_url, offline=self.offline)
         identifier = article_id(retrieved.canonical_url)
         self.assert_not_training_article(model, identifier)
-        prediction = self.inference.predict(model, retrieved.text)
+        prediction = self.inference.predict(
+            model,
+            retrieved.text,
+            on_progress=lambda phase: progress(phase, INFERENCE_PHASES.get(phase, 60)),
+        )
+        progress("saving the prediction", 90)
         completed = utc_now()
         run: dict[str, object] = {
             "prediction_run_id": str(uuid.uuid4()),

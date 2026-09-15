@@ -1,5 +1,4 @@
 import csv
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,8 +7,8 @@ from publisher_reliability.identity import article_id, normalized_hostname, publ
 from publisher_reliability.prediction_dataset import (
     BASE_PUBLIC_COLUMNS,
     PUBLIC_COLUMNS,
+    USER_PREDICTIONS_FILENAME,
     _dataset_row,
-    reconcile_prediction_dataset,
     restore_user_predictions,
     sync_user_predictions,
 )
@@ -135,42 +134,39 @@ class PredictionDatasetSyncTest(unittest.TestCase):
                 sync_user_predictions(release, [run], {"local-model": model}),
                 0,
             )
+
+            # The released file and its manifest are untouched: mirroring a user's own
+            # evaluation must never modify the tracked, shared research corpus.
+            original_bytes_after_sync = (release / "predictions.csv").read_bytes()
+            original_manifest_after_sync = (release / "manifest.json").read_bytes()
             result = verify_release(release)
             self.assertEqual(result["dataset_original_records"], 1)
-            self.assertEqual(result["user_evaluation_records"], 1)
-
+            self.assertEqual(result["user_evaluation_records"], 0)
             with (release / "predictions.csv").open(
                 encoding="utf-8", newline=""
             ) as stream:
-                rows = list(csv.DictReader(stream))
-            self.assertEqual(list(rows[0]), PUBLIC_COLUMNS)
-            self.assertEqual(rows[-1]["prediction_origin"], "user_evaluation")
-            self.assertEqual(rows[-1]["prediction_run_id"], "local-run")
-            self.assertEqual(rows[-1]["model_id"], "local-model")
-            self.assertEqual(rows[-1]["prediction_model_name"], "Local BERT")
+                original_rows = list(csv.DictReader(stream))
+            self.assertEqual(len(original_rows), 1)
+            self.assertEqual(original_rows[0]["prediction_origin"], "dataset_original")
+
+            # The user's own evaluation instead lands in a private mirror file.
+            mirror_path = release / USER_PREDICTIONS_FILENAME
+            with mirror_path.open(encoding="utf-8", newline="") as stream:
+                mirror_rows = list(csv.DictReader(stream))
+            self.assertEqual(list(mirror_rows[0]), PUBLIC_COLUMNS)
+            self.assertEqual(len(mirror_rows), 1)
+            self.assertEqual(mirror_rows[0]["prediction_origin"], "user_evaluation")
+            self.assertEqual(mirror_rows[0]["prediction_run_id"], "local-run")
+            self.assertEqual(mirror_rows[0]["model_id"], "local-model")
+            self.assertEqual(mirror_rows[0]["prediction_model_name"], "Local BERT")
             self.assertEqual(
-                rows[-1]["prediction_model_provenance"],
+                mirror_rows[0]["prediction_model_provenance"],
                 "local_checkpoint",
             )
             self.assertEqual(
-                rows[-1]["prediction_official_manifest_entry_sha256"],
+                mirror_rows[0]["prediction_official_manifest_entry_sha256"],
                 "",
             )
-
-            manifest_path = release / "manifest.json"
-            stale_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            stale_manifest["records"] = 1
-            stale_manifest["user_evaluation_records"] = 0
-            stale_manifest["parts"][0]["rows"] = 1
-            manifest_path.write_text(
-                json.dumps(stale_manifest, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            self.assertTrue(reconcile_prediction_dataset(release))
-            self.assertFalse(reconcile_prediction_dataset(release))
-            repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(repaired["records"], 2)
-            self.assertEqual(repaired["user_evaluation_records"], 1)
 
             with Storage(root / "restored-state") as restored:
                 self.assertEqual(restore_user_predictions(restored, release), 1)
@@ -196,6 +192,14 @@ class PredictionDatasetSyncTest(unittest.TestCase):
                 )
             with Storage(root / "restored-state") as reopened:
                 self.assertEqual(len(reopened.rows["prediction_runs"]), 1)
+
+            # A full restore-and-resync round trip still never touches the shared file.
+            self.assertEqual(
+                (release / "predictions.csv").read_bytes(), original_bytes_after_sync
+            )
+            self.assertEqual(
+                (release / "manifest.json").read_bytes(), original_manifest_after_sync
+            )
 
 
 if __name__ == "__main__":

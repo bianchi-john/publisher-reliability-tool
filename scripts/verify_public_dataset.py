@@ -94,6 +94,12 @@ def validate_user_prediction(row: dict[str, str], row_number: int) -> None:
         raise ValueError(f"unexpected official model digest at release row {row_number}")
 
 
+# Matches publisher_reliability.prediction_dataset.USER_PREDICTIONS_FILENAME: the
+# running application writes a user's own local evaluations there, beside the release
+# but never part of it, so a verified release directory may legitimately contain it.
+USER_PREDICTIONS_FILENAME = "user-predictions.csv"
+
+
 def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[str, int]:
     manifest_path = release_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -124,7 +130,9 @@ def verify_release(release_dir: Path, source_path: Path | None = None) -> dict[s
         expected_part_rows.append(int(part["rows"]))
 
     unexpected_csv = sorted(
-        path.name for path in release_dir.glob("*.csv") if path.name not in part_names
+        path.name
+        for path in release_dir.glob("*.csv")
+        if path.name not in part_names and path.name != USER_PREDICTIONS_FILENAME
     )
     if unexpected_csv:
         raise ValueError(f"CSV files absent from manifest: {unexpected_csv}")

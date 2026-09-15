@@ -11,22 +11,21 @@
 <body>
   <a class="skip-link" href="#content">Skip to content</a>
   <header class="topbar">
-    <a class="brand" href="#dashboard" aria-label="Publisher Reliability Tool home">
+    <a class="brand" href="#evaluate" aria-label="Publisher Reliability Tool home">
       <span class="brand-mark">PR</span>
       <span><strong>Publisher Reliability</strong><small>Research workspace</small></span>
     </a>
     <div class="topbar-actions">
-      <div id="system-state" class="system-state" aria-live="polite">Connecting…</div>
+      <button id="system-state" class="system-state" type="button" aria-haspopup="true" aria-expanded="false">Connecting…</button>
+      <div id="system-popover" class="system-popover" role="dialog" aria-label="Workspace overview" hidden></div>
     </div>
   </header>
   <div class="shell">
     <nav aria-label="Primary">
-      <a href="#dashboard" data-page="dashboard">Dashboard</a>
       <a href="#evaluate" data-page="evaluate">Evaluate</a>
       <a href="#articles" data-page="articles">Articles & predictions</a>
       <a href="#publishers" data-page="publishers">Publishers</a>
       <a href="#models" data-page="models">Models</a>
-      <a href="#imports" data-page="imports">Imports</a>
       <a href="#jobs" data-page="jobs">Jobs</a>
       <a href="/api/docs">API docs <span aria-hidden="true">↗</span></a>
     </nav>

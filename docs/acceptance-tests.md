@@ -182,9 +182,11 @@ makes no network/model call, creates no run/evaluation, and reports provenance.
 
 Two accepted recompute requests freshly retrieve and create two different
 immutable UUIDv4 runs. Earlier runs remain queryable. Each new run appears
-exactly once in `dataset/predictions/predictions.csv` with
+exactly once in the private, git-ignored
+`dataset/predictions/user-predictions.csv` with
 `prediction_origin=user_evaluation`, matching run/model/fold/label and all five
-probabilities; restarting adds no duplicate.
+probabilities; restarting adds no duplicate, and the tracked
+`dataset/predictions/predictions.csv` release is never modified.
 
 ### AT-028 — Saved local content lifecycle
 
@@ -274,9 +276,10 @@ quantization value changes it.
 
 ### AT-040 — Essential navigation
 
-Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs are keyboard
-reachable and present loading, empty, offline, missing-model, partial, and error
-states with clear English actions. Articles exposes distinct dataset and
+Evaluate, Articles, Publishers, Models, and Jobs are keyboard reachable and
+present loading, empty, offline, missing-model, partial, and error states with
+clear English actions. The top-bar status control opens a keyboard-reachable
+popover with workspace counts and runtime details. Articles exposes distinct dataset and
 user-evaluated filters/badges derived from run origin rather than URL heuristics.
 An imported article with a later local run remains dataset-backed and also
 shows the user-evaluated badge. The UI exposes a single warm orange/terracotta
@@ -295,14 +298,18 @@ remain visible in Evaluate after refresh.
 
 ### AT-042 — Export privacy
 
-Article CSV export contains the exact documented header and filtered derived
-rows but no title, body, author, HTML, snippet, protected value, or full model
-path.
+The prediction CSV export contains the exact documented header and one filtered
+row per stored prediction run, each naming its model and carrying all five class
+probabilities, but no title, body, author, HTML, snippet, protected value, or
+full model path.
 
 ### AT-043 — Job polling
 
 Evaluation, dataset import, and model validation jobs move through only their
-documented macro phases and terminal state. The UI observes them by polling;
+documented phases and terminal state, and reported progress never moves
+backwards. Evaluation reports each slow step so the progress bar advances
+gradually instead of jumping from start to completion. The UI observes them by
+polling;
 there is no event, cancel, or retry route. Equivalent CLI verify/import/scan
 commands execute synchronously and create no job requiring a server worker.
 

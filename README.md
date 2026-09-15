@@ -52,7 +52,7 @@ The service is published only on `127.0.0.1:8000`.
 | Evaluation | Stored reuse, new single-article inference and publisher aggregation |
 | Methods | Majority vote, ordinal mean and mean probabilities |
 | Import | Privacy-preserving CSV and CSV.GZ import |
-| Persistence | Seven CSV ledgers plus a user-prediction mirror in the dataset |
+| Persistence | Seven CSV ledgers plus a private, git-ignored user-prediction mirror |
 | Access | Browser UI, REST API, OpenAPI and CLI |
 | Offline | Browsing, reuse and stored aggregation |
 
@@ -66,11 +66,13 @@ Imports are identified by content digest, so restarting or importing the same
 dataset again does not duplicate data.
 
 Every newly inferred article run is first committed to
-`data/state/prediction_runs.csv`, then mirrored as one `user_evaluation` row in
-`dataset/predictions/predictions.csv`. Original rows are explicitly marked
-`dataset_original`. The mirror includes the exact model/fold, predicted label,
-model display name, official/custom/local provenance, all five probabilities
-and run provenance, and is synchronized without
+`data/state/prediction_runs.csv`, then mirrored as one row in
+`dataset/predictions/user-predictions.csv`, a private file listed in
+`.gitignore` and never part of the tracked release. The released
+`dataset/predictions/predictions.csv` holds only `dataset_original` rows and is
+never modified after it ships. The mirror includes the exact model/fold,
+predicted label, model display name, official/custom/local provenance, all
+five probabilities and run provenance, and is synchronized without
 duplicating an existing `prediction_run_id`.
 
 ## Models and new article inference
@@ -133,9 +135,11 @@ and remain outside version control.
 - Authors and raw HTML have no storage field.
 - Every publisher evaluation records the exact model, articles and runs used.
 - Every bundled historical run includes all five class probabilities.
-- Every local article inference is mirrored in the tracked prediction CSV with
-  `prediction_origin=user_evaluation`.
-- The only tracked dataset is the prediction release in `dataset/predictions`.
+- Every local article inference is mirrored to a private,
+  `.gitignore`d CSV (`dataset/predictions/user-predictions.csv`) with
+  `prediction_origin=user_evaluation`; it never enters version control.
+- The only tracked dataset is the released `predictions.csv` in
+  `dataset/predictions`, which the running application never modifies.
 
 See [dataset/README.md](dataset/README.md) for the dataset format.
 

@@ -35,7 +35,9 @@ browser/CLI -> FastAPI service -> Storage (seven authoritative CSV files)
                                -> AggregationMethod
                                       |
                                       +-> PredictionDatasetMirror
-                                          -> dataset/predictions/predictions.csv
+                                          -> dataset/predictions/user-predictions.csv
+                                             (private, git-ignored; the tracked
+                                             predictions.csv is never written)
 ```
 
 Frontend and API use the same Pydantic request types and service functions.
@@ -47,7 +49,7 @@ CSV files.
 | Boundary | Responsibility | How to extend |
 | --- | --- | --- |
 | `Storage` | Load ledgers, lock data directory, append immutable rows, atomically rewrite small mutable files | Add a column/schema version and loader validation |
-| `PredictionDatasetMirror` | Upgrade the public CSV schema, mirror local runs idempotently, refresh its manifest, and restore mirrored runs at startup | Add an explicit origin/run field without changing original-row identity |
+| `PredictionDatasetMirror` | Mirror local runs idempotently to a private, git-ignored file and restore mirrored runs at startup; never writes the tracked release | Add an explicit origin/run field without changing original-row identity |
 | `ModelLoader` | Recognize one explicit family, validate resources, tokenize, run its frozen fixture | Add one Python class and scientific fixture; no plugin loader |
 | `ArticleRetriever` | Normalize URLs, enforce safe HTTP policy, parse supplied HTML | Add an extraction strategy behind the same content boundary |
 | `InferenceService` | Select reuse/recompute, call loader, validate probabilities, create provenance | Add output fields explicitly to run schema |
@@ -64,16 +66,19 @@ extension mechanism.
 publishers are derived at startup from canonical URL, publisher hostname, and
 prediction-run data. This avoids synchronizing a second entity store.
 
-The prediction release is a deliberate, inspectable replica for user-created
-article runs. Original rows use `prediction_origin=dataset_original`; one local
-inference uses one `prediction_origin=user_evaluation` row identified by
-`prediction_run_id`. A run commits to `prediction_runs.csv` first, then the
-mirror rewrites `predictions.csv` and `manifest.json` through sibling temporary
-files. At startup, valid CSV content can reconcile stale mutable manifest
-metadata when the immutable original digest still matches; mirrored local rows
-missing from state are then restored before all local runs are synchronized
-again. Thus the dataset copy can aid recovery but never creates a competing run
-ID or duplicate on restart.
+The prediction mirror is a deliberate, inspectable replica for user-created
+article runs, kept in a private, git-ignored file
+(`dataset/predictions/user-predictions.csv`) entirely separate from the tracked
+`predictions.csv` release: a user's own evaluation history must never enter
+version control. Original rows in the tracked release use
+`prediction_origin=dataset_original` and are never rewritten by the running
+application; one local inference uses one `prediction_origin=user_evaluation`
+row identified by `prediction_run_id` in the private mirror. A run commits to
+`prediction_runs.csv` first, then the mirror file is rewritten through a
+sibling temporary file. At startup, mirrored local rows missing from state are
+restored before all local runs are synchronized again. Thus the mirror can aid
+recovery but never creates a competing run ID or duplicate on restart, and
+never touches the tracked release.
 
 - Immutable scientific rows (`prediction_runs.csv`, `evaluations.csv`, and
   `imports.csv`) are appended, flushed, and fsynced.
@@ -101,7 +106,8 @@ acceptable for this single-user demo.
 
 One FIFO worker runs `evaluation`, `dataset_import`, and `model_validation`
 jobs. Admission persists a queued row; the worker rewrites job state at
-macrophase boundaries. The browser polls every two seconds.
+phase boundaries, including every evaluation step that can take noticeable
+time. The browser polls about once per second while a job runs.
 
 No persistent event stream, cancellation, retry endpoint, priority queue, lane,
 or job-level parallelism exists. Publisher candidates are sequential. On
@@ -237,7 +243,7 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Running job at restart | Mark `PROCESS_INTERRUPTED` |
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |
 | Missing artifact | Preserve historical model identity and runs |
-| Prediction mirror is unwritable | Preserve the committed state run, fail the dependent inference operation, and report storage failure |
+| Private prediction mirror is unwritable | Preserve the committed state run, fail the dependent inference operation, and report storage failure |
 | Purge | Rewrite active local-content file; backups remain the user's responsibility |
 
 Manual stopped-server copying of the data directory is the backup and restore

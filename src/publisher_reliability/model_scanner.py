@@ -32,6 +32,14 @@ def _sha256_file(path: Path) -> str:
 
 
 def _validate_checkpoint(path: Path, family: str) -> tuple[int, int]:
+    """Confirm a .pt file really is the expected classifier before trusting it.
+
+    Weights are read with ``weights_only`` so a checkpoint can never execute code while
+    loading. Shapes, tensor and layer counts are then matched against the known BERT
+    and RoBERTa architectures and non-finite values rejected: a file that merely
+    unpickles cleanly could still be the wrong model or a truncated download.
+    """
+
     try:
         import torch
     except ImportError as exc:
@@ -96,6 +104,12 @@ def _model_row(
     parameter_count: int,
     timestamp: str,
 ) -> dict[str, object]:
+    """Describe one validated local checkpoint as a models ledger row.
+
+    The locator is stored relative to a configured root rather than as an absolute
+    path, so the same artifact keeps one identity across machines and container layouts.
+    """
+
     base_model = CORE_MODELS[family]["base_model"]
     base_revision = CORE_MODELS[family]["revision"]
     return {

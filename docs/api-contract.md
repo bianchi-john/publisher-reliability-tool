@@ -161,13 +161,17 @@ content is `NOT_FOUND`; bad confirmation is `INVALID_INPUT`.
 
 ### `GET /api/v1/articles/export`
 
-Streams all filtered article summaries as CSV using the list filters. Header:
+Streams one row per stored prediction run as CSV using the list filters, so every
+model that evaluated an article is a separate, fully described row. Runs of the
+same article stay adjacent, ordered by family then fold. Header:
 
 ```text
-article_id,canonical_url,publisher_id,normalized_hostname,model_count,run_count,latest_prediction_run_id,latest_model_id,latest_predicted_class,source_type,dataset_run_count,local_run_count,has_user_evaluation,content_saved,first_seen_at,updated_at
+article_id,url,domain,publisher_id,prediction_origin,prediction_run_id,model_id,prediction_family,prediction_fold_id,prediction_model_name,prediction_model_provenance,prediction_official_manifest_entry_sha256,predicted_label,prob_class_0,prob_class_1,prob_class_2,prob_class_3,prob_class_4,prediction_action,input_source,content_retention,job_id,inference_started_at,inference_completed_at,duration_ms,device,software_versions_json,recorded_at
 ```
 
-No option can include saved or ephemeral content.
+The attachment is named `article-predictions.csv`. Column names match the
+user-prediction block of `dataset/predictions/predictions.csv`. No option can
+include saved or ephemeral content, and no column exposes an artifact path.
 
 ## 6. Publishers and evaluations
 
@@ -351,10 +355,11 @@ states whether an existing exact run was selected. The probability array always
 uses class order `[0,1,2,3,4]`.
 
 When `origin=local_inference`, the committed authoritative run is also mirrored
-to `dataset/predictions/predictions.csv` as one
+to a private, git-ignored `dataset/predictions/user-predictions.csv` as one
 `prediction_origin=user_evaluation` row keyed by the same
-`prediction_run_id`. This storage side effect adds no API field and repeated
-synchronization does not create another row.
+`prediction_run_id`. This mirror file is never part of the tracked release, so
+a user's own evaluations never enter version control. The side effect adds no
+API field and repeated synchronization does not create another row.
 
 Before model execution, the service enforces the cross-validation leakage rule
 from the scientific contract for single articles, explicit lists and publisher
@@ -382,7 +387,8 @@ Paginated newest-first list filtered by `status` or `job_type`.
 
 Returns job type/status, macro phase, approximate progress, safe normalized
 request, result IDs/counters/warnings, safe error code/message, and timestamps.
-The frontend polls this endpoint every two seconds. Failed jobs return HTTP
+The frontend polls this endpoint about once per second while a job runs.
+Failed jobs return HTTP
 `200`; absent jobs return `NOT_FOUND`.
 
 ## 10. Imports

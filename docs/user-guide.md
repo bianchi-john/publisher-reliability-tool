@@ -6,7 +6,10 @@ predictions, and publisher aggregations.
 > Predictions are estimates, not fact checks or ground-truth ratings. Softmax
 > values are not necessarily calibrated confidence.
 
-## 1. Understand the dashboard counts
+## 1. Understand the workspace overview
+
+Click **Ready · local** (or **Ready · offline**) in the top bar to open a
+compact overview popover with the same counts a dashboard would show:
 
 - **Stored predictions** are immutable article-level outputs. The bundled
   release contains BERT and RoBERTa only, with one predicted label and all five
@@ -136,14 +139,18 @@ page refresh.
 Every completed new inference is stored in two coordinated places:
 
 - `data/state/prediction_runs.csv` is the authoritative application ledger;
-- `dataset/predictions/predictions.csv` contains an inspectable mirror row with
-  `prediction_origin=user_evaluation`.
+- `dataset/predictions/user-predictions.csv` contains an inspectable mirror row
+  with `prediction_origin=user_evaluation`. This file is private: it is listed
+  in `.gitignore` and never becomes part of the tracked repository, because a
+  user's own reading and evaluation history must never be committed alongside
+  the shared research dataset.
 
 The mirrored row includes the run ID, URL, exact model ID/family/fold, predicted
 label, all five probabilities, action, timestamps, duration, device and
-software versions. Existing release rows use
-`prediction_origin=dataset_original`. A repeated start or synchronization does
-not duplicate a prediction because the run ID is unique.
+software versions. The tracked `dataset/predictions/predictions.csv` holds only
+`prediction_origin=dataset_original` rows and is never modified by the running
+application. A repeated start or synchronization does not duplicate a
+prediction because the run ID is unique.
 
 Common availability messages have distinct meanings:
 
@@ -182,8 +189,13 @@ origins; it does not guess from the URL:
 | `user_import` | Imported dataset |
 | `local_inference` | User evaluation |
 
-The article CSV export includes the same derived source counts and flags but
-never includes saved body text, authors, or raw HTML.
+**Export predictions CSV** downloads `article-predictions.csv`: one row per
+stored prediction, so each model that evaluated an article appears separately
+with its own predicted label, all five class probabilities, family, fold,
+readable model name, provenance, run ID, model ID, and the job ID of the
+evaluation that produced it. Rows of the same article stay adjacent, and the
+active source filter applies to the download. It never includes saved body
+text, authors, raw HTML, or a checkpoint path.
 
 Run origin in the application ledger (`local_inference`) and row origin in the
 combined prediction dataset (`user_evaluation`) describe the same user-created

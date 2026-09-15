@@ -18,6 +18,8 @@ from .storage import Storage
 
 
 def parser() -> argparse.ArgumentParser:
+    """Build the command tree: serve, dataset, models and storage."""
+
     root = argparse.ArgumentParser(prog="publisher-reliability")
     commands = root.add_subparsers(dest="command", required=True)
 
@@ -71,6 +73,13 @@ def _config_with_args(args: argparse.Namespace) -> Config:
 
 
 def _serve(args: argparse.Namespace) -> int:
+    """Start the local server, reserving the port before touching any state.
+
+    The socket is bound first so a port conflict fails without having changed the data
+    directory, and the bound socket is handed to uvicorn to close the window in which
+    another process could take the port.
+    """
+
     print("Starting Publisher Reliability Tool…", flush=True)
     config = _config_with_args(args)
     bind_host = "0.0.0.0" if config.container_internal else "127.0.0.1"
@@ -123,6 +132,12 @@ def _serve(args: argparse.Namespace) -> int:
 
 
 def _dataset_verify(path: Path) -> int:
+    """Verify a release directory or a single CSV without touching stored state.
+
+    A single file is imported into a temporary workspace that is discarded afterwards,
+    so verification never has a side effect on the real data directory.
+    """
+
     if path.is_dir():
         result = verify_manifest(path)
         print(
@@ -169,6 +184,8 @@ def _dataset_import(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Dispatch one command and translate application errors into exit codes."""
+
     args = parser().parse_args(argv)
     try:
         if args.command == "serve":

@@ -36,4 +36,9 @@ dataset/*
 !dataset/predictions/
 !dataset/predictions/*.csv
 !dataset/predictions/manifest.json
+# A user's own local evaluations are mirrored here so they survive a data/ wipe, but
+# they are personal usage history and must never be committed alongside the shared
+# released dataset above.
+dataset/predictions/user-predictions.csv
 data/
+other/

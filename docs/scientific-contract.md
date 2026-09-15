@@ -37,8 +37,11 @@ ordered run and article IDs it used. A newer run never changes an older result.
 The working release is `dataset/predictions/manifest.json` plus
 `predictions.csv`. Part size/checksum, row counts, schema, and the stable
 `prt-dataset-content-v1` digest of original rows are verified before import.
-Schema version 2 distinguishes `dataset_original` and `user_evaluation` through
-the required `prediction_origin` field.
+Schema version 2 declares the `prediction_origin` field, but the tracked
+release itself carries only `dataset_original` rows: a user's own
+`user_evaluation` rows are mirrored to a separate, private, git-ignored
+`dataset/predictions/user-predictions.csv` file instead, and never enter the
+tracked release or version control (see §7).
 
 The bundled legacy wide schema contains:
 
@@ -270,11 +273,13 @@ transformers, tokenizers, Newspaper3k, and langdetect versions; an unused
 optional library is JSON null. Imported runs use `{}` rather than guessed data.
 
 After the state-ledger append, every local inference is mirrored idempotently
-to the schema-2 dataset as `prediction_origin=user_evaluation`. The mirror
-copies the same run ID, URL, exact local model/fold, hard class, five
-probabilities and provenance. It neither changes nor fills an original BERT or
-RoBERTa output. Startup may restore a mirrored run absent from state and then
-resynchronize all local runs; run IDs prevent duplication.
+to a private, git-ignored `dataset/predictions/user-predictions.csv` as
+`prediction_origin=user_evaluation`. The mirror copies the same run ID, URL,
+exact local model/fold, hard class, five probabilities and provenance. It
+neither changes nor fills an original BERT or RoBERTa output, and it never
+touches the tracked `predictions.csv` release: a user's own evaluation history
+must never enter version control. Startup may restore a mirrored run absent
+from state and then resynchronize all local runs; run IDs prevent duplication.
 
 ## 8. Publisher aggregation
 

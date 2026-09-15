@@ -1,5 +1,6 @@
 const content = document.querySelector("#content");
 const stateBadge = document.querySelector("#system-state");
+const systemPopover = document.querySelector("#system-popover");
 const warning = "Predictions are estimates, not fact checks. Softmax values are not necessarily calibrated confidence.";
 let routeController = null;
 
@@ -11,6 +12,18 @@ const statusPill = (value) => `<span class="pill ${escapeHtml(value)}">${escapeH
 const pageHead = (eyebrow, title, intro, action = "") => `
   <header class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>
   <p class="intro">${intro}</p></div>${action}</header>`;
+const errorCard = (message) => `<div class="error-card" role="alert"><span class="error-icon" aria-hidden="true">!</span><span>${escapeHtml(message)}</span></div>`;
+const humanizePhase = (value) => {
+  const text = String(value ?? "").replaceAll("_", " ").trim() || "working";
+  return escapeHtml(text.charAt(0).toUpperCase() + text.slice(1));
+};
+const progressCard = (phase, percent) => {
+  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+  return `<div class="progress-card" aria-live="polite">
+    <div class="progress-message"><span>${humanizePhase(phase)}…</span><b>${clamped}%</b></div>
+    <div class="progress-track"><span style="width:${clamped}%"></span></div>
+  </div>`;
+};
 const modelLabel = (row) => row.display_name || row.model_display_name || `${String(row.family).toUpperCase()} · fold ${row.fold_id}`;
 const provenanceLabel = (value) => ({
   paper_official: "Paper original",
@@ -52,10 +65,10 @@ function table(headers, rows) {
 }
 
 function parseLocation() {
-  const raw = location.hash.slice(1) || "dashboard";
+  const raw = location.hash.slice(1) || "evaluate";
   const [path, query = ""] = raw.split("?", 2);
   const parts = path.split("/").filter(Boolean);
-  return {page: parts[0] || "dashboard", id: parts[1] || "", params: new URLSearchParams(query)};
+  return {page: parts[0] || "evaluate", id: parts[1] || "", params: new URLSearchParams(query)};
 }
 
 function probabilityCells(run) {
@@ -115,25 +128,71 @@ function pager(base, page) {
   return previous || next ? `<div class="pager">${previous}<span class="muted">Rows ${page.offset + 1}–${page.offset + page.limit}</span>${next}</div>` : "";
 }
 
-async function dashboard() {
-  const status = await api("/api/v1/status");
-  stateBadge.textContent = status.offline ? "Ready · offline" : "Ready · local";
-  const c = status.ledger_counts;
-  const d = status.derived_counts;
-  content.innerHTML = pageHead("Local overview", "Research dashboard",
-    "Browse every imported prediction separately from publisher aggregations created in this workspace.") + `
-    <div class="grid">
-      <section class="card"><div class="muted">Articles</div><div class="metric">${Number(d.articles).toLocaleString()}</div><p>Distinct articles represented in prediction history</p></section>
-      <section class="card"><div class="muted">Stored predictions</div><div class="metric">${Number(d.historical_predictions).toLocaleString()}</div><p>Immutable model outputs imported from datasets</p></section>
-      <section class="card"><div class="muted">Complete probability vectors</div><div class="metric">${Number(d.predictions_with_probabilities).toLocaleString()}</div><p>Every bundled BERT/RoBERTa run contains all five classes</p></section>
-      <section class="card"><div class="muted">Publishers</div><div class="metric">${Number(d.publishers).toLocaleString()}</div><p>Normalized publisher identities</p></section>
-      <section class="card"><div class="muted">Created aggregations</div><div class="metric">${Number(c.evaluations).toLocaleString()}</div><p>Publisher-level results explicitly created here</p></section>
-      <section class="card"><div class="muted">Model identities</div><div class="metric">${Number(c.models).toLocaleString()}</div><p>Historical identities plus validated local checkpoints</p></section>
-      <section class="card wide"><h2>How counts differ</h2><div class="notice"><b>Stored predictions</b> are the article-level evaluations already present in the imported dataset. <b>Created aggregations</b> combine several of those predictions for one publisher and start at zero until you create one.</div></section>
-      <section class="card"><h2>Runtime</h2><p><b>Device:</b> ${escapeHtml(status.device)}<br><b>Schema:</b> ${escapeHtml(status.schema_version)}<br><b>Version:</b> ${escapeHtml(status.application_version)}</p></section>
-      <section class="card full"><div class="warning">${warning} This tool never calculates accuracy against protected labels.</div></section>
-    </div>`;
+async function refreshSystemBadge() {
+  try {
+    const status = await api("/api/v1/status");
+    stateBadge.textContent = status.offline ? "Ready · offline" : "Ready · local";
+    return status;
+  } catch (error) {
+    stateBadge.textContent = "Status unavailable";
+    return null;
+  }
 }
+
+async function loadSystemPopover() {
+  systemPopover.innerHTML = `<div class="loading">Loading overview…</div>`;
+  try {
+    const status = await api("/api/v1/status");
+    const c = status.ledger_counts;
+    const d = status.derived_counts;
+    systemPopover.innerHTML = `
+      <div class="popover-section">
+        <div class="popover-row"><span>Articles</span><b>${Number(d.articles).toLocaleString()}</b></div>
+        <div class="popover-row"><span>Stored predictions</span><b>${Number(d.historical_predictions).toLocaleString()}</b></div>
+        <div class="popover-row"><span>Publishers</span><b>${Number(d.publishers).toLocaleString()}</b></div>
+        <div class="popover-row"><span>Created aggregations</span><b>${Number(c.evaluations).toLocaleString()}</b></div>
+        <div class="popover-row"><span>Model identities</span><b>${Number(c.models).toLocaleString()}</b></div>
+      </div>
+      <div class="popover-section">
+        <div class="popover-row"><span>Device</span><b>${escapeHtml(status.device)}</b></div>
+        <div class="popover-row"><span>Schema</span><b>${escapeHtml(status.schema_version)}</b></div>
+        <div class="popover-row"><span>Version</span><b>${escapeHtml(status.application_version)}</b></div>
+      </div>
+      <a class="popover-link" href="#models">Manage models →</a>`;
+  } catch (error) {
+    systemPopover.innerHTML = errorCard(error.message);
+  }
+}
+
+function closeSystemPopover() {
+  if (systemPopover.hidden) return;
+  systemPopover.hidden = true;
+  stateBadge.setAttribute("aria-expanded", "false");
+}
+
+async function toggleSystemPopover() {
+  const opening = systemPopover.hidden;
+  systemPopover.hidden = !opening;
+  stateBadge.setAttribute("aria-expanded", String(opening));
+  if (opening) await loadSystemPopover();
+}
+
+stateBadge.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleSystemPopover();
+});
+document.addEventListener("click", (event) => {
+  if (!systemPopover.hidden && !systemPopover.contains(event.target) && event.target !== stateBadge) {
+    closeSystemPopover();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !systemPopover.hidden) {
+    closeSystemPopover();
+    stateBadge.focus();
+  }
+});
+window.addEventListener("hashchange", closeSystemPopover);
 
 async function articles(_id, params) {
   const offset = Number(params.get("offset") || 0);
@@ -142,7 +201,7 @@ async function articles(_id, params) {
   const pageBase = source ? `articles?source=${encodeURIComponent(source)}` : "articles";
   content.innerHTML = pageHead("Prediction history", "Articles & predictions",
     "Dataset articles and articles classified by the user are identified separately. Open one to inspect every model output and probability.",
-    `<a class="button secondary" href="/api/v1/articles/export${source ? `?article_source=${encodeURIComponent(source)}` : ""}">Export CSV</a>`) + `
+    `<a class="button secondary" href="/api/v1/articles/export${source ? `?article_source=${encodeURIComponent(source)}` : ""}">Export predictions CSV</a>`) + `
     <div class="source-tabs" aria-label="Filter articles by source">
       <a class="${source ? "" : "active"}" href="#articles">All articles</a>
       <a class="${source === "dataset" ? "active" : ""}" href="#articles?source=dataset">Dataset articles</a>
@@ -231,14 +290,15 @@ async function publisherDetail(id, params) {
 }
 
 async function waitForJob(jobId, output) {
-  for (let attempt = 0; attempt < 240; attempt += 1) {
+  const deadline = Date.now() + 480000;
+  while (Date.now() < deadline) {
     const job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
-    output.textContent = `${job.phase || job.status} · ${job.progress}%`;
+    output.innerHTML = progressCard(job.phase || job.status, job.progress);
     if (job.status === "succeeded") return job;
     if (job.status === "failed") throw new Error(job.error_message || "Model scan failed.");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 700));
   }
-  throw new Error("Model scan is still running; inspect it on the Jobs page.");
+  throw new Error("This job is still running; inspect it on the Jobs page.");
 }
 
 function renderModelTables(items) {
@@ -331,7 +391,7 @@ async function models() {
       scanState.textContent = `${job.result.message}${rejected ? ` ${rejected} checkpoint(s) rejected.` : ""}`;
       await loadInventory();
     } catch (error) {
-      scanState.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+      scanState.innerHTML = errorCard(error.message);
     } finally {
       scanButton.disabled = false;
     }
@@ -353,7 +413,7 @@ async function models() {
       event.currentTarget.reset();
       await loadInventory();
     } catch (error) {
-      scanState.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+      scanState.innerHTML = errorCard(error.message);
     } finally {
       uploadButton.disabled = false;
     }
@@ -373,7 +433,7 @@ async function models() {
       event.currentTarget.reset();
       await loadInventory();
     } catch (error) {
-      scanState.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+      scanState.innerHTML = errorCard(error.message);
     } finally {
       uploadButton.disabled = false;
     }
@@ -394,30 +454,6 @@ async function models() {
   } else {
     scanState.textContent = "Inventory loaded. Rescan after adding or removing checkpoint files.";
   }
-}
-
-async function importsPage() {
-  content.innerHTML = pageHead("Dataset provenance", "Imports",
-    "Upload CSV or CSV.GZ predictions. Editorial and protected values are discarded before persistence.") + `
-    <section class="card full"><form id="upload"><div class="row"><label>Prediction dataset
-      <input required name="file" type="file" accept=".csv,.gz"></label><button>Import dataset</button></div></form>
-      <div id="upload-result" aria-live="polite"></div></section><div class="loading">Loading imports…</div>`;
-  document.querySelector("#upload").addEventListener("submit", async event => {
-    event.preventDefault();
-    const result = document.querySelector("#upload-result");
-    result.textContent = "Acquiring upload…";
-    try {
-      const body = new FormData(event.currentTarget);
-      const job = await api("/api/v1/imports/upload", {method: "POST", body});
-      result.innerHTML = `<p>Import accepted as job ${shortId(job.job_id)}</p>`;
-    } catch (error) { result.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
-  });
-  const data = await api("/api/v1/imports?limit=25");
-  content.querySelector(".loading").outerHTML = table(
-    ["Source", "Status", "Rows", "Accepted", "Digest"],
-    data.items.map(row => `<tr><td>${escapeHtml(row.source_name)}<br><span class="muted">${escapeHtml(row.source_kind)}</span></td>
-      <td>${statusPill(row.status)}</td><td>${row.source_rows}</td><td>${row.accepted_rows}</td><td>${shortId(row.content_sha256)}</td></tr>`)
-  );
 }
 
 async function jobsPage() {
@@ -452,7 +488,7 @@ async function evaluate() {
           <small>“Use available” creates a partial result with at least two safe articles; “require” fails unless the requested count is reached.</small></label>
       </div>
       <div id="model-availability" class="notice" aria-live="polite">Models will be detected from stored predictions for this input.</div>
-      <div class="row"><button disabled>Start evaluation</button></div>
+      <div class="row evaluation-actions"><button disabled>Start evaluation</button></div>
     </form><div id="evaluation-result" aria-live="polite"></div></section>
     <section class="section-block"><h2>Recent user article evaluations</h2>
       <p class="muted">New local predictions remain visible here after a refresh. Open an article for its complete model history.</p>
@@ -502,8 +538,13 @@ async function evaluate() {
       modelField.innerHTML = `<option value="">Enter a valid URL first</option>`;
       modelField.disabled = true;
       submit.disabled = true;
+      availability.hidden = false;
+      availability.className = "notice";
+      availability.textContent = "Models will be detected from stored predictions for this input.";
       return;
     }
+    availability.hidden = false;
+    availability.className = "notice";
     availability.textContent = "Detecting compatible stored predictions…";
     const query = new URLSearchParams({
       input_type: typeField.value,
@@ -525,15 +566,24 @@ async function evaluate() {
       modelField.disabled = !eligible.length;
       submit.disabled = !eligible.length;
       const blocked = data.availability.blocked_training_models || [];
-      availability.innerHTML = `<b>${escapeHtml(data.availability.message)}</b>${
-        blocked.length
-          ? `<br><span class="muted">Blocked to prevent training leakage: ${blocked.map(row => escapeHtml(modelLabel(row))).join(", ")}.</span>`
-          : ""
-      }`;
+      const blockedNote = blocked.length
+        ? `<span class="muted">Blocked to prevent training leakage: ${blocked.map(row => escapeHtml(modelLabel(row))).join(", ")}.</span>`
+        : "";
+      if (data.availability.code === "AVAILABLE") {
+        availability.hidden = !blockedNote;
+        availability.className = "notice";
+        availability.innerHTML = blockedNote;
+      } else {
+        availability.hidden = false;
+        availability.className = "notice notice-warning";
+        availability.innerHTML = `<b>${escapeHtml(data.availability.message)}</b>${blockedNote ? `<br>${blockedNote}` : ""}`;
+      }
     } catch (error) {
       modelField.disabled = true;
       submit.disabled = true;
-      availability.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+      availability.hidden = false;
+      availability.className = "notice";
+      availability.innerHTML = errorCard(error.message);
     }
   }
 
@@ -557,10 +607,9 @@ async function evaluate() {
     const body = {input, model_id: data.get("model_id"), prediction_action: "reuse", content_retention: "discard"};
     if (type !== "article") body.aggregation_method = data.get("method");
     const output = document.querySelector("#evaluation-result");
-    output.textContent = "Submitting evaluation…";
+    output.innerHTML = progressCard("submitting evaluation", 0);
     try {
       const job = await api("/api/v1/evaluation-jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-      output.innerHTML = `<p class="notice">Evaluation accepted as job ${shortId(job.job_id)}. Retrieval and local inference may take some time depending on the selected model and hardware.</p>`;
       const completed = await waitForJob(job.job_id, output);
       if (type === "article") {
         output.innerHTML = articlePredictionResult(completed.result);
@@ -568,7 +617,7 @@ async function evaluate() {
       } else {
         output.innerHTML = `<p class="notice">Evaluation completed: Class ${completed.result.result_class}, using ${completed.result.used_count} article(s).</p>`;
       }
-    } catch (error) { output.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
+    } catch (error) { output.innerHTML = errorCard(error.message); }
   });
 
   await loadRecentArticleEvaluations();
@@ -583,14 +632,12 @@ async function evaluate() {
 }
 
 const routes = {
-  dashboard,
   evaluate,
   articles,
   article: articleDetail,
   publishers,
   publisher: publisherDetail,
   models,
-  imports: importsPage,
   jobs: jobsPage,
 };
 
@@ -605,10 +652,10 @@ async function route() {
   });
   content.setAttribute("aria-busy", "true");
   try {
-    await (routes[current.page] || dashboard)(current.id, current.params);
+    await (routes[current.page] || evaluate)(current.id, current.params);
   } catch (error) {
     if (error.name === "AbortError" || routeController !== controller) return;
-    content.innerHTML = pageHead("Request failed", "Unable to load this view", "") + `<p class="error">${escapeHtml(error.message)}</p>`;
+    content.innerHTML = pageHead("Request failed", "Unable to load this view", "") + errorCard(error.message);
   } finally {
     if (routeController === controller) content.setAttribute("aria-busy", "false");
   }
@@ -618,4 +665,5 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
+refreshSystemBadge();
 route();

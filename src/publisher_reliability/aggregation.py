@@ -46,6 +46,20 @@ METHODS = [
 
 
 def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
+    """Combine several article predictions into one publisher-level class.
+
+    The three methods answer subtly different questions and are kept separate rather
+    than blended: majority vote counts outlets' most common verdict, ordinal mean
+    exploits the fact that the five reliability classes are ordered rather than merely
+    distinct, and mean probabilities uses the full confidence vector and therefore
+    refuses runs that lack one.
+
+    Tie rules are fixed and documented in ``METHODS`` so that a repeated aggregation of
+    the same runs always returns the same class. Two articles is the floor: a single
+    prediction is not an aggregate, and reporting it as one would overstate what the
+    publisher-level number means.
+    """
+
     selected = list(runs)
     if len(selected) < 2:
         raise AppError(
@@ -54,11 +68,14 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
         )
     classes = [int(run["predicted_class"]) for run in selected]
     if any(value not in range(5) for value in classes):
+        # Out-of-range means the stored ledger is corrupt, not that the caller erred.
         raise AppError("STORAGE_ERROR", "A prediction contains an invalid class.")
 
     if method == "majority_vote":
         counts = Counter(classes)
         largest = max(counts.values())
+        # A tie resolves to the smallest class: the more cautious reading of the
+        # evidence, and a deterministic one.
         result = min(value for value, count in counts.items() if count == largest)
         return {
             "result_class": result,
@@ -68,6 +85,8 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
         }
 
     if method == "ordinal_mean":
+        # Averaging class indices is only meaningful because the bands are ordered.
+        # floor(mean + 0.5) rounds halves upward, unlike Python's banker's rounding.
         mean = sum(classes) / len(classes)
         return {
             "result_class": math.floor(mean + 0.5),
@@ -105,6 +124,7 @@ def aggregate(runs: Iterable[dict[str, str]], method: str) -> dict[str, object]:
             for index in range(5)
         ]
         largest = max(means)
+        # index() returns the first maximum, so a tie resolves to the smallest class.
         return {
             "result_class": means.index(largest),
             "ordinal_mean": "",

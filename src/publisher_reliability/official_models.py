@@ -82,6 +82,13 @@ def _identify_entry(
     sources: Iterable[Path],
     source_names: Iterable[str] | None = None,
 ) -> dict[str, object]:
+    """Recognise which catalogued model the uploaded files are.
+
+    Family and fold are never taken from the user: they are derived from the exact file
+    names, byte sizes and SHA-256 digests recorded in the published manifest, so a
+    renamed or altered download cannot be installed under a paper model's identity.
+    """
+
     paths = list(sources)
     if not paths:
         raise AppError("INVALID_INPUT", "Select at least one official model file.")
@@ -246,6 +253,13 @@ def _install_mistral(
 
 
 def llm_runtime_status() -> tuple[str, bool, str]:
+    """Report whether this machine can actually run a Llama or Mistral checkpoint.
+
+    A verified checkpoint is worth keeping even where it cannot run, so integrity and
+    runnability are reported separately: quantized inference needs CUDA and the
+    optional extra, neither of which is required to store and audit the artifact.
+    """
+
     missing = [
         package
         for package in ("accelerate", "bitsandbytes", "peft", "torch", "transformers")
