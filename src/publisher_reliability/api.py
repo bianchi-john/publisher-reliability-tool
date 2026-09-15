@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal, Union
@@ -90,7 +91,11 @@ def error_response(exc: AppError, request_id: str | None = None) -> JSONResponse
     )
 
 
-def create_app(config: Config | None = None) -> FastAPI:
+def create_app(
+    config: Config | None = None,
+    *,
+    on_scan_progress: Callable[[str], None] | None = None,
+) -> FastAPI:
     settings = config or Config.from_env()
     storage = Storage(settings.data_dir)
     try:
@@ -98,7 +103,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             settings.seed_dataset
         )
         bundled_import = import_bundled_release(storage, settings.seed_dataset)
-        startup_model_scan = scan_model_roots(storage, settings.models_dirs)
+        startup_model_scan = scan_model_roots(
+            storage, settings.models_dirs, on_progress=on_scan_progress
+        )
         restored_user_predictions = restore_user_predictions(
             storage,
             settings.seed_dataset,

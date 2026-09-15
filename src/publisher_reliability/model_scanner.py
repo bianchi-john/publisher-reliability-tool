@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from .errors import AppError
@@ -137,8 +137,24 @@ def _model_row(
     }
 
 
-def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, object]:
-    """Discover recognized files below configured roots and register validated artifacts."""
+def scan_model_roots(
+    storage: Storage,
+    roots: tuple[Path, ...],
+    *,
+    on_progress: Callable[[str], None] | None = None,
+) -> dict[str, object]:
+    """Discover recognized files below configured roots and register validated artifacts.
+
+    ``on_progress`` is an optional callback invoked with a short human-readable
+    message before each core checkpoint is hashed and structurally validated.
+    Every recognized checkpoint is fully re-read (SHA-256 over its exact bytes,
+    then a strict-shape ``torch.load``) on every scan, so this is the slow step
+    when large local checkpoints are configured; callers that want terminal or
+    console feedback during that wait (the CLI, ``serve`` at startup) should
+    pass a callback, while callers that already report progress through their
+    own channel (the background ``model_validation`` job, whose status is
+    polled by the UI) should leave it unset.
+    """
 
     timestamp = utc_now()
     discovered: list[dict[str, object]] = []
@@ -156,6 +172,9 @@ def scan_model_roots(storage: Storage, roots: tuple[Path, ...]) -> dict[str, obj
                 continue
             family, fold_value = match.groups()
             locator = f"root-{root_index}/{path.name}"
+            if on_progress is not None:
+                size_mb = path.stat().st_size / (1024 * 1024)
+                on_progress(f"Verifying {path.name} ({size_mb:.0f} MB)…")
             try:
                 digest = _sha256_file(path)
                 tensor_count, parameter_count = _validate_checkpoint(path, family)

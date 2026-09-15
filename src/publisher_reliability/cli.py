@@ -7,6 +7,7 @@ import json
 import socket
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .config import Config
@@ -70,6 +71,7 @@ def _config_with_args(args: argparse.Namespace) -> Config:
 
 
 def _serve(args: argparse.Namespace) -> int:
+    print("Starting Publisher Reliability Tool…", flush=True)
     config = _config_with_args(args)
     bind_host = "0.0.0.0" if config.container_internal else "127.0.0.1"
     reservation = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -88,7 +90,18 @@ def _serve(args: argparse.Namespace) -> int:
         from uvicorn import Config as UvicornConfig, Server
         from .api import create_app
 
-        app = create_app(config)
+        print(
+            "Loading storage and scanning configured model directories… "
+            "every local checkpoint is re-hashed and re-verified on each "
+            "startup, so this can take a while when large .pt files are present.",
+            flush=True,
+        )
+        started = time.monotonic()
+        app = create_app(
+            config,
+            on_scan_progress=lambda message: print(message, flush=True),
+        )
+        print(f"Ready in {time.monotonic() - started:.1f}s.", flush=True)
         print(f"UI:      http://127.0.0.1:{config.port}/")
         print(f"API:     http://127.0.0.1:{config.port}/api/v1/status")
         print(f"Docs:    http://127.0.0.1:{config.port}/api/docs")
@@ -174,12 +187,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "models":
             config = Config.from_env()
             with Storage(args.data_dir or config.data_dir) as storage:
+                print(
+                    "Scanning configured model directories… every local "
+                    "checkpoint is re-hashed and re-verified, so this can take "
+                    "a while when large .pt files are present.",
+                    flush=True,
+                )
                 result = scan_model_roots(
                     storage,
                     (
                         *config.models_dirs,
                         storage.data_dir / "managed-models",
                     ),
+                    on_progress=lambda message: print(message, flush=True),
                 )
                 print(json.dumps(result, indent=2))
             return 0
