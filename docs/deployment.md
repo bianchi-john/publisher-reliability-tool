@@ -157,10 +157,9 @@ English content explicitly and Newspaper3k is the only body extractor, parsing
 with `language="en"`. Deterministic language detection still rejects extracted
 text that is not English.
 
-Gloock, Instrument Sans and both SIL Open Font License files are included in the
-packaged frontend. The warm orange/terracotta light and dark themes need no
-remote asset or CDN; only an explicit user choice is retained in browser local
-storage.
+The frontend uses the system Times New Roman font, so no font files are
+bundled. The single warm orange/terracotta light theme needs no remote asset
+or CDN.
 
 ## 7. Backup and restore
 

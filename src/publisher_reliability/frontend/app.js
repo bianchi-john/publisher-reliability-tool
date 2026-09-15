@@ -1,28 +1,7 @@
 const content = document.querySelector("#content");
 const stateBadge = document.querySelector("#system-state");
-const themeToggle = document.querySelector("#theme-toggle");
 const warning = "Predictions are estimates, not fact checks. Softmax values are not necessarily calibrated confidence.";
-const THEME_KEY = "prt-theme";
 let routeController = null;
-
-function applyTheme(theme, persist = false) {
-  const selected = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = selected;
-  themeToggle.setAttribute("aria-pressed", String(selected === "dark"));
-  themeToggle.querySelector(".theme-label").textContent = selected === "dark"
-    ? "Light theme"
-    : "Dark theme";
-  themeToggle.querySelector(".theme-icon").textContent = selected === "dark" ? "☀" : "◐";
-  if (persist) localStorage.setItem(THEME_KEY, selected);
-}
-
-applyTheme(document.documentElement.dataset.theme);
-themeToggle.addEventListener("click", () => {
-  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
-});
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", event => {
-  if (!localStorage.getItem(THEME_KEY)) applyTheme(event.matches ? "dark" : "light");
-});
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")

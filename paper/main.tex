@@ -1,0 +1,292 @@
+% =========================================================================
+% Publisher Reliability Tool -- ECIR 2027 demo paper
+% Springer LNCS, single-blind review (NOT anonymous).
+% Format limit: max 4 pages of content, extra pages for references only.
+% Submission deadline: 2 November 2026.
+%
+% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
+%
+% Search this file for "TODO:" -- every open item is marked that way.
+% =========================================================================
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext}
+\usepackage[varvw]{newtxmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{xurl}   % lets long URLs break across lines
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+\urlstyle{rm}
+
+% ---- Placeholder figure box -------------------------------------------
+% Lets the paper compile before the screenshot exists. Replace the
+% \figplaceholder{...} call with the \includegraphics line shown beside it.
+\newcommand{\figplaceholder}[2]{%
+  \fbox{\begin{minipage}[c][#1][c]{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}
+    \centering\small\ttfamily TODO: screenshot -- #2
+  \end{minipage}}%
+}
+
+\begin{document}
+
+\title{Publisher Reliability Tool: Interactive, Leakage-Safe\\
+       Exploration of Article-to-Publisher Reliability Predictions}
+\titlerunning{Publisher Reliability Tool}
+
+\author{%
+John Bianchi\inst{1}\orcidID{0009-0006-2582-1480} \and
+Manuel Pratelli\inst{2}\orcidID{0000-0002-9978-791X} \and
+Fabio Pinelli\inst{1}\orcidID{0000-0003-1058-6917} \and
+Marinella Petrocchi\inst{2,1}\orcidID{0000-0003-0591-877X}}
+\authorrunning{J. Bianchi et al.}
+
+\institute{%
+IMT School for Advanced Studies Lucca, 55100 Lucca, Italy\\
+\email{\{john.bianchi,fabio.pinelli\}@imtlucca.it}
+\and
+Institute of Informatics and Telematics, National Research Council (IIT-CNR),
+56124 Pisa, Italy\\
+\email{\{manuel.pratelli,marinella.petrocchi\}@iit.cnr.it}}
+
+\maketitle
+
+% =========================================================================
+\begin{abstract}
+Automatic assessment of news source reliability is usually reported as
+aggregate offline numbers, which makes it hard to inspect why a particular
+publisher received a particular verdict. We present the \emph{Publisher
+Reliability Tool} (PRT), an open-source local web application that turns a
+five-fold, publisher-disjoint article classification study into an interactive,
+auditable workspace. PRT ships a prediction-only release of 38,854
+article-level runs over 19,411 political news articles and 838 publishers,
+produced by BERT and RoBERTa classifiers trained on NewsGuard reliability
+bands. Users browse stored predictions with complete per-class probabilities,
+classify new article URLs on CPU, and aggregate 2--50 article runs into a
+publisher-level verdict under three documented formulas. Two properties
+distinguish PRT from a notebook: a server-side cross-validation leakage guard
+that refuses to evaluate an article with a checkpoint trained on it, and
+content-addressed model identities that keep every result reproducible from
+plain, inspectable CSV. The licensed provider ratings themselves are never
+redistributed.
+\keywords{News source reliability \and Interactive demonstration \and
+Prediction provenance \and Cross-validation leakage \and Reproducibility}
+\end{abstract}
+
+% =========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Estimating how reliable a news \emph{publisher} is has become a recurring task
+in information retrieval~\cite{nakov2024survey,srba2025survey}. A common design
+classifies individual articles and aggregates those decisions to the
+publisher~\cite{burdisso2024reliability}, and reports the outcome as a table of
+offline scores: the reader learns how a model performed on average, but cannot
+ask what it said about a specific publisher, which articles drove that verdict,
+or what would change under a different aggregation rule. Since a single number
+attached to a news outlet invites over-interpretation when the evidence behind
+it is invisible, an interactive tool is what makes ``\emph{this is a model
+prediction, conditioned on these exact inputs}'' inspectable rather than
+asserted -- and it introduces a failure mode offline evaluation avoids by
+construction: once a checkpoint can be aimed at an arbitrary article, nothing
+prevents fold~$N$ meeting an article it was trained
+on~\cite{verhoeven2025yesterday}.
+
+We present the \textbf{Publisher Reliability Tool} (PRT), the reference
+implementation accompanying our study on aggregating language model predictions
+for news source reliability~\cite{bianchi2026articles}. It contributes an
+offline-capable workspace over a prediction-only release of 38,854 article runs
+with full probability vectors; a \emph{leakage-safe evaluation model} whose
+offered checkpoints come from the intersection of installed artifacts, stored
+coverage and held-out fold membership; and a content-addressed model identity
+over seven human-readable CSV ledgers.
+
+% =========================================================================
+\section{Background and Related Work}
+\label{sec:related}
+
+Professional rating systems such as NewsGuard, the Global Disinformation Index
+and Media Bias/Fact Check assess outlets at the \emph{publisher} level and agree
+strongly, which makes them a common source of
+supervision~\cite{lin2023correspondence,pratelli2022structured}. Computational
+work estimates source reliability from text, interaction signals, or language
+models used directly as
+raters~\cite{burdisso2024reliability,yang2025accuracy,srba2025survey}; what
+varies, and is rarely exposed, is the aggregation rule and the article sample
+it consumes, which PRT turns into selectable parameters. Generalisation across
+publishers is the fragile part~\cite{azizov2024safari,verhoeven2025yesterday},
+which PRT keeps visible by treating fold membership as a service-enforced
+safety property. Interactive publisher-reliability tools have appeared at ECIR
+before~\cite{pratelli2025tropic}; PRT differs in publishing \emph{predictions
+only}, so the licensed ratings are never redistributed.
+
+% =========================================================================
+\section{System Overview}
+\label{sec:system}
+
+\subsubsection{Task and data.}
+PRT models a two-level task: a classifier maps one English article body to an
+ordered class in $\{0,\dots,4\}$ with a five-component softmax vector, and an
+aggregation function combines $2$--$50$ runs from \emph{one exact model} and
+\emph{one normalised publisher} into a single class. The classes are the five
+NewsGuard reliability bands in ascending order: \texttt{Class~0} is a score of
+0--39 (proceed with maximum caution), then 40--59, 60--74, 75--99, and
+\texttt{Class~4} is 100. Each article inherits its publisher's band, so
+supervision is weak by construction~\cite{bianchi2026articles}. The corpus was
+scraped with Newspaper3k from the homepages of NewsGuard-rated outlets tagged
+\emph{Political News and Commentary}: English, paywall-free, capped per outlet,
+at least 100 words.
+
+% TODO: the source study reports 439 scraped domains (Table I) while the shipped
+% TODO: release contains 838 distinct publisher hostnames over 19,429 rows, and
+% TODO: its largest outlet has 294 articles against a stated cap of 200.
+% TODO: Reconcile the two before submission and adjust the numbers below.
+Crucially, PRT redistributes \emph{model outputs only}: the licensed scores,
+bands and metadata are stripped at import and never persisted, logged or
+rendered, and a class is always framed as a prediction. The
+release contains 19,429 rows which, after canonical URL normalisation, yield
+19,411 articles, 38,854 immutable runs and $10$ historical model/fold
+identities over 838 publishers, $597$ with at least two articles (median
+$15$).
+
+\subsubsection{Architecture.}
+PRT is a single Python~3.12 process that owns one data directory, serves the UI
+and REST API from FastAPI on \texttt{127.0.0.1}, and runs one FIFO worker.
+Frontend and API share the same request types and service functions, so the
+browser cannot reach behaviour the API does not expose. All state lives in
+seven CSV ledgers written by a single \texttt{flock}-guarded writer, three of
+them append-only and immutable; malformed data fails closed before any HTTP
+port is served. Articles and publishers are not stored -- they are views
+derived at query time from prediction runs. Every local inference is mirrored
+into the release CSV as a \texttt{user\_evaluation} row while original rows keep
+\texttt{dataset\_original}; the release digest covers original rows only, so
+user evaluations never alter release identity.
+
+\subsubsection{Models and reproducible identity.}
+The demonstrated path is CPU-only. BERT~\cite{devlin2019bert}
+(\texttt{bert-base-uncased}) and RoBERTa~\cite{liu2020roberta}
+(\texttt{roberta-large}) are fully fine-tuned five-label classifiers truncated
+to 256 tokens, loaded with strict key and shape checking and gated by a frozen
+CPU reference fixture. The loader interface is deliberately extensible: the
+study's Llama~3~8B~\cite{llama2024herd} and
+Mistral~24B~\cite{jiang2024mixtral} QLoRA checkpoints are authenticated against
+a packaged manifest of exact filenames, byte sizes and SHA-256 digests, and
+users may register their own five-class Transformers as a constrained ZIP
+bundle -- inspectable, but outside the live demonstration since each fold needs
+CUDA and several gigabytes. No path executes artifact-supplied code:
+\texttt{auto\_map}, \texttt{trust\_remote\_code}, pickle weights and unsafe
+archive paths are rejected.
+
+A runnable model identity is the SHA-256 of canonical JSON over every
+output-relevant setting -- artifact digest, loader recipe, base and tokenizer
+revisions, class order, token limit, padding policy, dtype, quantisation -- but
+not filesystem location; it is re-verified before loading, and imported
+predictions get a separate, non-runnable \emph{historical} identity.
+
+\subsubsection{Leakage-safe evaluation.}
+The study enforces a publisher-disjoint protocol: fold $N$ means the stored
+prediction was produced for held-out test fold $N$, so that checkpoint trained
+on the other four. PRT makes this a service-layer invariant: checkpoint fold
+$N$ may evaluate a known article in test fold $N$; a known article in any other
+fold is rejected with the stable error
+\texttt{TRAINING\_DATA\_LEAKAGE}, and publisher aggregation excludes every known
+article outside its held-out fold. The $16$ articles normalising into more than one fold are excluded
+entirely, and the guard covers single articles, explicit lists and publisher
+candidates alike. PRT is equally careful about what this does \emph{not} prove:
+absence from the registry is no evidence that an external article was outside
+every training corpus.
+
+\subsubsection{Retrieval and aggregation.}
+Classifying a new URL uses an SSRF-hardened client that validates every
+redirect and rejects non-public addresses; the HTML is parsed once by a single
+English-configured extractor, and the text must reach 200 characters and 30
+tokens and be detected as English before tokenisation, while raw HTML and
+authors are discarded. Three versioned aggregation methods each require
+$2$--$50$ runs from one model: \texttt{majority\_vote} -- the rule used in the
+study -- \texttt{ordinal\_mean} (class $=\lfloor\mu+0.5\rfloor$) and
+\texttt{mean\_probabilities}. Every evaluation records the ordered article and
+run identifiers it consumed, so a later run can never change an earlier one.
+
+% =========================================================================
+\section{Demonstration}
+\label{sec:demo}
+
+The demonstration runs on an AMD Ryzen~7~2700U laptop (4 cores, 16\,GB RAM,
+Ubuntu 26.04, no GPU) and needs no network for browsing or aggregation.
+\emph{Browsing} an article lists every run with its probability vector, family
+and fold, run identifier and origin. The visitor then pastes a public English
+article URL: before submission PRT reports whether it is known, whether
+inference is required, whether a matching checkpoint exists, and whether it is
+blocked for leakage (Fig.~\ref{fig:evaluate}), so the selector is derived
+rather than fixed. \emph{Reuse} returns the stored run without touching
+the network; \emph{recompute} classifies the page into a new immutable run in
+5--7\,s end to end (warm model time 0.9\,s for BERT, 2.9\,s for
+RoBERTa-large). In \emph{publisher} mode the visitor picks a checkpoint, a
+method and a count; PRT aggregates only stored, leakage-safe runs for that
+hostname, never crawls, and re-running under another method makes the verdict's
+sensitivity to the decision rule visible. We close by opening the CSV ledgers
+beside the browser to show the new run and its mirrored release row.
+
+\begin{figure}[t]
+\centering
+\figplaceholder{4.0cm}{Evaluate page -- URL field, derived model/fold selector with availability explanations, result card with probability bars, model/fold, run ID, origin}
+% TODO: replace the \figplaceholder line above with the real screenshot.
+% TODO: The 4.0cm box is sized for a TIGHTLY CROPPED screenshot. A taller
+% TODO: image will push the paper past the 4-page content limit, so crop the
+% TODO: Evaluate panel rather than capturing the whole browser window:
+% \includegraphics[width=\textwidth]{figures/evaluate.png}
+\Description{Screenshot of the Evaluate page: a URL input field, a derived
+model and fold selector listing only leakage-safe checkpoints with a short
+explanation for each unavailable option, and a result card showing the
+predicted class, five probability bars, the exact model and fold, the
+prediction run identifier and whether the run was stored or newly computed.}
+\caption{Deriving the available checkpoints on the \emph{Evaluate} page.}
+\label{fig:evaluate}
+\end{figure}
+
+% =========================================================================
+\section{Availability}
+\label{sec:availability}
+
+% TODO: record the screencast and replace the placeholder URL below. ECIR
+% TODO: requires a working online demo URL *or* a video of the main features;
+% TODO: PRT is loopback-only by design, so the video is the route to take.
+% TODO: add an archived release DOI (e.g. Zenodo) if one is minted.
+A screencast of the walkthrough in Section~\ref{sec:demo} is at
+\url{https://TODO-video-url}; the source code is under Apache-2.0 at
+\url{https://github.com/bianchi-john/publisher-reliability-tool} with the
+dataset release and its scientific and storage contracts. PRT starts with one
+native command or one Compose service on \texttt{127.0.0.1:8000};
+checkpoints and supplementary material~\cite{bianchi2026supplementary} are on
+OSF\footnote{\url{https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74}}.
+Project-owned outputs use a limited
+CC0 dedication; third-party URLs, names, ratings and weights are excluded.
+
+% =========================================================================
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+PRT turns a publisher-disjoint reliability study into a workspace where every
+verdict traces to the checkpoint, articles and rule behind it; its leakage
+guard and content-addressed identity generalise to any tool exposing
+cross-validated classifiers. The release holds encoder predictions only and
+aggregation is limited to three unweighted rules; a local evaluation mode would
+let users with their own ratings measure the accuracy PRT does not report.
+
+% =========================================================================
+\begin{credits}
+\subsubsection{\ackname}
+Partially supported by the IIT-CNR internal project SIMULARE.
+% TODO: add any further grant numbers, or adjust if the demo paper is funded
+% TODO: differently from the underlying study.
+
+\subsubsection{\discintname}
+The authors have no competing interests to declare.
+\end{credits}
+
+\bibliographystyle{splncs04}
+\bibliography{references}
+
+\end{document}

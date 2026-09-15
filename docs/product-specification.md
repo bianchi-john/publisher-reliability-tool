@@ -298,12 +298,10 @@ terminal job handling cleans its acquired temporary upload.
 The UI has Dashboard, Evaluate, Articles, Publishers, Models, Imports, and Jobs.
 It favors provenance and scientific explanation over administration. Loading,
 empty, offline, missing-model, partial, and error states use clear English text.
-The persistent top bar provides a
-keyboard-accessible light/dark theme control, initially follows the operating
-system, stores an explicit browser-local preference, and does not remount or
-shift during route changes. Both palettes use a warm orange/terracotta visual
-system. Locally bundled Gloock is used for display headings and Instrument Sans
-for paragraphs, navigation and controls, without a CDN.
+The persistent top bar does not remount or shift during route changes. The UI
+uses a single warm orange/terracotta light visual system with no theme
+control and no dark mode, and the system Times New Roman serif font throughout,
+without a CDN.
 
 ## 9. Functional requirements
 
@@ -343,8 +341,8 @@ for paragraphs, navigation and controls, without a CDN.
 | NFR-003 | Dependency locks, dataset checksums, and core model fixtures shall make the demo reproducible. |
 | NFR-004 | CSV writes shall use one writer, fsync, atomic replacement for complete-file updates, and fail-closed structural verification as documented. |
 | NFR-005 | Logs and errors shall exclude editorial content, protected data, credentials, and unrestricted paths. |
-| NFR-006 | Frontend assets, both open font families and API documentation shall be bundled locally without telemetry or CDN dependencies. |
-| NFR-007 | User-visible text, errors, exports and the persistent light/dark theme control shall be English and accessible. |
+| NFR-006 | Frontend assets and API documentation shall be bundled locally without telemetry or CDN dependencies; the frontend shall use the system Times New Roman font rather than bundled font files. |
+| NFR-007 | User-visible text, errors, exports and the persistent top bar shall be English and accessible. |
 | NFR-008 | API and frontend shall share the same service and validation functions. |
 
 ## 11. Release gate

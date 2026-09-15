@@ -209,15 +209,11 @@ Publisher pages distinguish:
 An evaluation count of zero therefore does not mean that the publisher has no
 article predictions.
 
-## 6. Theme and navigation
+## 6. Appearance and navigation
 
-Use the button in the top bar to switch between light and dark mode. Without an
-explicit choice the interface follows the operating-system preference. A manual
-choice is saved only in browser local storage and restored on later visits.
-
-The application bundles open-source Gloock for titles/headings and Instrument
-Sans for paragraphs, navigation, forms and buttons, together with both SIL Open
-Font License files. The paired light/dark palettes use cream, terracotta,
-burnt-orange and cocoa tones and do not contact a font or style CDN. The top bar
-remains mounted while navigating; the current page is retained until the next
-page is ready so the header and scrollbar do not flicker between tabs.
+The interface uses a single warm orange/terracotta light palette; there is no
+dark mode or theme control. Titles, paragraphs, navigation, forms and buttons
+all use the system Times New Roman serif font, so nothing is fetched from a
+font or style CDN. The top bar remains mounted while navigating; the current
+page is retained until the next page is ready so the header and scrollbar do
+not flicker between tabs.

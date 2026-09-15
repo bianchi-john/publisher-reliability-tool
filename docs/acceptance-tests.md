@@ -279,12 +279,11 @@ reachable and present loading, empty, offline, missing-model, partial, and error
 states with clear English actions. Articles exposes distinct dataset and
 user-evaluated filters/badges derived from run origin rather than URL heuristics.
 An imported article with a later local run remains dataset-backed and also
-shows the user-evaluated badge. The keyboard-accessible theme control follows
-the initial system preference, persists an explicit light/dark choice locally,
-and uses no remote font or style dependency. Both themes expose the documented
-warm orange/terracotta palette, Gloock headings and Instrument Sans body/control
-text. Route changes keep the top bar mounted, keep its first navigation item
-visible, and do not collapse page height or scrollbar space.
+shows the user-evaluated badge. The UI exposes a single warm orange/terracotta
+light palette with the system Times New Roman font throughout, no theme
+control, no dark mode, and no remote font or style dependency. Route changes
+keep the top bar mounted, keep its first navigation item visible, and do not
+collapse page height or scrollbar space.
 
 ### AT-041 — Transparent results
 

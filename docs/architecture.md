@@ -16,7 +16,7 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 | Runtime | Python 3.12 |
 | API | FastAPI, Pydantic v2, generated OpenAPI 3.1 |
 | Server | Uvicorn, one worker, fixed loopback binding |
-| Frontend | Bundled static HTML, CSS and browser JavaScript; local Gloock and Instrument Sans |
+| Frontend | Bundled static HTML, CSS and browser JavaScript; system Times New Roman throughout |
 | Persistence | Python `csv`, in-memory row lists, filesystem lock |
 | Retrieval | `httpx` and English Newspaper3k extraction |
 | Language | `langdetect`, seed zero |
@@ -163,11 +163,10 @@ stable scrollbar gutter and minimum content height prevent layout movement.
 Route completion returns the document to the top and moves keyboard focus to
 the main content with scroll prevention, so the sticky bar cannot cover the
 first navigation item.
-The top bar contains a light/dark theme control. The initial theme follows
-`prefers-color-scheme`, an explicit choice is stored in browser local storage,
-and both warm orange/terracotta palettes use locally bundled Gloock for display
-headings and Instrument Sans for body text, navigation and controls. Both font
-families retain their SIL Open Font License files in the frontend package.
+The top bar uses a single warm orange/terracotta light palette; there is no
+theme control and no dark mode. Display headings, body text, navigation and
+controls all use the system Times New Roman serif font, so no font files are
+bundled with the frontend.
 
 ## 9. Model lifecycle
 
