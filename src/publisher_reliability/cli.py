@@ -91,9 +91,7 @@ def _serve(args: argparse.Namespace) -> int:
         from .api import create_app
 
         print(
-            "Loading storage and scanning configured model directories… "
-            "every local checkpoint is re-hashed and re-verified on each "
-            "startup, so this can take a while when large .pt files are present.",
+            "Loading storage and scanning configured model directories… ",
             flush=True,
         )
         started = time.monotonic()
