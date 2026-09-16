@@ -6,7 +6,7 @@
 Official artifacts are available from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74).
 
-Expected core filenames:
+Expected filenames:
 
 ```text
 bert_fold_1.pt
@@ -25,20 +25,29 @@ roberta_fold_5.pt
 > A compatible checkpoint can classify new public English article URLs. Its
 > pinned official tokenizer is cached on first online use.
 
-The scanner also recognizes the exact official OSF filenames
-`mistral_fold_N.zip` and the pair
-`llama_fold_N.pt.z01` + `llama_fold_N.pt.z02`. It imports a complete fold only
-after checking the packaged OSF size and SHA-256 values. The same workflow is
-available from **Models → Import an original paper model from OSF**, where the
-download catalog is shown directly.
+Verifying a checkpoint reads it twice, once for its SHA-256 and once for its
+structure, so the first scan of several gigabytes takes a while. A file left
+untouched since the previous scan reuses that result and later starts are quick;
+adding, replacing or modifying a file has it verified again. Run
+`publisher-reliability models scan --full` to re-read every byte on demand.
 
-Custom five-class Hugging Face sequence classifiers—including compatible Llama
-3 8B and Mistral 24B PEFT adapters—are imported from the Models page as
-self-contained `.zip` bundles and are marked as user models. See
-[`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for the exact
-safe format.
+## Larger decoder checkpoints are not importable yet
 
-The application never manages Hugging Face credentials or executes code
-supplied by an artifact. BERT/RoBERTa acquire only pinned tokenizer resources.
-Llama/Mistral inference requires the pinned base-model snapshot; authenticate
-with Hugging Face outside this application when a gated repository requires it.
+The study also fine-tuned Llama 3 8B and Mistral 24B, and their artifacts are on
+OSF, but **this release cannot import them**. Each fold needs a CUDA GPU and
+several gigabytes of weights, which a single-machine CPU demo cannot assume, so
+any attempt to import one is refused with `FEATURE_UNAVAILABLE` and nothing is
+installed. BERT and RoBERTa run here on CPU and report comparable accuracy in
+the study.
+
+## Custom models
+
+Custom five-class Hugging Face **encoder** sequence classifiers are imported from
+the Models page as self-contained `.zip` bundles and are marked as user models.
+Decoder-only architectures and PEFT adapters are rejected for the same reason as
+above. See [`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for
+the exact safe format.
+
+The application never manages Hugging Face credentials or executes code supplied
+by an artifact. BERT and RoBERTa acquire only pinned tokenizer resources; no
+base-model weights are ever downloaded.

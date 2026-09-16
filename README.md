@@ -1,20 +1,22 @@
 # Publisher Reliability Tool
 
-> A local research application for exploring article predictions and
-> aggregating them at publisher level.
+> A local research application for classifying news articles and reading a
+> publisher's reliability class from the articles already classified.
 
-**Local only** · **Prediction-only data** · **Inspectable CSV storage**
+**Local only** · **Predictions, no ground-truth labels** · **Plain CSV storage**
 
-PRT turns the bundled model outputs into browsable articles, publishers and
-reproducible evaluations. It serves a web interface and REST API at
-`http://127.0.0.1:8000`.
+The tool ships the model outputs of the study as a browsable dataset, lets you
+classify a new article URL with a local BERT or RoBERTa checkpoint, and derives a
+publisher-level class on demand. It serves a web interface and a REST API on
+`http://127.0.0.1:8000` and nothing else.
 
 > [!IMPORTANT]
-> Results are model predictions—not facts, fact checks or ground-truth ratings.
+> Every result is a model prediction — not a fact, a fact check, or a
+> ground-truth rating. Softmax values are not necessarily calibrated confidence.
 
 ## Start
 
-Requires Ubuntu/Linux, Python 3.12 and [`uv` 0.8.3](https://docs.astral.sh/uv/).
+Requires Linux, Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --frozen --extra models
@@ -23,15 +25,14 @@ publisher-reliability dataset verify ./dataset/predictions
 publisher-reliability serve
 ```
 
-The `models` extra installs the locked PyTorch, Transformers and safetensors
-dependencies required to scan BERT/RoBERTa checkpoints and validate custom
-encoder bundles. Use `uv sync --frozen` only for a lightweight
-stored-prediction-only environment.
-
-Open **<http://127.0.0.1:8000>**. API documentation is available at
+Then open **<http://127.0.0.1:8000>**; the API documentation is at
 **<http://127.0.0.1:8000/api/docs>**.
 
-### Docker
+The `models` extra installs the pinned PyTorch and Transformers dependencies
+needed to run checkpoints. Plain `uv sync --frozen` gives a lighter environment
+that can browse and reuse stored predictions but cannot classify anything new.
+
+With Docker:
 
 ```bash
 mkdir -p data models dataset/predictions
@@ -39,151 +40,95 @@ sudo chown -R 10001:10001 data dataset/predictions
 docker compose up --build
 ```
 
-The service is published only on `127.0.0.1:8000`.
+## What it does
 
-## What works
+The bundled release imports on first start and yields **19,411** articles,
+**38,854** immutable prediction runs with complete five-class probabilities, and
+**10** BERT/RoBERTa fold identities. An import is keyed by content digest, so
+starting again never duplicates anything.
 
-| Area | Available |
-| --- | --- |
-| Dataset | Verified automatic import of the bundled predictions |
-| Exploration | Articles, publishers, runs, models, imports and jobs |
-| Evaluation | Stored reuse, new single-article inference and publisher aggregation |
-| Methods | Majority vote, ordinal mean and mean probabilities |
-| Import | Privacy-preserving CSV and CSV.GZ import |
-| Persistence | Six CSV ledgers plus a private, git-ignored user-prediction mirror |
-| Access | Browser UI, REST API, OpenAPI and CLI |
-| Offline | Browsing, reuse and stored aggregation |
+**Evaluate** classifies one article URL. You pick a model among those actually
+usable for that URL, and the run is stored with all five class probabilities.
 
-The bundled release produces:
+**Publishers** reads a class rather than creating one. It is recomputed from the
+stored article predictions each time you ask, per model, under the counting rule
+you choose — majority vote, ordinal mean or mean probabilities — and over the
+articles you leave in. Two checkpoints that disagree are shown disagreeing
+instead of being averaged into a number neither produced. Nothing is stored.
 
-- **19,411** derived articles;
-- **38,854** immutable prediction runs with complete five-class probabilities;
-- **10** historical BERT/RoBERTa model/fold identities.
+**Export** downloads one row per prediction, so every model that judged an
+article appears separately with its own label, probabilities, readable name,
+provenance and run identifier.
 
-Imports are identified by content digest, so restarting or importing the same
-dataset again does not duplicate data.
+## Models
 
-Every newly inferred article run is first committed to
-`data/state/prediction_runs.csv`, then mirrored as one row in
-`dataset/predictions/user-predictions.csv`, a private file listed in
-`.gitignore` and never part of the tracked release. The released
-`dataset/predictions/predictions.csv` holds only `dataset_original` rows and is
-never modified after it ships. The mirror includes the exact model/fold,
-predicted label, model display name, official/custom/local provenance, all
-five probabilities and run provenance, and is synchronized without
-duplicating an existing `prediction_run_id`.
+The repository distributes no weights. Copy `bert_fold_N.pt` or
+`roberta_fold_N.pt` into `models/` (see [models/README.md](models/README.md));
+checkpoints are discovered by exact filename and validated before use. The
+Models page also imports custom five-class encoder classifiers as self-contained
+`.zip` bundles.
 
-## Models and new article inference
+Weights are published separately on
+[OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74).
 
-The repository does not distribute model weights. The Models page scans
-configured roots for BERT/RoBERTa state dictionaries, and family and fold are
-read from the exact filename. Historical dataset identities remain separate.
+**Leakage is blocked, not warned about.** Every family in the study shares one
+publisher-disjoint five-fold split, so an article's held-out fold identifies the
+training set of every checkpoint. Fold `N` may score an article only if that
+article was held out in fold `N`; the rest are withheld from the selector and
+refused by the backend. The withheld checkpoints are named on screen, so a
+missing option is never unexplained.
 
-Stored dataset predictions remain fully browseable by article, publisher,
-model/fold and class probability. Publisher aggregations created in the
-workspace are tracked separately.
+The study also fine-tuned Llama 3 8B and Mistral 24B, but **importing them is
+under development and unavailable here**: each fold needs a CUDA GPU and several
+gigabytes of weights, which a single-machine CPU demo cannot assume. Attempting
+it returns `FEATURE_UNAVAILABLE` and installs nothing. The identity, loader and
+leakage rules are written so the family can be added later without changing the
+storage contract.
 
-Evaluate derives its choices from both the local Models inventory and the
-stored prediction coverage for the submitted URL. For fold-indexed dataset
-articles, checkpoint fold `N` is offered only for articles assigned to held-out
-test fold `N`; checkpoints trained on that article are hidden and rejected.
-For a new URL, Evaluate offers each runnable local model and creates an
-immutable prediction run containing all five probabilities. Retrieval,
-extraction, tokenizer acquisition and inference failures are reported
-separately.
-
-The request explicitly prefers English (`Accept-Language: en-US,en;q=0.9`).
-Newspaper3k is the only article-body extractor and parses with `language="en"`;
-there is no secondary HTML extractor. Deterministic language detection still
-rejects non-English extracted text.
-
-Articles & predictions labels dataset-backed articles separately from articles
-created by a user evaluation, while retaining both badges when a dataset
-article is also evaluated locally. Evaluate keeps both the completed result card
-and a refresh-safe table of recent local article predictions.
-
-The bundled interface uses the system Times New Roman serif font throughout
-and a single warm orange/terracotta light theme; there is no dark mode.
-
-The Models page also accepts constrained custom Transformers `.zip` bundles:
-complete encoder classifiers in `safetensors`, requiring exactly five logits in
-class order 0–4, a local tokenizer, declared fold/training provenance and no
-custom executable code. These models and their new predictions are marked
-**User custom**.
-
-Checkpoint weights are available separately from
-[OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)
-and remain outside version control.
-
-### Larger decoder models
-
-The study also fine-tuned Llama 3 8B and Mistral 24B. Support for importing and
-running them is **under development and not available in this release**: each
-fold needs a CUDA GPU and several gigabytes of weights, which the single-machine
-CPU demo this tool targets cannot assume. The model-identity, loader-recipe and
-leakage rules are written so that such a family can be added without changing
-the storage contract. Attempting the import returns `FEATURE_UNAVAILABLE` with
-an explanatory message. BERT and RoBERTa, which do run here on CPU, report
-accuracy comparable to the larger models in the study.
-
-## Privacy and reproducibility
+## Privacy
 
 - Protected labels, scores and provider metadata are never persisted.
-- Imported titles, article text and authors are discarded.
-- Authors and raw HTML have no storage field.
-- Every publisher class names the model and the exact articles counted, and is
-  derived on request rather than stored.
-- Every bundled historical run includes all five class probabilities.
-- Every local article inference is mirrored to a private,
-  `.gitignore`d CSV (`dataset/predictions/user-predictions.csv`) with
-  `prediction_origin=user_evaluation`; it never enters version control.
-- The only tracked dataset is the released `predictions.csv` in
-  `dataset/predictions`, which the running application never modifies.
+- Article text, titles and authors are discarded; raw HTML has no storage field.
+- **Your own evaluations never enter version control.** Each local run is
+  committed to `data/state/prediction_runs.csv` and mirrored to
+  `dataset/predictions/user-predictions.csv`, which is git-ignored. The tracked
+  `predictions.csv` holds only the released rows and is never modified by the
+  running application.
 
 See [dataset/README.md](dataset/README.md) for the dataset format.
 
-## Useful commands
+## Commands
 
 ```bash
-# Verify a dataset without changing application state
-publisher-reliability dataset verify PATH
-
-# Import predictions into the configured data directory
-publisher-reliability dataset import PATH
-
-# Verify the six CSV ledgers
-publisher-reliability storage verify
-
-# Run in strict offline mode
-publisher-reliability serve --offline
-
-# Run the test suite
-uv run --frozen python -m unittest discover -s tests -v
+publisher-reliability dataset verify PATH   # check a dataset, change nothing
+publisher-reliability dataset import PATH   # import into the data directory
+publisher-reliability storage verify        # check the six CSV ledgers
+publisher-reliability models scan --full    # re-verify every checkpoint byte
+publisher-reliability serve --offline       # stored predictions only
+python -m unittest discover -s tests        # run the test suite
 ```
 
-## Project guide
+## Where things are
 
 | Path | Purpose |
 | --- | --- |
 | `src/publisher_reliability/` | Application, API, services and storage |
-| `dataset/predictions/` | Public prediction-only release |
-| `models/` | Local, untracked model artifacts |
+| `src/publisher_reliability/frontend/` | Page templates in `pages/`, ES modules in `js/` |
+| `dataset/predictions/` | The released, prediction-only dataset |
+| `models/` | Local model artifacts, untracked |
 | `docs/` | Scientific, API, storage and deployment contracts |
 | `tests/` | Automated tests |
 
-Start with:
-
-- [User guide](docs/user-guide.md)
-- [Product specification](docs/product-specification.md)
-- [API contract](docs/api-contract.md)
-- [Scientific contract](docs/scientific-contract.md)
-- [CSV storage contract](docs/csv-storage-contract.md)
-- [Custom model bundle](docs/custom-model-bundle.md)
-- [Deployment guide](docs/deployment.md)
+Start with the [user guide](docs/user-guide.md). The contracts are the
+[product specification](docs/product-specification.md),
+[API](docs/api-contract.md), [scientific](docs/scientific-contract.md),
+[CSV storage](docs/csv-storage-contract.md),
+[custom model bundle](docs/custom-model-bundle.md),
+[architecture](docs/architecture.md) and [deployment](docs/deployment.md).
 
 ## License
 
 Software and documentation are Apache-2.0. Project-owned prediction outputs and
-database arrangement use the limited CC0 dedication described in
+the database arrangement use the limited CC0 dedication described in
 [MODEL-OUTPUT-LICENSE.md](MODEL-OUTPUT-LICENSE.md). Third-party URLs, pages,
 names, trademarks, models and weights are excluded.

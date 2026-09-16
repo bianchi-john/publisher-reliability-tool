@@ -26,8 +26,10 @@ models, and weights remain third-party material.
 
 1. An article classifier produces one ordered class index in `0..4` and, for
    new inference, five softmax values.
-2. A publisher method aggregates 2–50 compatible article runs from one exact
-   model and one normalized publisher.
+2. A publisher method aggregates the compatible article runs of one exact model
+   and one normalized publisher: every leakage-safe article the caller has not
+   excluded, and at least two of them. Below two, the method reports no class
+   rather than presenting a single article as an aggregate.
 
 Every persisted run is immutable. A publisher class is not persisted at all: it
 is derived on request from the stored article runs, and it names the model and
@@ -90,10 +92,10 @@ probability vector.
 Normalization also reveals 16 canonical article identities assigned to more
 than one test fold (32 article/family memberships across BERT and RoBERTa).
 Their historical predictions remain consultable, but no fold checkpoint is
-treated as leakage-safe for a new article or a derived publisher class. Publisher
-selection excludes those identities; an explicit article or article-list
-request fails with `TRAINING_DATA_LEAKAGE`. The application never guesses a
-fold from conflicting evidence.
+treated as leakage-safe for a new article or a derived publisher class. A
+derived publisher class excludes those identities, and evaluating one directly
+fails with `TRAINING_DATA_LEAKAGE`. The application never guesses a fold from
+conflicting evidence.
 
 The release-identity content digest is `prt-dataset-content-v1` as defined by
 the storage contract and covers only the original wide-format values.

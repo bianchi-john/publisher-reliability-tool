@@ -234,6 +234,35 @@ def _read_user_predictions(release_dir: Path) -> list[dict[str, str]]:
     return rows
 
 
+def clear_user_predictions(release_dir: Path | None) -> int:
+    """Permanently remove the private mirror of locally created predictions.
+
+    This is the counterpart to a bulk delete of local ``prediction_runs`` rows, and it
+    has to happen first, not after. ``restore_user_predictions`` reads this file on
+    every start to bring back any run present here but missing from the ledger, which
+    is exactly what a deleted row would look like; leaving the mirror behind would
+    silently resurrect every prediction the user just asked to delete on the next
+    restart, undoing a deletion that was already reported as complete. Deleting the
+    file outright (rather than rewriting it empty) is simplest because a missing
+    mirror is already the normal, unexceptional starting state everywhere else in
+    this module.
+    """
+
+    if release_dir is None:
+        return 0
+    path = _user_predictions_path(release_dir)
+    if not path.is_file():
+        return 0
+    removed = len(_read_user_predictions(release_dir))
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise AppError(
+            "STORAGE_ERROR", f"Could not remove {USER_PREDICTIONS_FILENAME}."
+        ) from exc
+    return removed
+
+
 def _write_user_predictions(release_dir: Path, rows: list[dict[str, str]]) -> None:
     """Rewrite the mirror file atomically, the same way the CSV ledgers are written.
 

@@ -10,6 +10,7 @@ from publisher_reliability.prediction_dataset import (
     PUBLIC_COLUMNS,
     USER_PREDICTIONS_FILENAME,
     _dataset_row,
+    clear_user_predictions,
     restore_user_predictions,
     sync_user_predictions,
 )
@@ -201,6 +202,97 @@ class PredictionDatasetSyncTest(unittest.TestCase):
             self.assertEqual(
                 (release / "manifest.json").read_bytes(), original_manifest_after_sync
             )
+
+
+def _local_run_and_model(url: str, run_id: str) -> tuple[dict[str, str], dict[str, str]]:
+    """A minimal local-inference run/model pair, enough to mirror successfully."""
+
+    model = {column: "" for column in HEADERS["models"]}
+    model.update(
+        model_id="local-model",
+        family="bert",
+        fold_id="1",
+        display_name="Local BERT",
+        artifact_kind="pytorch_state_dict",
+        class_order_json="[0,1,2,3,4]",
+        runtime_scientific_json="{}",
+        status="compatible",
+        artifact_available="true",
+        runnable="true",
+        registered_at="2026-07-24T00:00:00Z",
+        last_validated_at="2026-07-24T00:00:00Z",
+    )
+    run = {column: "" for column in HEADERS["prediction_runs"]}
+    run.update(
+        prediction_run_id=run_id,
+        article_id=article_id(url),
+        canonical_url=url,
+        publisher_id=publisher_id(normalized_hostname(url)),
+        normalized_hostname=normalized_hostname(url),
+        model_id="local-model",
+        predicted_class="2",
+        prob_class_0="0.05",
+        prob_class_1="0.10",
+        prob_class_2="0.70",
+        prob_class_3="0.10",
+        prob_class_4="0.05",
+        origin="local_inference",
+        action="missing_run_inference",
+        input_source=url,
+        content_retention="discard",
+        job_id="job-1",
+        inference_started_at="2026-07-24T00:00:00Z",
+        inference_completed_at="2026-07-24T00:00:01Z",
+        duration_ms="1000",
+        device="cpu",
+        software_versions_json="{}",
+        recorded_at="2026-07-24T00:00:01Z",
+    )
+    return run, model
+
+
+class ClearUserPredictionsTest(unittest.TestCase):
+    """`clear_user_predictions` is the half of a bulk delete that must run first.
+
+    Leaving the mirror behind after removing the ledger rows would let
+    `restore_user_predictions` bring them right back on the next start; these tests
+    pin that the file is actually gone, not merely emptied of rows the caller happens
+    to care about.
+    """
+
+    def test_removes_an_existing_mirror_and_reports_its_row_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            release = Path(temporary) / "predictions"
+            run, model = _local_run_and_model("https://example.com/a", "run-1")
+            sync_user_predictions(release, [run], {"local-model": model})
+            mirror_path = release / USER_PREDICTIONS_FILENAME
+            self.assertTrue(mirror_path.is_file())
+
+            self.assertEqual(clear_user_predictions(release), 1)
+
+            self.assertFalse(mirror_path.exists())
+
+    def test_a_cleared_mirror_restores_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release = root / "predictions"
+            run, model = _local_run_and_model("https://example.com/a", "run-1")
+            sync_user_predictions(release, [run], {"local-model": model})
+
+            clear_user_predictions(release)
+
+            with Storage(root / "data") as storage:
+                self.assertEqual(restore_user_predictions(storage, release), 0)
+                self.assertEqual(storage.rows["prediction_runs"], [])
+
+    def test_is_a_no_op_when_no_mirror_was_ever_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            release = Path(temporary) / "predictions"
+            self.assertEqual(clear_user_predictions(release), 0)
+            self.assertFalse(release.exists())
+
+    def test_is_a_no_op_without_a_configured_release_directory(self) -> None:
+        self.assertEqual(clear_user_predictions(None), 0)
 
 
 class PrivateMirrorStaysOutOfVersionControlTest(unittest.TestCase):

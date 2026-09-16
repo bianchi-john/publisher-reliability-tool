@@ -115,13 +115,13 @@ Module inventory (`src/publisher_reliability/`, LOC from `wc -l`):
 
 | Module | LOC | Responsibility |
 | --- | ---: | --- |
-| `services.py` | 1292 | `ResearchService`: all read queries, `available_models()`, `evaluate()` |
+| `services.py` | 1294 | `ResearchService`: all read queries, `available_models()`, `evaluate()`, `clear_user_data()` |
 | `inference.py` | 662 | Safe retrieval, English extraction, `InferenceEngine` (BERT and RoBERTa recipes) |
 | `importer.py` | 631 | CSV / CSV.GZ projection, validation, conflict detection, idempotent import |
 | `custom_models.py` | 601 | Validation/installation of user `.zip` model bundles (schema 1 & 2) |
-| `api.py` | 575 | 26 HTTP routes, Pydantic request models, error mapping, static frontend |
+| `api.py` | 577 | 26 HTTP routes, Pydantic request models, error mapping, static frontend |
 | `official_models.py` | 459 | Checksum-authenticated import of large decoder artifacts; retained as an extension point, unreachable from any user-facing path |
-| `prediction_dataset.py` | 420 | Public-release verification + idempotent mirroring of local runs |
+| `prediction_dataset.py` | 449 | Public-release verification + idempotent mirroring and clearing of local runs |
 | `storage.py` | 390 | Six CSV ledgers, `flock`, append+fsync, atomic rename |
 | `jobs.py` | 306 | Single FIFO worker, persisted job rows, macro-phase progress |
 | `model_scanner.py` | 362 | Scans configured roots for recognized artifacts (no symlink following), reusing unchanged verifications |
@@ -131,13 +131,14 @@ Module inventory (`src/publisher_reliability/`, LOC from `wc -l`):
 | `model_scan_cache.py` | 136 | Skips re-hashing a checkpoint whose file is untouched; self-invalidating |
 | `config.py` | 85 | `PRT_*` env vars + CLI options |
 | `errors.py` | 51 | 20 stable error codes with fixed HTTP statuses |
-| `frontend/` | 1406 | `index.html` (41) + `styles.css` (223) + 9 page templates in `pages/*.html` (209) + 16 vanilla ES modules in `js/` (933) |
+| `frontend/` | 1475 | `index.html` (41) + `styles.css` (235) + 9 page templates in `pages/*.html` (208) + 16 vanilla ES modules in `js/` (991) |
 
-Total application code ≈ 6.3k LOC Python + ~1.4k LOC frontend. Tests: 13 files,
-~2.4k LOC, **64 tests, all passing** (verified: `python -m unittest discover -s
-tests` → `Ran 64 tests in 3.479s / OK`). They cover the leakage guard across every
+Total application code ≈ 6.4k LOC Python + ~1.5k LOC frontend. Tests: 14 files,
+~2.8k LOC, **77 tests, all passing** (verified: `python -m unittest discover -s
+tests` → `Ran 77 tests in 1.253s / OK`). They cover the leakage guard across every
 model family, publisher aggregation as a read-only derivation, the prediction
-export, the checkpoint scan cache, and the private mirror staying out of version
+export, the checkpoint scan cache, the local-data purge's crash-safe ordering,
+and the private mirror staying out of version
 control.
 
 ### Deliberate non-architecture

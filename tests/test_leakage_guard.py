@@ -136,7 +136,6 @@ class LeakageGuardTest(unittest.TestCase):
             local_checkpoint(self.storage, "bert", fold_id)
 
         availability = self.service.available_models(
-            input_type="article",
             url="https://example.com/held-out-in-fold-2",
         )
 

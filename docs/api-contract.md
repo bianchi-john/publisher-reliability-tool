@@ -174,6 +174,19 @@ The attachment is named `article-predictions.csv`. Column names match the
 user-prediction block of `dataset/predictions/predictions.csv`. No option can
 include saved or ephemeral content, and no column exposes an artifact path.
 
+### `DELETE /api/v1/user-data`
+
+Synchronous, permanent purge of every locally created evaluation. Body requires
+`{"confirmation":"DELETE"}`. It rejects while any evaluation job is running.
+It then removes the private prediction mirror
+(`dataset/predictions/user-predictions.csv`) before replacing `prediction_runs.csv`
+with everything except `local_inference` rows, and replaces `local_content.csv`
+with nothing — that ledger holds only content the user chose to save locally,
+regardless of which run's prediction they were viewing when they saved it. The
+released dataset and every `bundled_import`/`user_import` run are untouched.
+Returns `200` with `{"deleted_predictions":<int>,"deleted_saved_content":<int>}`.
+Bad confirmation is `INVALID_INPUT`.
+
 ## 6. Publishers
 
 ### `GET /api/v1/publishers`
@@ -219,17 +232,24 @@ Body is `{}`. Creates a `model_validation` job that scans configured roots and
 the internal managed-model root for recognized BERT/RoBERTa checkpoints and runs
 required fixtures. It accepts no path. Returns `202 {"job_id":"uuid"}`.
 
+A checkpoint whose file is unchanged since the previous scan reuses its recorded
+verification instead of being hashed and loaded again; the job result reports how
+many were reused. Full re-verification is deliberately not exposed over HTTP: it
+reads every byte of every checkpoint and belongs to the operator, through
+`publisher-reliability models scan --full`.
+
 ### `GET /api/v1/models/available`
 
-Explains model availability for one proposed evaluation input. Query parameters
-are `input_type=article|publisher`, `url`, `requested_count=2..50`, and
-`allow_partial=true|false`.
+Explains which local checkpoints may classify one article URL. The only query
+parameter is `url`. An article is the only input there is: a publisher class is
+read from the articles already classified, through the aggregation endpoint, so
+there is no availability question to ask about a publisher.
 
-For stored coverage, `items` contains historical model/fold identities for
-which a local checkpoint with the same family/fold is present. For
-single-article input it additionally contains runnable local model IDs that can
-create a missing run. Each item includes `mode=stored_prediction|new_inference`,
-the separate `local_model_id`, local status/runnable flag, safe held-out article
+`items` contains the historical model/fold identities whose stored prediction can
+be reused, meaning a local checkpoint of the same family and fold is installed and
+the leakage guard accepts it, plus the runnable local checkpoints that can create
+the missing run. Each item includes `mode=stored_prediction|new_inference`, the
+separate `local_model_id`, local status/runnable flag, safe held-out article
 count, run count, probability count and `eligible`.
 
 `availability` always explains the result with this separate, non-HTTP status
@@ -241,7 +261,6 @@ registry:
 | `NO_LOCAL_CHECKPOINTS` | No validated local artifact is currently present |
 | `NEW_ARTICLE_REQUIRES_INFERENCE` | URL needs a new run but no runnable local model is available |
 | `TRAINING_DATA_LEAKAGE` | Present local folds were trained on this known dataset article |
-| `INSUFFICIENT_SAFE_ARTICLES` | Matching publisher coverage is below the required safe count |
 | `NO_MATCHING_LOCAL_MODEL` | Stored history has no family/fold present in the local inventory |
 
 The object also returns `input_known`, local/eligible counts, and family/fold

@@ -133,6 +133,14 @@ On first online BERT/RoBERTa inference the application may cache the small
 tokenizer/configuration files from the immutable revisions recorded in model
 identity. BERT/RoBERTa CPU is the supported core path.
 
+Plan for the first start to be slow: every checkpoint is read once for its
+SHA-256 and once more for structural validation, which for the paper's ten folds
+is roughly 8.8 GB. Later starts reuse the recorded result for any file left
+untouched, through `<data-dir>/model-scan-cache.json`, and take seconds instead.
+The cache is disposable — deleting it only makes the next start slow again — and
+`publisher-reliability models scan --full` forces complete re-verification, which
+is the right thing to run when storage integrity is in question.
+
 The study's larger decoder checkpoints (Llama 3 8B, Mistral 24B) cannot be
 imported in this release: that support is under development, and each fold needs
 a CUDA GPU plus several gigabytes of weights. An import attempt returns
@@ -150,8 +158,7 @@ with `language="en"`. Deterministic language detection still rejects extracted
 text that is not English.
 
 The frontend uses the system Times New Roman font, so no font files are
-bundled. The single warm orange/terracotta light theme needs no remote asset
-or CDN.
+bundled. The single light theme needs no remote asset or CDN.
 
 ## 7. Backup and restore
 

@@ -68,7 +68,6 @@ class ImporterServiceTest(unittest.TestCase):
                 )
 
                 availability = service.available_models(
-                    input_type="article",
                     url="https://example.com/ambiguous",
                 )
                 self.assertEqual(availability["items"], [])
@@ -253,7 +252,6 @@ class ImporterServiceTest(unittest.TestCase):
                 self.assertNotIn("private author", service.export_predictions())
 
                 article_availability = service.available_models(
-                    input_type="article",
                     url="https://example.com/article-1",
                 )
                 available_for_article = article_availability["items"]
@@ -264,37 +262,18 @@ class ImporterServiceTest(unittest.TestCase):
                 self.assertEqual(
                     article_availability["availability"]["code"], "AVAILABLE"
                 )
-                available_for_publisher = service.available_models(
-                    input_type="publisher",
-                    url="https://example.com/",
-                    requested_count=2,
-                )["items"]
-                self.assertEqual(available_for_publisher[0]["article_count"], 2)
-                self.assertEqual(available_for_publisher[0]["probability_count"], 2)
-                self.assertTrue(available_for_publisher[0]["eligible"])
-
+                # A publisher is not an evaluation input: its class is read from the
+                # article predictions instead, by publisher_aggregation.
                 publisher = service.publisher_summaries()[0]
                 self.assertEqual(publisher["run_count"], 2)
                 self.assertEqual(publisher["probability_run_count"], 2)
 
                 unknown = service.available_models(
-                    input_type="article",
                     url="https://example.com/new-article",
                 )
                 self.assertEqual(
                     unknown["availability"]["code"],
                     "NEW_ARTICLE_REQUIRES_INFERENCE",
-                )
-
-                unknown_publisher = service.available_models(
-                    input_type="publisher",
-                    url="https://not-in-dataset.example/",
-                    requested_count=2,
-                )
-                self.assertEqual(unknown_publisher["items"], [])
-                self.assertEqual(
-                    unknown_publisher["availability"]["code"],
-                    "PUBLISHER_NOT_IN_DATASET",
                 )
 
                 trained_model = dict(local_model)

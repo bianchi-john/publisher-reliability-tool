@@ -44,6 +44,16 @@ Startup scans configured roots automatically. The Models page also performs one
 session scan when it finds no local identities; the explicit scan button is
 available after files are added, removed, or replaced.
 
+The first scan of a checkpoint is slow, because the file is read once for its
+SHA-256 and once more to verify its structure. A checkpoint that has not changed
+since the previous scan reuses that recorded result, so later starts are quick;
+a new, moved, replaced or modified file is verified again in full. To re-read
+every byte on demand, for example when a disk may be failing, run:
+
+```bash
+publisher-reliability models scan --full
+```
+
 Core checkpoints contain model weights but not the official tokenizer files.
 On first online inference the application may cache only the small tokenizer
 and configuration resources from the pinned immutable Hugging Face revision.
@@ -83,7 +93,7 @@ and export contract.
 
 ## 3. Evaluate one article
 
-1. Open **Evaluate** and choose **Single article**.
+1. Open **Evaluate**. One article is the only thing the page classifies.
 2. Enter the full public article URL.
 3. Wait for the application to inspect stored prediction coverage and the local
    Models inventory.
@@ -118,9 +128,9 @@ New-page retrieval:
 
 The completed Evaluate card shows the predicted `Class 0..4`, every probability
 as a decimal and percentage bar, exact family/fold, stored-versus-new status,
-prediction-run ID, and a link to the complete article history. The **Recent
-user article evaluations** table reloads persisted local inference runs after a
-page refresh.
+prediction-run ID, and a link to the complete article history. The card belongs
+to the evaluation you just ran; earlier local predictions are listed under
+**Articles & predictions → User-evaluated articles**, which survives a refresh.
 
 Every completed new inference is stored in two coordinated places:
 
@@ -146,9 +156,8 @@ Common availability messages have distinct meanings:
   a model identity may exist, but no installed artifact passed runnable
   validation.
 - **Training-data leakage**: the local fold was trained on that known dataset
-  article.
-- **Insufficient safe articles**: a publisher does not have enough compatible
-  held-out stored runs for the requested count.
+  article. The checkpoints withheld for this reason are named beneath the
+  selector, so a hidden option is never unexplained.
 
 Retrieval, extraction, language, tokenizer, model-loading, and inference
 failures are reported separately. Strict offline mode can reuse stored runs but
@@ -187,6 +196,14 @@ Run origin in the application ledger (`local_inference`) and row origin in the
 combined prediction dataset (`user_evaluation`) describe the same user-created
 inference at two storage boundaries.
 
+**Clear user data** permanently deletes local evaluation history: every article
+classified locally, any title/body saved alongside one, and the private file
+that would otherwise restore them after a restart. It asks for the exact
+confirmation phrase before doing anything, and reports how many predictions and
+saved articles were removed. The bundled release and any imported CSV/CSV.GZ
+are never affected — this only ever touches what this browser's own use of the
+tool created.
+
 ## 5. Read a publisher's class
 
 A publisher class is not something you create. It is a reading of the articles
@@ -213,7 +230,8 @@ than presenting a single article as an aggregate.
 
 ## 6. Appearance and navigation
 
-The interface uses a single warm orange/terracotta light palette; there is no
+The interface uses one light palette, defined as CSS custom properties at the
+top of `styles.css`; there is no
 dark mode or theme control. Titles, paragraphs, navigation, forms and buttons
 all use the system Times New Roman serif font, so nothing is fetched from a
 font or style CDN. The top bar remains mounted while navigating; the current

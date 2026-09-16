@@ -57,6 +57,10 @@ class DeleteContentRequest(StrictModel):
     confirm_canonical_url: str
 
 
+class ClearUserDataRequest(StrictModel):
+    confirmation: str
+
+
 class EmptyRequest(StrictModel):
     pass
 
@@ -322,6 +326,12 @@ def create_app(
             },
         )
 
+    @app.delete("/api/v1/user-data")
+    async def clear_user_data(body: ClearUserDataRequest):
+        # A publisher's stored predictions are never touched here: this deletes only
+        # what a user created locally, not the shared research dataset.
+        return service.clear_user_data(confirmation=body.confirmation)
+
     @app.get("/api/v1/articles")
     async def articles(
         limit: int = 25,
@@ -426,18 +436,10 @@ def create_app(
         return {"items": service.models(family=family, status=status)}
 
     @app.get("/api/v1/models/available")
-    async def available_models(
-        input_type: Literal["article", "publisher"],
-        url: str,
-        requested_count: int = Query(default=2, ge=2, le=50),
-        allow_partial: bool = False,
-    ):
-        return service.available_models(
-            input_type=input_type,
-            url=url,
-            requested_count=requested_count,
-            allow_partial=allow_partial,
-        )
+    async def available_models(url: str):
+        # One article URL is the only question this answers: a publisher class is read
+        # from the articles already classified, never evaluated.
+        return service.available_models(url=url)
 
     @app.post("/api/v1/models/scan", status_code=202)
     async def model_scan(_body: EmptyRequest):

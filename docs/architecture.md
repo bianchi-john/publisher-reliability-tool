@@ -192,7 +192,8 @@ stable scrollbar gutter and minimum content height prevent layout movement.
 Route completion returns the document to the top and moves keyboard focus to
 the main content with scroll prevention, so the sticky bar cannot cover the
 first navigation item.
-The top bar uses a single warm orange/terracotta light palette; there is no
+The interface uses one light palette, defined as CSS custom properties at the
+top of `styles.css`; there is no
 theme control and no dark mode. Display headings, body text, navigation and
 controls all use the system Times New Roman serif font, so no font files are
 bundled with the frontend.

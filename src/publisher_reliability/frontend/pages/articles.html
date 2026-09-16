@@ -4,8 +4,13 @@
     <h1>Articles &amp; predictions</h1>
     <p class="intro">Dataset articles and articles classified by the user are identified separately. Open one to inspect every model output and probability.</p>
   </div>
-  <a class="button secondary" href="/api/v1/articles/export{{exportQuery}}">Export predictions CSV</a>
+  <div class="toolbar">
+    <button class="secondary" id="export">Export predictions CSV</button>
+    <button class="danger" id="clear-user-data">Clear user data</button>
+  </div>
 </header>
+
+<div id="page-notice" class="notice" hidden aria-live="polite"></div>
 
 <div class="source-tabs" aria-label="Filter articles by source">
   <a class="{{allTab}}" href="#articles">All articles</a>
@@ -18,4 +23,4 @@
   <span><span class="source-dot user-source"></span><b>User evaluated:</b> a new article classified locally through Evaluate.</span>
 </div>
 
-<div class="loading">Loading articles…</div>
+<div id="article-list" class="loading">Loading articles…</div>

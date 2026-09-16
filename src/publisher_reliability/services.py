@@ -16,7 +16,7 @@ from .aggregation import METHODS, WARNING, aggregate
 from .errors import AppError
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
-from .prediction_dataset import sync_user_predictions
+from .prediction_dataset import clear_user_predictions, sync_user_predictions
 from .storage import Storage, json_field, utc_now
 
 
@@ -552,28 +552,28 @@ class ResearchService:
         rows.sort(key=lambda row: (str(row["family"]), int(row["fold_id"])))
         return rows
 
-    def available_models(
-        self,
-        *,
-        input_type: str,
-        url: str,
-        requested_count: int = 2,
-        allow_partial: bool = False,
-    ) -> dict[str, object]:
-        """Explain availability and return locally present, leakage-safe stored models.
+    def available_models(self, *, url: str) -> dict[str, object]:
+        """Explain which local checkpoints may classify one article URL, and why not.
 
         The interface never offers a checkpoint it cannot honour, so this answers two
         questions at once: which options are genuinely selectable, and why the rest are
         not. The explanation carries as much weight as the list, because "nothing is
-        available" has several unrelated causes: no checkpoint installed, too few
-        held-out articles for the requested count, or a leakage guard that rejects
-        every installed fold.
+        available" has several unrelated causes: no checkpoint installed, no installed
+        family and fold matching the stored predictions, or a leakage guard that
+        rejects every installed fold.
+
+        One article is the only input. A publisher class is read from the articles
+        already classified, by ``publisher_aggregation``, so there is no availability
+        question to ask about a publisher before evaluating it.
         """
 
         canonical = normalize_url(url)
-        matching, required = self._runs_for_input(
-            input_type, canonical, requested_count, allow_partial
-        )
+        identifier = article_id(canonical)
+        stored_runs = [
+            row
+            for row in self.storage.rows["prediction_runs"]
+            if row["article_id"] == identifier
+        ]
         local_models = [
             model
             for model in self.storage.rows["models"]
@@ -582,21 +582,19 @@ class ResearchService:
         ]
         fold_registry = self._imported_fold_registry()
 
-        options, had_local_identity = self._stored_prediction_options(
-            matching, local_models, fold_registry, required
+        options = self._stored_prediction_options(
+            stored_runs, local_models, fold_registry
         )
-        blocked: list[dict[str, object]] = []
-        if input_type == "article":
-            new_options, blocked = self._new_inference_options(
-                local_models,
-                fold_registry,
-                article_id(canonical),
-                {str(row["model_id"]) for row in options},
-            )
-            options.extend(new_options)
+        new_options, blocked = self._new_inference_options(
+            local_models,
+            fold_registry,
+            identifier,
+            {str(row["model_id"]) for row in options},
+        )
+        options.extend(new_options)
 
-        # Selectable options first, stored reuse before new inference, then a stable
-        # family/fold order so the selector does not reshuffle between refreshes.
+        # Stored reuse before new inference, then a stable family/fold order so the
+        # selector does not reshuffle between refreshes.
         options.sort(
             key=lambda row: (
                 not bool(row["eligible"]),
@@ -606,11 +604,9 @@ class ResearchService:
             )
         )
         code, message = self._availability_verdict(
-            input_type=input_type,
             options=options,
             local_model_count=len(local_models),
-            input_known=bool(matching),
-            had_local_identity=had_local_identity,
+            input_known=bool(stored_runs),
             blocked=blocked,
         )
         return {
@@ -618,58 +614,25 @@ class ResearchService:
             "availability": {
                 "code": code,
                 "message": message,
-                "input_known": bool(matching),
+                "input_known": bool(stored_runs),
                 "local_checkpoint_count": len(local_models),
                 "eligible_model_count": sum(bool(row["eligible"]) for row in options),
                 "blocked_training_models": blocked,
             },
         }
 
-    def _runs_for_input(
-        self,
-        input_type: str,
-        canonical_url: str,
-        requested_count: int,
-        allow_partial: bool,
-    ) -> tuple[list[dict[str, str]], int]:
-        """Stored runs describing this input, and how many safe articles it needs.
-
-        An article needs one compatible run. A publisher needs at least two, because a
-        single article is not an aggregate; asking for more than the available count is
-        only permitted when the caller accepts a partial result.
-        """
-
-        if input_type == "article":
-            identifier = article_id(canonical_url)
-            matching = [
-                row
-                for row in self.storage.rows["prediction_runs"]
-                if row["article_id"] == identifier
-            ]
-            return matching, 1
-        if input_type == "publisher":
-            hostname = normalized_hostname(canonical_url)
-            matching = [
-                row
-                for row in self.storage.rows["prediction_runs"]
-                if row["normalized_hostname"] == hostname
-            ]
-            return matching, 2 if allow_partial else max(2, requested_count)
-        raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
-
     def _stored_prediction_options(
         self,
-        matching: list[dict[str, str]],
+        stored_runs: list[dict[str, str]],
         local_models: list[dict[str, str]],
         fold_registry: dict[str, set[int]],
-        required: int,
-    ) -> tuple[list[dict[str, object]], bool]:
-        """Options that reuse stored runs, and whether any family/fold exists locally.
+    ) -> list[dict[str, object]]:
+        """Options that reuse a prediction already stored for this article.
 
         A stored run is offered only when the same family and fold is installed here,
-        so the workspace never promises a reproduction it cannot perform. The returned
-        flag separates "no installed checkpoint matches these runs" from "one matches
-        but too few of its articles are leakage-safe", which are reported differently.
+        so the workspace never promises a reproduction it cannot perform, and only when
+        the leakage guard accepts it. Anything that survives both conditions can be
+        honoured, which is why every option returned here is eligible.
         """
 
         local_by_family_fold: dict[tuple[str, int], list[dict[str, str]]] = defaultdict(list)
@@ -677,12 +640,11 @@ class ResearchService:
             local_by_family_fold[(model["family"], int(model["fold_id"]))].append(model)
 
         grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for run in matching:
+        for run in stored_runs:
             grouped[run["model_id"]].append(run)
 
         models = self.models_by_id
         options: list[dict[str, object]] = []
-        had_local_identity = False
         for model_identifier, runs in grouped.items():
             model = models.get(model_identifier)
             if model is None:
@@ -692,7 +654,6 @@ class ResearchService:
             )
             if not local_matches:
                 continue
-            had_local_identity = True
             safe_runs = [
                 run
                 for run in runs
@@ -721,11 +682,11 @@ class ResearchService:
                     "probability_count": sum(
                         bool(run["prob_class_0"]) for run in safe_runs
                     ),
-                    "eligible": article_count >= required,
+                    "eligible": True,
                     "mode": "stored_prediction",
                 }
             )
-        return options, had_local_identity
+        return options
 
     def _new_inference_options(
         self,
@@ -802,11 +763,9 @@ class ResearchService:
     @staticmethod
     def _availability_verdict(
         *,
-        input_type: str,
         options: list[dict[str, object]],
         local_model_count: int,
         input_known: bool,
-        had_local_identity: bool,
         blocked: list[dict[str, object]],
     ) -> tuple[str, str]:
         """Name the one reason that explains this outcome, most specific cause first."""
@@ -818,8 +777,8 @@ class ResearchService:
                 "No validated local checkpoint is available. Add a supported model "
                 "under Models and scan the configured directories.",
             )
-        if options and eligible_count:
-            if input_type == "article" and any(
+        if eligible_count:
+            if any(
                 row["eligible"] and row["mode"] == "new_inference" for row in options
             ):
                 return (
@@ -832,26 +791,11 @@ class ResearchService:
                 f"{eligible_count} local checkpoint(s) have enough leakage-safe "
                 "stored predictions for this request.",
             )
-        if options or (input_type == "publisher" and had_local_identity):
-            return (
-                "INSUFFICIENT_SAFE_ARTICLES",
-                "Matching local checkpoints exist, but the publisher has fewer safe "
-                "held-out predictions than the requested article count.",
-            )
-        if input_type == "article" and not input_known:
+        if not input_known:
             return (
                 "NEW_ARTICLE_REQUIRES_INFERENCE",
                 "This URL is not present in the imported prediction dataset. It requires "
                 "a new inference run, but no runnable local model is available.",
-            )
-        if input_type == "publisher" and not input_known:
-            return (
-                "PUBLISHER_NOT_IN_DATASET",
-                "This publisher has no stored predictions in the imported dataset. "
-                "Publisher evaluation only aggregates existing article predictions; it "
-                "does not crawl the site or infer missing articles. Use Single article "
-                "to classify one new page, or check Publishers for a hostname that is "
-                "already present.",
             )
         if blocked:
             if any("multiple imported folds" in str(row["reason"]) for row in blocked):
@@ -961,6 +905,64 @@ class ResearchService:
         return {
             "deleted": True,
             "backup_notice": "User backups and external copies are unchanged.",
+        }
+
+    CLEAR_USER_DATA_CONFIRMATION = "DELETE"
+
+    def clear_user_data(self, *, confirmation: str) -> dict[str, object]:
+        """Permanently delete every locally created evaluation, and nothing else.
+
+        This removes exactly what the user produced on this machine: their own
+        article evaluations (``prediction_runs`` rows of origin ``local_inference``),
+        any title/body they chose to save alongside a run (``local_content`` is only
+        ever populated by that same user action, whether the run it accompanies is a
+        reused dataset prediction or a local one), and the private mirror that would
+        otherwise restore them. Every ``bundled_import``/``user_import`` row, and the
+        released dataset itself, is untouched: it is shared research data, not
+        personal history.
+
+        The private mirror is cleared before the ledger rows, deliberately. See
+        ``clear_user_predictions`` for why that order, and not the reverse, is the one
+        that cannot silently undo itself on the next restart.
+        """
+
+        if confirmation != self.CLEAR_USER_DATA_CONFIRMATION:
+            raise AppError(
+                "INVALID_INPUT",
+                f'Type "{self.CLEAR_USER_DATA_CONFIRMATION}" to confirm.',
+            )
+        if any(
+            row["job_type"] == "evaluation" and row["status"] == "running"
+            for row in self.storage.rows["jobs"]
+        ):
+            raise AppError(
+                "INVALID_INPUT", "User data cannot be cleared while an evaluation is running."
+            )
+
+        deleted_predictions = sum(
+            1
+            for row in self.storage.rows["prediction_runs"]
+            if row["origin"] == "local_inference"
+        )
+        deleted_saved_content = len(self.storage.rows["local_content"])
+
+        if deleted_predictions:
+            clear_user_predictions(self.prediction_dataset_dir)
+        if deleted_saved_content:
+            self.storage.replace("local_content", [])
+        if deleted_predictions:
+            self.storage.replace(
+                "prediction_runs",
+                [
+                    row
+                    for row in self.storage.rows["prediction_runs"]
+                    if row["origin"] != "local_inference"
+                ],
+            )
+
+        return {
+            "deleted_predictions": deleted_predictions,
+            "deleted_saved_content": deleted_saved_content,
         }
 
     def export_predictions(

@@ -3,7 +3,7 @@
 **Status:** Normative research-demo coverage map
 
 Acceptance tests verify requirements and do not create additional product
-scope. AT-001–AT-047 and AT-051–AT-054 are core; AT-048–AT-050 are optional
+scope. AT-001–AT-047 and AT-051–AT-055 are core; AT-048–AT-050 are optional
 stress/fault.
 
 ## Functional requirements
@@ -34,6 +34,7 @@ stress/fault.
 | FR-022 | AT-026, AT-029, AT-030, AT-051, AT-052 |
 | FR-023 | AT-011, AT-012, AT-033, AT-054 |
 | FR-024 | AT-036, AT-046, AT-047 |
+| FR-025 | AT-055 |
 
 ## Non-functional requirements
 

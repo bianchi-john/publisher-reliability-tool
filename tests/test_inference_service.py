@@ -152,7 +152,6 @@ class InferenceServiceTest(unittest.TestCase):
                 )
 
                 availability = service.available_models(
-                    input_type="article",
                     url="https://example.com/new",
                 )
                 self.assertEqual(availability["availability"]["code"], "AVAILABLE")
@@ -237,7 +236,6 @@ class InferenceServiceTest(unittest.TestCase):
                     run["article_id"],
                 )
                 repeated = service.available_models(
-                    input_type="article",
                     url="https://example.com/new",
                 )
                 self.assertEqual(

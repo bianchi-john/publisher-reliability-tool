@@ -58,7 +58,7 @@ The MVP shall:
 - prevent a checkpoint from evaluating known imported articles outside its
   held-out test fold;
 - display exact model/fold/run/article provenance and scientific warnings;
-- work offline for browsing, reuse, and stored aggregation;
+- work offline for browsing, reuse, and deriving a publisher class from stored runs;
 - optionally retain extracted title/body with explicit per-request consent.
 
 ## 4. Explicitly excluded or deferred
@@ -209,20 +209,16 @@ content saved by an earlier request.
 Content is committed only after an exact run has been selected or created, so
 `local_content.csv` cannot introduce an article absent from run history.
 
-Single-article evaluation creates no publisher aggregate. Explicit lists must
-contain 2–50 distinct URLs that resolve to one publisher and create missing
-runs sequentially when the selected model is runnable. Publisher URL evaluation
-uses stored compatible runs only; it does not crawl or infer undiscovered
-articles. `allow_partial=true` permits an aggregate with 2..requested stored
-runs; otherwise an unmet count fails.
+One article is the only thing an evaluation accepts, and it creates no publisher
+aggregate. A publisher-level class is not an operation a user performs: it is a
+reading over the articles already classified, derived on request by the publisher
+aggregation endpoint and never stored. The application never crawls a publisher
+to discover articles it has not been given.
 
-For single-article input, publisher count, aggregation method and partial-result
-controls are hidden because they do not apply. Before submission, Evaluate
-reports whether the URL is known, requires new inference, lacks a matching local
-checkpoint, has insufficient safe publisher coverage, or is blocked for
-training-data leakage. `allow_partial=true` is explained as using 2..requested
-safe articles when the requested count cannot be met; false requires the full
-count.
+Before submission, Evaluate reports whether the URL is known, requires new
+inference, lacks a matching local checkpoint, or is blocked for training-data
+leakage. Checkpoints withheld by the leakage guard are named, so a hidden option
+is never unexplained.
 
 After single-article completion, the new immutable run is appended to the
 authoritative state ledger and mirrored to a private, git-ignored
@@ -231,8 +227,9 @@ authoritative state ledger and mirrored to a private, git-ignored
 touches the tracked release. Evaluate keeps a prominent result card on the
 page with the predicted `Class 0..4`, all five decimal/percentage
 probabilities, exact model/fold, stored-versus-new origin, run ID, and a link to
-the complete article history. A recent-local-runs table remains available after
-refresh. Articles & predictions provides separate filters and visual badges for
+the complete article history. Earlier local runs are read from Articles &
+predictions rather than repeated on the Evaluate page. Articles & predictions
+provides separate filters and visual badges for
 dataset-backed articles and articles created solely by a user inference; a
 dataset article evaluated locally retains both facts.
 
@@ -282,6 +279,23 @@ when no evaluation job is running, then rewrites that small ledger through a
 temporary file and atomic rename. It affects active state only. User-created
 backups and external copies must be deleted manually.
 
+### 7.6 Clearing local user data
+
+A single confirmed operation deletes everything a user produced on this
+machine — every `local_inference` prediction run, every row of saved content
+regardless of which run it accompanies, and the private prediction mirror —
+and nothing else: bundled and user-imported dataset rows, their model
+identities, and the tracked release are never touched. It is refused while any
+evaluation job is running or the typed confirmation does not match, exactly
+like the single-article purge above.
+
+Order is safety-critical, not incidental: the private mirror is removed before
+`prediction_runs.csv` is rewritten. An interruption between those two steps
+leaves an already-doomed row sitting in the ledger, recoverable by repeating
+the operation; the reverse order would let a surviving mirror silently restore
+every deleted run at the next start, undoing a deletion already reported as
+complete.
+
 ## 8. Jobs and UI
 
 Only operations that can take noticeable time are jobs.
@@ -313,7 +327,7 @@ runtime details, replacing a dedicated dashboard page. It favors provenance
 and scientific explanation over administration. Loading,
 empty, offline, missing-model, partial, and error states use clear English text.
 The persistent top bar does not remount or shift during route changes. The UI
-uses a single warm orange/terracotta light visual system with no theme
+uses one light visual system with no theme
 control and no dark mode, and the system Times New Roman serif font throughout,
 without a CDN.
 
@@ -337,7 +351,7 @@ without a CDN.
 | FR-014 | BERT and RoBERTa shall form the built-in core model path. |
 | FR-015 | New web inference shall use safe retrieval, unchanged extracted text, and deterministic English validation. |
 | FR-016 | Strict offline mode shall prevent every application-initiated outbound HTTP request. |
-| FR-017 | Essential state shall survive restart in the seven documented CSV ledgers; user-evaluation rows in the dataset CSV shall provide an additional recoverable mirror, not a second independent identity system. |
+| FR-017 | Essential state shall survive restart in the six documented CSV ledgers; user-evaluation rows in the dataset CSV shall provide an additional recoverable mirror, not a second independent identity system. |
 | FR-018 | UI/API long operations shall use the three simple persisted job types and polling; CLI commands shall run the same work synchronously. |
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
 | FR-020 | UI, API and the prediction CSV shall expose model, fold, run, contributing articles where applicable, method, all available probabilities, dataset-versus-user origin, and scientific limitations. |
@@ -345,6 +359,7 @@ without a CDN.
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
 | FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches; importing the study's larger decoder checkpoints shall be refused with `FEATURE_UNAVAILABLE` while that support is under development. |
+| FR-025 | A confirmed bulk purge shall permanently delete every local prediction, its saved content, and its private mirror, in an order that cannot resurrect a deleted run on restart, without touching bundled or user-imported dataset rows. |
 
 ## 10. Non-functional requirements
 

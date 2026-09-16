@@ -112,16 +112,27 @@ Minimum commit units are deliberately explicit:
   validation;
 - new prediction: one append-only prediction-run row followed by an idempotent
   private user-prediction mirror update keyed by `prediction_run_id`;
-- publisher evaluation: one append-only evaluation row referencing already
-  committed runs;
 - content save/delete: one complete `local_content.csv` replacement;
 - model registration/status: one complete `models.csv` replacement;
-- job admission/status/result: one complete `jobs.csv` replacement.
+- job admission/status/result: one complete `jobs.csv` replacement;
+- local-data purge: private mirror file removal, then a complete
+  `local_content.csv` replacement, then a complete `prediction_runs.csv`
+  replacement, in that fixed order.
 
-These units are independent. If the process stops after a run/evaluation/import
-commits but before its job-success rewrite, the scientific record remains valid
-and the recovered job is `PROCESS_INTERRUPTED`. Already committed article runs
-or content from a failed multi-article evaluation are not rolled back.
+These units are independent, with one exception. If the process stops after a
+run or an import commits but before its job-success rewrite, the scientific
+record remains valid and the recovered job is `PROCESS_INTERRUPTED`. An already
+committed run or its saved content is not rolled back. The local-data purge is
+the one sequence where order is safety-critical rather than independent: an
+interruption after the mirror is removed but before `prediction_runs.csv` is
+rewritten leaves already-doomed rows sitting in the ledger, recoverable by
+repeating the purge. The reverse order would let a surviving mirror file
+resurrect them at the next restart, silently undoing a purge already reported
+as complete.
+
+A publisher-level class has no commit unit because it is never committed: it is
+derived from the runs above whenever someone asks for it, under the counting
+rule and article selection they chose at that moment.
 
 For the prediction mirror, `user-predictions.csv` is completely rewritten to a
 sibling temporary file in the same directory, flushed/fsynced and replaced. The

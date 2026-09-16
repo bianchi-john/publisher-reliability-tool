@@ -2,7 +2,7 @@
 
 **Status:** Normative verification contract
 
-AT-001–AT-047 and AT-051–AT-054 form the core release gate on a normal CPU
+AT-001–AT-047 and AT-051–AT-055 form the core release gate on a normal CPU
 workstation. AT-048–AT-050 are optional stress/fault tests. Optional failures
 are reported but do not block the core demo.
 
@@ -142,8 +142,9 @@ credentials, absolute artifact path, or production stack trace.
 
 ### AT-021 — Offline browsing and aggregation
 
-With outbound connections blocked, bundled articles, publishers, runs, imports,
-and derived publisher classes can be browsed/exported and read offline.
+With outbound connections blocked, bundled articles, publishers, runs and
+imports can be browsed and exported offline, and a publisher class can still be
+derived from the stored runs.
 
 ### AT-022 — Strict offline transport
 
@@ -283,8 +284,8 @@ clear English actions. The top-bar status control opens a keyboard-reachable
 popover with workspace counts and runtime details. Articles exposes distinct dataset and
 user-evaluated filters/badges derived from run origin rather than URL heuristics.
 An imported article with a later local run remains dataset-backed and also
-shows the user-evaluated badge. The UI exposes a single warm orange/terracotta
-light palette with the system Times New Roman font throughout, no theme
+shows the user-evaluated badge. The UI exposes one light palette with the
+system Times New Roman font throughout, no theme
 control, no dark mode, and no remote font or style dependency. Route changes
 keep the top bar mounted, keep its first navigation item visible, and do not
 collapse page height or scrollbar space.
@@ -391,21 +392,33 @@ block. If normalization maps one article identity to more than one imported fold
 stored runs remain consultable but every checkpoint is blocked for direct
 evaluation and the identity is excluded from publisher aggregation.
 
-### AT-053 — Availability explanation and conditional controls
+### AT-053 — Availability explanation
 
 A new URL absent from stored history offers every runnable local model with mode
 `new_inference`; when none is runnable it returns
 `NEW_ARTICLE_REQUIRES_INFERENCE`. Other empty states distinguish no local
-checkpoints, no matching family/fold and insufficient safe articles.
-Single-article mode hides publisher count, aggregation and partial controls.
-Publisher mode explains that partial means using at least two but fewer than
-the requested safe articles.
+checkpoints and no matching family/fold. Evaluate presents one article URL and
+one model, with no publisher count, aggregation method or partial-result
+control, because a publisher class is read on the Publishers page instead of
+being requested here. Checkpoints withheld by the leakage guard are named
+beneath the selector.
 
 ### AT-054 — Bundled release replacement
 
 Starting with the obsolete four-family bundled import and then loading the
 current manifest removes old bundled runs, their unreferenced historical model
-identities, obsolete bundled import row and any publisher aggregation that
-references a removed bundled run. It then imports exactly 38,854 BERT/RoBERTa
-runs. User imports, their models and runs, saved content, jobs and local
+identities and the obsolete bundled import row. It then imports exactly 38,854
+BERT/RoBERTa runs. No stored publisher aggregate has to be removed, because none
+is ever written. User imports, their models and runs, saved content, jobs and local
 checkpoint registrations are unchanged.
+
+### AT-055 — Local evaluation purge
+
+A confirmed bulk purge deletes every `local_inference` run, all saved content,
+and the private prediction mirror in one operation, while every
+`bundled_import`/`user_import` run, its model identities, and the tracked
+release remain unchanged. It returns `INVALID_INPUT` while any evaluation job
+is running or the typed confirmation does not match, and its response counts
+exactly what was removed. After a restart, none of the purged rows returns,
+because the mirror that would have restored them was removed before the
+ledger, not after.

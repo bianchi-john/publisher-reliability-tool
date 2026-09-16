@@ -7,6 +7,7 @@
   --line: #cfdbe5;
   --accent: #2a5f8a;
   --accent-soft: #d7e6f0;
+  --focus: #0b2d4d;
   --on-accent: #f6fafc;
   --warning: #a5701a;
   --red: #a83d32;
@@ -116,7 +117,18 @@ input[type="search"] { min-width: 280px; }
 textarea { width: min(720px, 100%); min-height: 110px; resize: vertical; }
 button, .button { cursor: pointer; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; }
 button.secondary, .button.secondary { background: var(--surface); color: var(--accent); }
-button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px solid #f0a06a; outline-offset: 2px; }
+button.danger, .button.danger { border-color: var(--red); background: var(--surface); color: var(--red); }
+button.danger:hover { background: var(--failed-bg); }
+/* The offset keeps the ring on the page background instead of on the control, so its
+   contrast is read against that background: this one clears 12:1 on every surface
+   here, where the previous colour stayed below the 3:1 minimum on all of them. */
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* The router focuses the content area after each navigation so a screen reader starts
+   reading the new page, and the skip link jumps here too. That is a container being
+   focused programmatically, never a control the user tabbed to, so it must not draw a
+   focus ring around the whole page; main is tabindex="-1" and unreachable by Tab, so
+   this cannot hide a keyboard user's position. */
+#content:focus, #content:focus-visible { outline: none; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--row-line); text-align: left; vertical-align: top; }

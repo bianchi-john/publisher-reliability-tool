@@ -75,10 +75,7 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
 
         availability = await self.client.get(
             "/api/v1/models/available",
-            params={
-                "input_type": "article",
-                "url": "https://example.com/article",
-            },
+            params={"url": "https://example.com/article"},
         )
         self.assertEqual(availability.status_code, 200)
         self.assertEqual(availability.json()["items"], [])
@@ -99,6 +96,28 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "INVALID_INPUT")
 
+    async def test_clear_user_data_is_exposed_and_confirmation_checked(self) -> None:
+        paths = (await self.client.get("/api/openapi.json")).json()["paths"]
+        self.assertEqual(set(paths["/api/v1/user-data"]), {"delete"})
+
+        wrong = await self.client.request(
+            "DELETE", "/api/v1/user-data", json={"confirmation": "please"}
+        )
+        self.assertEqual(wrong.status_code, 422)
+        self.assertEqual(wrong.json()["error"]["code"], "INVALID_INPUT")
+
+        # Nothing to delete in a fresh workspace, but the confirmed call still
+        # succeeds and reports zero of each, rather than treating "nothing local
+        # yet" as an error.
+        confirmed = await self.client.request(
+            "DELETE", "/api/v1/user-data", json={"confirmation": "DELETE"}
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(
+            confirmed.json(),
+            {"deleted_predictions": 0, "deleted_saved_content": 0},
+        )
+
     async def test_only_single_articles_can_be_evaluated(self) -> None:
         """A publisher class is read, never requested as an evaluation."""
 
@@ -116,6 +135,11 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         # Reading a publisher's class is a GET; there is no endpoint that creates one.
         aggregation = paths["/api/v1/publishers/{publisher_identifier}/aggregation"]
         self.assertEqual(set(aggregation), {"get"})
+
+        # Availability is asked about one article and nothing else. The publisher
+        # input, and the article-count options that only served it, are gone.
+        parameters = paths["/api/v1/models/available"]["get"]["parameters"]
+        self.assertEqual([item["name"] for item in parameters], ["url"])
         self.assertNotIn("/api/v1/publisher-evaluations", paths)
         self.assertNotIn("/api/v1/aggregation-jobs", paths)
         for path, operations in paths.items():
