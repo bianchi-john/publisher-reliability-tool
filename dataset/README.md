@@ -20,11 +20,25 @@ predictions/
 
 | Measure | Value |
 | --- | ---: |
-| Original dataset rows | 19,429 |
-| Derived articles | 19,411 |
-| Original prediction runs | 38,854 |
+| Original dataset rows | 17,283 |
+| Derived articles | 17,269 |
+| Original prediction runs | 34,564 |
+| Publishers | 372 |
+| Minimum classified articles per publisher | 20 |
 | Original model/fold identities | 10 |
-| Canonical articles assigned to multiple folds | 16 |
+| Canonical articles assigned to multiple folds | 13 |
+
+### Publisher threshold
+
+The release is a subset of the study corpus: a publisher is included only when
+at least **20** of its articles were classified. Outlets below that line were
+over half the distinct domains but about a ninth of the rows, and a handful of
+articles cannot support a publisher-level reading — the aggregation needs at
+least two leakage-safe articles, and a verdict resting on two or three of them
+says more about the sample than about the outlet. Dropping them keeps the
+shipped file small enough to browse while leaving every publisher in it
+substantial enough to aggregate. This is why the domain count here is lower than
+the number of domains scraped in the study.
 
 `prediction_origin` distinguishes the two row shapes that share one column set:
 
@@ -46,7 +60,7 @@ The original wide-format columns remain unchanged. Generic local-run fields are
 `title`, `text` and `authors` remain empty compatibility columns. Protected
 provider labels, scores and metadata are not included.
 
-The 16 canonical identities assigned to multiple folds correspond to 32
+The 13 canonical identities assigned to multiple folds correspond to 26
 article/family memberships across BERT and RoBERTa. Their stored predictions
 remain visible for inspection, but they are excluded from leakage-safe
 evaluation because no single held-out fold can be established.

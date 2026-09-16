@@ -42,10 +42,12 @@ docker compose up --build
 
 ## What it does
 
-The bundled release imports on first start and yields **19,411** articles,
-**38,854** immutable prediction runs with complete five-class probabilities, and
-**10** BERT/RoBERTa fold identities. An import is keyed by content digest, so
-starting again never duplicates anything.
+The bundled release imports on first start and yields **17,269** articles,
+**34,564** immutable prediction runs with complete five-class probabilities, and
+**10** BERT/RoBERTa fold identities, over **372** publishers. It ships only
+outlets with at least 20 classified articles, since a publisher verdict resting
+on two or three articles says more about the sample than about the outlet. An
+import is keyed by content digest, so starting again never duplicates anything.
 
 **Evaluate** classifies one article URL. You pick a model among those actually
 usable for that URL, and the run is stored with all five class probabilities.

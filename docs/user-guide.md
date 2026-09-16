@@ -18,8 +18,10 @@ compact overview popover with the same counts a dashboard would show:
   local runnable artifacts. A historical identity is useful for provenance but
   is not itself an installed checkpoint.
 
-The bundled release produces 19,411 normalized articles, 38,854 prediction
-runs, and 10 historical BERT/RoBERTa family/fold identities.
+The bundled release produces 17,269 normalized articles, 34,564 prediction
+runs, and 10 historical BERT/RoBERTa family/fold identities, spread over 372
+publishers. It carries only outlets with at least 20 classified articles, so
+every publisher in it has enough material to aggregate.
 
 ## 2. Make models available
 

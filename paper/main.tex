@@ -60,8 +60,8 @@ aggregate offline numbers, which makes it hard to inspect why a particular
 publisher received a particular verdict. We present the \emph{Publisher
 Reliability Tool} (PRT), an open-source local web application that turns a
 five-fold, publisher-disjoint article classification study into an interactive,
-auditable workspace. PRT ships a prediction-only release of 38,854
-article-level runs over 19,411 political news articles and 838 publishers,
+auditable workspace. PRT ships a prediction-only release of 34,564
+article-level runs over 17,269 political news articles and 372 publishers,
 produced by BERT and RoBERTa classifiers trained on NewsGuard reliability
 bands. Users browse stored predictions with complete per-class probabilities,
 classify new article URLs on CPU, and read a publisher-level verdict PRT derives
@@ -97,7 +97,7 @@ on~\cite{verhoeven2025yesterday}.
 We present the \textbf{Publisher Reliability Tool} (PRT), the reference
 implementation accompanying our study on aggregating language model predictions
 for news source reliability~\cite{bianchi2026articles}. It contributes an
-offline-capable workspace over a prediction-only release of 38,854 article runs
+offline-capable workspace over a prediction-only release of 34,564 article runs
 with full probability vectors; a \emph{leakage-safe evaluation model} whose
 offered checkpoints come from the intersection of installed artifacts, stored
 coverage and held-out fold membership; and a content-addressed model identity
@@ -129,27 +129,26 @@ only}, so the licensed ratings are never redistributed.
 \subsubsection{Task and data.}
 PRT models a two-level task: a classifier maps one English article body to an
 ordered class in $\{0,\dots,4\}$ with a five-component softmax vector, and an
-aggregation function combines $2$--$50$ runs from \emph{one exact model} and
-\emph{one normalised publisher} into a single class. The classes are the five
-NewsGuard reliability bands in ascending order: \texttt{Class~0} is a score of
-0--39 (proceed with maximum caution), then 40--59, 60--74, 75--99, and
-\texttt{Class~4} is 100. Each article inherits its publisher's band, so
+aggregation function combines every leakage-safe run of \emph{one exact model}
+over \emph{one normalised publisher} -- at least two -- into a single class.
+The five classes are the NewsGuard reliability bands in
+ascending order: 0--39 (\texttt{Class~0}), 40--59, 60--74, 75--99 and 100
+(\texttt{Class~4}). Each article inherits its publisher's band, so
 supervision is weak by construction~\cite{bianchi2026articles}. The corpus was
 scraped with Newspaper3k from the homepages of NewsGuard-rated outlets tagged
 \emph{Political News and Commentary}: English, paywall-free, capped per outlet,
 at least 100 words.
 
-% TODO: the source study reports 439 scraped domains (Table I) while the shipped
-% TODO: release contains 838 distinct publisher hostnames over 19,429 rows, and
-% TODO: its largest outlet has 294 articles against a stated cap of 200.
-% TODO: Reconcile the two before submission and adjust the numbers below.
+% TODO: the largest outlet still holds 294 articles against the study's stated
+% TODO: cap of 200; check that cap before submission.
 Crucially, PRT redistributes \emph{model outputs only}: the licensed scores,
 bands and metadata are stripped at import and never persisted, logged or
-rendered, and a class is always framed as a prediction. The
-release contains 19,429 rows which, after canonical URL normalisation, yield
-19,411 articles, 38,854 immutable runs and $10$ historical model/fold
-identities over 838 publishers, $597$ with at least two articles (median
-$15$).
+rendered, and a class is always framed as a prediction. Outlets with fewer than
+$20$ classified articles are dropped -- over half the domains, a ninth of the
+rows -- since a handful supports no publisher-level reading. The release holds
+17,283 rows which, after canonical URL normalisation, yield 17,269 articles,
+34,564 immutable runs and $10$ historical model/fold identities over 372
+publishers (median $33$ each).
 
 \subsubsection{Architecture.}
 PRT is a single Python~3.12 process that owns one data directory, serves the UI
@@ -160,9 +159,10 @@ six CSV ledgers written by a single \texttt{flock}-guarded writer, two of
 them append-only and immutable; malformed data fails closed before any HTTP
 port is served. Articles and publishers are not stored -- they are views
 derived at query time from prediction runs. Every local inference is mirrored
-into the release CSV as a \texttt{user\_evaluation} row while original rows keep
-\texttt{dataset\_original}; the release digest covers original rows only, so
-user evaluations never alter release identity.
+to a private, git-ignored sibling of the release CSV, so an evaluation history
+outlives a deleted data directory without ever entering version control; the
+shipped release is never rewritten by the running application, and one confirmed
+action purges every local run, saved body and the mirror itself.
 
 \subsubsection{Models and reproducible identity.}
 The demonstrated path is CPU-only. BERT~\cite{devlin2019bert}
@@ -175,8 +175,8 @@ needs CUDA and several gigabytes while the encoders reach comparable accuracy.
 The design anticipates one: identity is content-addressed over output-relevant
 settings, not an architecture name, and the leakage guard keys folds by article.
 Users may register their own five-class Transformers as a constrained ZIP
-bundle. No path executes artifact-supplied code: \texttt{auto\_map},
-\texttt{trust\_remote\_code}, pickle weights and unsafe archive paths are
+bundle; no path executes artifact-supplied code, and \texttt{auto\_map},
+\texttt{trust\_remote\_code}, pickle weights and unsafe archive paths are all
 rejected.
 
 A runnable model identity is the SHA-256 of canonical JSON over every
@@ -192,7 +192,7 @@ on the other four. PRT makes this a service-layer invariant: checkpoint fold
 $N$ may evaluate a known article in test fold $N$; a known article in any other
 fold is rejected with the stable error
 \texttt{TRAINING\_DATA\_LEAKAGE}, and publisher aggregation excludes every known
-article outside its held-out fold. The $16$ articles normalising into more than one fold are excluded
+article outside its held-out fold. The $13$ articles normalising into more than one fold are excluded
 entirely, and the guard covers single articles and publisher
 readings alike. PRT is equally careful about what this does \emph{not} prove:
 absence from the registry is no evidence that an external article was outside

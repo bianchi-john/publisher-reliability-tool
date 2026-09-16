@@ -84,13 +84,15 @@ Projection rules:
 - if outputs conflict for one article/model in that source, publish none of
   that pair and report safe row numbers under `IMPORT_INVALID`.
 
-The generated bundled release contains 19,429 released URLs. Runtime
-normalization yields 19,411 article IDs, 38,854 unique runs, and 10 historical
-BERT/RoBERTa family/fold identities. Every run has one complete five-class
-probability vector.
+The generated bundled release contains 17,283 released URLs, restricted to the
+372 publishers with at least 20 classified articles each; outlets below that
+threshold are excluded from the release, which is why it carries fewer domains
+than the study scraped. Runtime normalization yields 17,269 article IDs, 34,564
+unique runs, and 10 historical BERT/RoBERTa family/fold identities. Every run
+has one complete five-class probability vector.
 
-Normalization also reveals 16 canonical article identities assigned to more
-than one test fold (32 article/family memberships across BERT and RoBERTa).
+Normalization also reveals 13 canonical article identities assigned to more
+than one test fold (26 article/family memberships across BERT and RoBERTa).
 Their historical predictions remain consultable, but no fold checkpoint is
 treated as leakage-safe for a new article or a derived publisher class. A
 derived publisher class excludes those identities, and evaluating one directly

@@ -77,15 +77,16 @@ per article/model without duplicates. No custom transaction marker is claimed.
 ### AT-011 — Bundled release verification
 
 The committed schema-2 manifest verifies part size/SHA-256, the stable
-original-row content digest, empty editorial fields, 19,429
+original-row content digest, empty editorial fields, 17,283
 `dataset_original` rows, BERT/RoBERTa-only original columns, complete
 finite five-class probability vectors for both families, and the exact count
 and shape of any `user_evaluation` rows.
 
 ### AT-012 — Bundled import identity
 
-First startup produces 19,411 derived articles, 38,854 immutable runs, and 10
-historical BERT/RoBERTa model identities. Every run has five probabilities.
+First startup produces 17,269 derived articles, 34,564 immutable runs, and 10
+historical BERT/RoBERTa model identities over 372 publishers, none with fewer
+than 20 classified articles. Every run has five probabilities.
 Restart returns the existing digest import without changing those counts.
 
 ### AT-013 — Protected user-import projection
@@ -407,7 +408,7 @@ beneath the selector.
 
 Starting with the obsolete four-family bundled import and then loading the
 current manifest removes old bundled runs, their unreferenced historical model
-identities and the obsolete bundled import row. It then imports exactly 38,854
+identities and the obsolete bundled import row. It then imports exactly 34,564
 BERT/RoBERTa runs. No stored publisher aggregate has to be removed, because none
 is ever written. User imports, their models and runs, saved content, jobs and local
 checkpoint registrations are unchanged.

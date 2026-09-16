@@ -180,40 +180,49 @@ synchronization bugs and is worth one sentence in the paper.
 Every local inference is written twice, in a fixed order:
 
 1. append to `data/state/prediction_runs.csv` (authoritative, `origin=local_inference`);
-2. rewrite `dataset/predictions/predictions.csv` adding one row with
-   `prediction_origin=user_evaluation`, then refresh `manifest.json`.
+2. add one `prediction_origin=user_evaluation` row to
+   `dataset/predictions/user-predictions.csv`.
 
-Original release rows carry `prediction_origin=dataset_original` and are never
-rewritten. The stable release identity is a content digest
-(`prt-dataset-content-v1`, value
-`7b15a415471653980b1bc38d05565afa25df5d96d50d9ca1e586035a2ada54c5`) computed
-**only over original rows**, so appending user evaluations changes the file
-checksum and counts but not the scientific identity of the release. At startup a
-mirrored row missing from state can restore the run; `prediction_run_id`
-uniqueness prevents duplication. This is a neat, paper-worthy detail: the
-"dataset" doubles as a human-inspectable recovery log.
+That second file is **private**: it is listed in `.gitignore` and never enters
+version control, because a user's own reading and evaluation history is not
+release data. The tracked `dataset/predictions/predictions.csv` holds only
+`prediction_origin=dataset_original` rows and is never rewritten by the running
+application — only the release-preparation script produces it — so its content
+digest (`prt-dataset-content-v1`, value
+`f492a7d30056d0588e93e81202299673229a7c980b881517fee2fe9df0e39451`) is
+untouched by anything a user does.
+
+At startup a mirrored row missing from state restores the run, so the local
+history survives deleting `data/`; `prediction_run_id` uniqueness prevents
+duplication. The paper-worthy detail is the split itself: the same row shape
+serves as a human-inspectable recovery log without the shared corpus ever
+absorbing private activity.
+
+**Clearing it.** One confirmed action deletes every `local_inference` run, all
+saved content and this mirror. Order matters and is asserted by a test: the
+mirror goes first, because clearing the ledger first and crashing would let the
+surviving mirror restore the "deleted" runs at the next start.
 
 ---
 
 ## 4. Dataset actually present in the repo
 
-`dataset/predictions/` (tracked in git; ~7.4 MB):
+`dataset/predictions/` (tracked in git; ~6.6 MB):
 
 | Measure | Value | Source |
 | --- | ---: | --- |
-| CSV rows (schema v2) | 19,432 | `manifest.json` |
-| `dataset_original` rows | 19,429 | `manifest.json` |
-| `user_evaluation` rows | 3 | `manifest.json` (grows with use) |
-| Derived articles | 19,411 | recomputed from `prediction_runs.csv` |
-| Prediction runs | 38,854 | recomputed |
-| Distinct publishers | **838** | recomputed (not stated in any doc) |
-| Publishers with ≥2 articles | **597** | recomputed |
-| Median articles per publisher | **15**, max **294** | recomputed |
+| `dataset_original` rows | 17,283 | `manifest.json` |
+| `user_evaluation` rows | 0 (private mirror, not this file) | `manifest.json` |
+| Derived articles | 17,269 | recomputed from `prediction_runs.csv` |
+| Prediction runs | 34,564 | recomputed |
+| Distinct publishers | **372** | recomputed |
+| Minimum articles per publisher | **20** (release threshold) | by construction |
+| Median articles per publisher | **33**, max **294** | recomputed |
 | Historical model/fold identities | 10 (BERT×5, RoBERTa×5) | recomputed |
-| Articles in >1 fold (excluded from safe evaluation) | 16 (32 article/family memberships) | `docs/scientific-contract.md` §3 |
+| Articles in >1 fold (excluded from safe evaluation) | 13 (26 article/family memberships) | `docs/scientific-contract.md` §3 |
 
-Predicted-class distribution over the 38,854 bundled runs (recomputed):
-`class 0: 9,388 · 1: 5,919 · 2: 9,166 · 3: 11,308 · 4: 3,076`.
+Predicted-class distribution over the 34,564 bundled runs (recomputed):
+`class 0: 8,755 · 1: 4,985 · 2: 7,847 · 3: 10,296 · 4: 2,681`.
 
 Largest publishers by run count: `politicshome.com` (588), `ntd.com` (458),
 `theguardian.com` (420), `news.sky.com` (402), `middleeasteye.net` (400).
@@ -229,21 +238,28 @@ least 100 words — 25,822 articles. `langdetect` then removed 6,346 non-English
 articles, leaving **19,476**. Each article inherits its publisher's band, so
 supervision is weak by construction.
 
-### ⚠ Two numbers that do not reconcile
+### Publisher threshold, and the one number still unreconciled
 
-These need the user's decision before submission:
+**Publishers — settled by a decision, not by analysis.** The manuscript reports
+**439** scraped domains (Table I: 152+69+95+88+35) and says "19,476 articles
+from 439 publishers", while the source prediction file carried **838** distinct
+values in its own `domain` column. That gap was already present in the training
+data, not introduced by PRT's URL normalisation, and no article-count threshold
+reproduces 439 exactly (≥10 articles → 466, ≥20 → 372).
 
-1. **Publishers.** The manuscript reports **439** scraped domains (Table I:
-   152+69+95+88+35) and says "19,476 articles from 439 publishers". The shipped
-   release has **838** distinct values in its own `domain` column, and the tool's
-   URL normalisation reproduces exactly those 838 — so this is not a
-   normalisation artefact introduced by PRT, it is already in the training data.
-   No article-count threshold reproduces 439 (≥10 articles → 466, ≥20 → 372).
-2. **Cap per outlet.** The manuscript states a cap of 200 articles per outlet,
-   but the largest publisher in the release has **294**.
+The release therefore ships only publishers with **≥20 classified articles**,
+which is a defensible line on its own terms: the aggregation needs at least two
+leakage-safe articles, and a publisher verdict resting on two or three says more
+about the sample than about the outlet. It removes 466 of the 838 domains but
+only 2,146 of 19,429 rows (11%), so the demonstration keeps almost all of its
+evidence while every remaining outlet is substantial enough to aggregate. The
+released domain count is now *below* the study's 439 and is explained as a
+deliberate subset, which is a far easier sentence to defend than an unexplained
+838.
 
-I have written the release's own verifiable figures into the demo paper and
-flagged both mismatches with a `% TODO:` there.
+**Still open — cap per outlet.** The manuscript states a cap of 200 articles per
+outlet, but the largest publisher in the release has **294**. The threshold does
+not touch this; it is flagged with a `% TODO:` in the paper.
 
 Only BERT and RoBERTa outputs are in the release, which matches the tool's
 scope: the larger decoder families are not importable here at all.
@@ -375,7 +391,8 @@ extension point; it is unreachable from any user-facing path.
 
 **Still open.**
 
-- **The 439-vs-838 publisher count and the 200-vs-294 article cap** (§4). The
+- **The 200-vs-294 article cap** (§4). The 439-vs-838 publisher gap is settled:
+  the release now ships only outlets with ≥20 classified articles (372). The
   user has seen this and will look into it separately — the `% TODO:` in
   `main.tex` is left as-is rather than reconciled or removed.
 - **Funding for the demo paper.** The acknowledgement currently reuses the

@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "source_records": 19429,
-  "records": 19429,
-  "unique_urls": 19429,
+  "source_records": 17283,
+  "records": 17283,
+  "unique_urls": 17283,
   "duplicate_url_rows": 0,
   "duplicate_policy": "error",
   "duplicate_source_url_groups": 0,
@@ -53,6 +53,8 @@
     "software_versions_json",
     "recorded_at"
   ],
+  "dataset_original_records": 17283,
+  "user_evaluation_records": 0,
   "redacted_editorial_columns": [
     "title",
     "text",
@@ -68,15 +70,13 @@
     "label"
   ],
   "max_part_bytes": 25165824,
-  "content_digest_sha256": "7b15a415471653980b1bc38d05565afa25df5d96d50d9ca1e586035a2ada54c5",
+  "content_digest_sha256": "f492a7d30056d0588e93e81202299673229a7c980b881517fee2fe9df0e39451",
   "parts": [
     {
       "file": "predictions.csv",
-      "rows": 19429,
-      "bytes": 7711221,
-      "sha256": "f85a409d2d8f3248a5650fb54b3c2577a69cdf1b73dd3a65394aaf02571224c6"
+      "rows": 17283,
+      "bytes": 6837332,
+      "sha256": "23c34dc7e6bf26d302c3c15afc3923fcc5df6372889f6506e955da3203ebccb5"
     }
-  ],
-  "dataset_original_records": 19429,
-  "user_evaluation_records": 0
+  ]
 }
