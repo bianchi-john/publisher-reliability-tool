@@ -51,9 +51,22 @@ CSV files.
 | `Storage` | Load ledgers, lock data directory, append immutable rows, atomically rewrite small mutable files | Add a column/schema version and loader validation |
 | `PredictionDatasetMirror` | Mirror local runs idempotently to a private, git-ignored file and restore mirrored runs at startup; never writes the tracked release | Add an explicit origin/run field without changing original-row identity |
 | `ModelLoader` | Recognize one explicit family, validate resources, tokenize, run its frozen fixture | Add one Python class and scientific fixture; no plugin loader |
+| `ScanCache` | Skip re-hashing and re-validating a checkpoint whose file is unchanged, and discard itself whenever the validation rules change | Extend the fingerprint, or bump the validation logic version so older entries are dropped; never widen what counts as unchanged |
 | `ArticleRetriever` | Normalize URLs, enforce safe HTTP policy, parse supplied HTML | Add an extraction strategy behind the same content boundary |
 | `InferenceService` | Select reuse/recompute, call loader, validate probabilities, create provenance | Add output fields explicitly to run schema |
 | `AggregationMethod` | Report availability and compute a deterministic result from exact runs | Add a named function, version, fixture, and UI explanation |
+
+Checkpoint verification is the slow part of startup: each `.pt` file is read
+once for the SHA-256 that is its scientific identity and once for a strict-shape
+`torch.load`. `model_scan_cache.py` records the result of a *successful*
+verification against the file's device, inode, size and modification time, in
+`<data-dir>/model-scan-cache.json`. Any difference in that fingerprint, a
+rejected checkpoint, a change to the validation rules, or `models scan --full`
+all force full verification again, and the file may be deleted at any time. A
+cache hit therefore asserts that the file has not been touched since it was
+verified, not that its bytes were re-read now: it does not lower the bar against
+someone who can already write to the model directory, but silent corruption that
+preserves size and timestamp is no longer caught automatically.
 
 Supporting modules are `config`, `api`, `imports`, `jobs`, `identity`,
 `language`, and `frontend`. Avoid registries, dependency injection frameworks,

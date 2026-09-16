@@ -167,7 +167,11 @@ Articles and publishers are views derived from those runs.
 The researcher manually downloads official artifacts and copies them below a
 configured model root. Startup scans those roots; an explicit
 `model_validation` job is also available after files change while the service
-is running. The Models page reports compatible, validated-not-runnable,
+is running. A checkpoint is fully verified — hashed and structurally validated —
+the first time it is seen and whenever its file changes; a checkpoint left
+untouched since the previous scan reuses that recorded result, so restarting does
+not re-read gigabytes for nothing. `publisher-reliability models scan --full`
+re-reads every byte on demand. The Models page reports compatible, validated-not-runnable,
 dependency-missing, resource-unavailable, artifact-missing, paper-official, custom and
 historical-only identities. On first online inference for a compatible core
 checkpoint, the application caches only its tokenizer/configuration resources

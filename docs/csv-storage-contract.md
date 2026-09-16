@@ -12,6 +12,7 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 ```text
 <data-dir>/
 ├── .writer.lock
+├── model-scan-cache.json
 ├── state/
 │   ├── meta.csv
 │   ├── models.csv
@@ -24,6 +25,10 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 ├── managed-models/
 └── logs/
 ```
+
+`model-scan-cache.json` is a disposable performance cache, described in
+[architecture](architecture.md); deleting it only makes the next scan slower. It is
+kept outside `state/`, which must contain the six ledgers and nothing else.
 
 Only `state/*.csv` is authoritative. Articles and publishers are derived views
 over prediction runs. `dataset/predictions/user-predictions.csv` is an additional

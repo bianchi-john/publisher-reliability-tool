@@ -10,6 +10,7 @@ from pathlib import Path
 from .errors import AppError
 from .identity import sha256_json
 from .inference import CORE_MODELS
+from .model_scan_cache import CACHE_FILENAME, ScanCache
 from .official_models import (
     MANAGED_ARTIFACT_KINDS,
     llm_runtime_status,
@@ -19,6 +20,46 @@ from .storage import Storage, json_field, utc_now
 
 
 CORE_ARTIFACT = re.compile(r"^(bert|roberta)_fold_([1-5])\.pt$")
+
+# What a valid checkpoint of each family must contain. Kept as data rather than as
+# branches inside the validator so that the scan cache can fingerprint the rules: any
+# edit here changes that fingerprint and re-verifies every checkpoint automatically.
+CHECKPOINT_SHAPES: dict[str, dict[str, object]] = {
+    "bert": {
+        "embedding_key": "bert.embeddings.word_embeddings.weight",
+        "embedding_shape": (30522, 768),
+        "classifier_key": "classifier.weight",
+        "classifier_shape": (5, 768),
+        "layer_prefix": "bert.encoder.layer.",
+        "layer_count": 12,
+        "tensor_count": 201,
+    },
+    "roberta": {
+        "embedding_key": "roberta.embeddings.word_embeddings.weight",
+        "embedding_shape": (50265, 1024),
+        "classifier_key": "classifier.out_proj.weight",
+        "classifier_shape": (5, 1024),
+        "layer_prefix": "roberta.encoder.layer.",
+        "layer_count": 24,
+        "tensor_count": 393,
+    },
+}
+
+# Bump when _validate_checkpoint changes in a way the shape table above does not
+# express, so that cached verifications made under the looser code are discarded.
+VALIDATION_LOGIC_VERSION = 1
+
+
+def validation_rules_fingerprint() -> str:
+    """Identify the rules a cached verification was produced under."""
+
+    return sha256_json(
+        {
+            "artifact_pattern": CORE_ARTIFACT.pattern,
+            "logic_version": VALIDATION_LOGIC_VERSION,
+            "shapes": CHECKPOINT_SHAPES,
+        }
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -51,22 +92,14 @@ def _validate_checkpoint(path: Path, family: str) -> tuple[int, int]:
     if not all(isinstance(key, str) and isinstance(value, torch.Tensor) for key, value in state.items()):
         raise ValueError("Checkpoint contains values other than named tensors.")
 
-    if family == "bert":
-        embedding_key = "bert.embeddings.word_embeddings.weight"
-        classifier_key = "classifier.weight"
-        layer_prefix = "bert.encoder.layer."
-        expected_embedding = (30522, 768)
-        expected_classifier = (5, 768)
-        expected_tensors = 201
-        expected_layers = 12
-    else:
-        embedding_key = "roberta.embeddings.word_embeddings.weight"
-        classifier_key = "classifier.out_proj.weight"
-        layer_prefix = "roberta.encoder.layer."
-        expected_embedding = (50265, 1024)
-        expected_classifier = (5, 1024)
-        expected_tensors = 393
-        expected_layers = 24
+    rules = CHECKPOINT_SHAPES[family]
+    embedding_key = rules["embedding_key"]
+    classifier_key = rules["classifier_key"]
+    layer_prefix = rules["layer_prefix"]
+    expected_embedding = rules["embedding_shape"]
+    expected_classifier = rules["classifier_shape"]
+    expected_tensors = rules["tensor_count"]
+    expected_layers = rules["layer_count"]
 
     if embedding_key not in state or tuple(state[embedding_key].shape) != expected_embedding:
         raise ValueError(f"Unexpected {family.upper()} embedding shape.")
@@ -154,21 +187,27 @@ def scan_model_roots(
     roots: tuple[Path, ...],
     *,
     on_progress: Callable[[str], None] | None = None,
+    full: bool = False,
 ) -> dict[str, object]:
     """Discover recognized files below configured roots and register validated artifacts.
 
+    Verifying a checkpoint reads all of it twice, for its SHA-256 and for a
+    strict-shape ``torch.load``, which is the slow step when large local checkpoints
+    are configured. A checkpoint whose file is unchanged since the previous scan
+    therefore reuses that previous result from :mod:`.model_scan_cache`; ``full=True``
+    ignores the cache and re-reads every byte.
+
     ``on_progress`` is an optional callback invoked with a short human-readable
-    message before each core checkpoint is hashed and structurally validated.
-    Every recognized checkpoint is fully re-read (SHA-256 over its exact bytes,
-    then a strict-shape ``torch.load``) on every scan, so this is the slow step
-    when large local checkpoints are configured; callers that want terminal or
-    console feedback during that wait (the CLI, ``serve`` at startup) should
-    pass a callback, while callers that already report progress through their
-    own channel (the background ``model_validation`` job, whose status is
-    polled by the UI) should leave it unset.
+    message before each checkpoint that is actually being verified, so a cached scan
+    stays silent. Callers that want terminal feedback during that wait (the CLI,
+    ``serve`` at startup) should pass a callback, while callers that already report
+    progress through their own channel (the background ``model_validation`` job,
+    whose status is polled by the UI) should leave it unset.
     """
 
     timestamp = utc_now()
+    cache = ScanCache(storage.data_dir / CACHE_FILENAME, validation_rules_fingerprint())
+    reused = 0
     discovered: list[dict[str, object]] = []
     rejected: list[dict[str, str]] = []
     seen_digests: set[str] = set()
@@ -186,15 +225,32 @@ def scan_model_roots(
                 continue
             family, fold_value = match.groups()
             locator = f"root-{root_index}/{path.name}"
-            if on_progress is not None:
-                size_mb = path.stat().st_size / (1024 * 1024)
-                on_progress(f"Verifying {path.name} ({size_mb:.0f} MB)…")
-            try:
-                digest = _sha256_file(path)
-                tensor_count, parameter_count = _validate_checkpoint(path, family)
-            except Exception as exc:
-                rejected.append({"locator": locator, "error": str(exc)})
-                continue
+            verified = None if full else cache.lookup(path)
+            if verified is None:
+                if on_progress is not None:
+                    size_mb = path.stat().st_size / (1024 * 1024)
+                    on_progress(f"Verifying {path.name} ({size_mb:.0f} MB)…")
+                try:
+                    digest = _sha256_file(path)
+                    tensor_count, parameter_count = _validate_checkpoint(path, family)
+                except Exception as exc:
+                    # Deliberately not remembered: a rejected file is reported again
+                    # on every scan until it is fixed or removed.
+                    rejected.append({"locator": locator, "error": str(exc)})
+                    continue
+                cache.remember(
+                    path,
+                    {
+                        "digest": digest,
+                        "tensor_count": tensor_count,
+                        "parameter_count": parameter_count,
+                    },
+                )
+            else:
+                digest = str(verified["digest"])
+                tensor_count = int(verified["tensor_count"])
+                parameter_count = int(verified["parameter_count"])
+                reused += 1
             seen_digests.add(digest)
             identity = {
                 "identity_kind": "local_validated_artifact",
@@ -289,13 +345,18 @@ def scan_model_roots(
             )
             current_by_id[row["model_id"]] = missing
     storage.replace("models", [*historical, *current_by_id.values()])
+    cache.save()
+    registered = len(discovered) + official_registered
+    if registered:
+        message = f"Validated {registered} local checkpoint(s)."
+        if reused:
+            message += f" {reused} were unchanged and reused a previous verification."
+    else:
+        message = "No valid supported local checkpoints were found."
     return {
-        "registered": len(discovered) + official_registered,
+        "registered": registered,
         "official_registered": official_registered,
+        "reused_from_cache": reused,
         "rejected": rejected,
-        "message": (
-            f"Validated {len(discovered) + official_registered} local checkpoint(s)."
-            if discovered or official_registered
-            else "No valid supported local checkpoints were found."
-        ),
+        "message": message,
     }

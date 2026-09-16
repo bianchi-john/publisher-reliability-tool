@@ -44,6 +44,11 @@ def parser() -> argparse.ArgumentParser:
     model_commands = models.add_subparsers(dest="models_command", required=True)
     scan = model_commands.add_parser("scan")
     scan.add_argument("--data-dir", type=Path)
+    scan.add_argument(
+        "--full",
+        action="store_true",
+        help="Re-hash and re-validate every checkpoint, ignoring the scan cache",
+    )
 
     storage = commands.add_parser("storage", help="Inspect persistent CSV state")
     storage_commands = storage.add_subparsers(dest="storage_command", required=True)
@@ -203,7 +208,11 @@ def main(argv: list[str] | None = None) -> int:
             config = Config.from_env()
             with Storage(args.data_dir or config.data_dir) as storage:
                 print(
-                    "Scanning configured model directories… every local "
+                    "Scanning configured model directories… a checkpoint that has "
+                    "changed since the last scan is re-hashed and re-verified, which "
+                    "takes a while for large .pt files."
+                    if not args.full
+                    else "Scanning configured model directories… every local "
                     "checkpoint is re-hashed and re-verified, so this can take "
                     "a while when large .pt files are present.",
                     flush=True,
@@ -215,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
                         storage.data_dir / "managed-models",
                     ),
                     on_progress=lambda message: print(message, flush=True),
+                    full=args.full,
                 )
                 print(json.dumps(result, indent=2))
             return 0
