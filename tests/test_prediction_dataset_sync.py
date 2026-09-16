@@ -1,4 +1,5 @@
 import csv
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,6 +201,44 @@ class PredictionDatasetSyncTest(unittest.TestCase):
             self.assertEqual(
                 (release / "manifest.json").read_bytes(), original_manifest_after_sync
             )
+
+
+class PrivateMirrorStaysOutOfVersionControlTest(unittest.TestCase):
+    """Locally inferred predictions are the user's own browsing, not release data.
+
+    `.gitignore` deliberately un-ignores `dataset/predictions/*.csv` so the released
+    dataset stays tracked, and then re-ignores the private mirror by name. That
+    ordering is easy to undo by accident, and undoing it publishes the URLs someone
+    evaluated on their own machine, so it is pinned here rather than trusted.
+    """
+
+    def check_ignore(self, relative: str) -> int:
+        repository = Path(__file__).resolve().parents[1]
+        if not (repository / ".git").exists():
+            self.skipTest("not a git checkout")
+        try:
+            completed = subprocess.run(
+                ["git", "check-ignore", "--quiet", relative],
+                cwd=repository,
+                capture_output=True,
+            )
+        except FileNotFoundError:  # pragma: no cover - git is present in development
+            self.skipTest("git is not installed")
+        return completed.returncode
+
+    def test_user_prediction_mirror_is_ignored(self) -> None:
+        self.assertEqual(
+            self.check_ignore(f"dataset/predictions/{USER_PREDICTIONS_FILENAME}"),
+            0,
+            "the private mirror of user predictions must not be tracked",
+        )
+
+    def test_released_dataset_stays_tracked(self) -> None:
+        self.assertEqual(
+            self.check_ignore("dataset/predictions/predictions.csv"),
+            1,
+            "the released dataset must remain part of the repository",
+        )
 
 
 if __name__ == "__main__":

@@ -245,6 +245,54 @@ class InferenceServiceTest(unittest.TestCase):
                     {"stored_prediction", "new_inference"},
                 )
 
+    def test_evaluate_accepts_nothing_but_a_single_article(self) -> None:
+        """Defence in depth behind the request schema.
+
+        A publisher class is derived on demand from the articles already classified,
+        so there is no evaluation that produces one.
+        """
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with Storage(root / "data") as storage:
+                model = {field: "" for field in HEADERS["models"]}
+                model.update(
+                    model_id="local-bert-fold-1",
+                    family="bert",
+                    fold_id=1,
+                    display_name="BERT fold 1",
+                    artifact_kind="pytorch_state_dict",
+                    artifact_locator="root-1/bert_fold_1.pt",
+                    artifact_sha256="a" * 64,
+                    loader_recipe="bert_state_dict",
+                    loader_recipe_version=2,
+                    class_order_json="[0,1,2,3,4]",
+                    max_tokens=256,
+                    padding_policy="fixed_max_length",
+                    runtime_scientific_json="{}",
+                    status="compatible",
+                    artifact_available=True,
+                    runnable=True,
+                    registered_at="2026-07-24T00:00:00Z",
+                    last_validated_at="2026-07-24T00:00:00Z",
+                )
+                storage.upsert("models", "model_id", model)
+                service = ResearchService(storage, inference_engine=FakeInferenceEngine())
+
+                for rejected_input in (
+                    {"type": "publisher", "url": "https://example.com"},
+                    {"type": "dataset", "url": "https://example.com"},
+                    "https://example.com",
+                    None,
+                ):
+                    with self.assertRaises(AppError) as raised:
+                        service.evaluate(
+                            {"input": rejected_input, "model_id": model["model_id"]},
+                            "job",
+                        )
+                    self.assertEqual(raised.exception.code, "INVALID_INPUT")
+                self.assertEqual(storage.rows["prediction_runs"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -74,9 +74,15 @@ class AggregationTest(unittest.TestCase):
 
 
 class StorageTest(unittest.TestCase):
-    def test_fresh_store_contains_seven_exact_ledgers(self) -> None:
+    def test_fresh_store_contains_six_exact_ledgers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             with Storage(Path(temporary) / "data") as storage:
+                # Pinned deliberately: the ledger set is part of the storage contract,
+                # so adding or dropping one has to be a conscious change, not a drift.
+                self.assertEqual(
+                    set(HEADERS),
+                    {"meta", "models", "prediction_runs", "imports", "jobs", "local_content"},
+                )
                 self.assertEqual(set(storage.rows), set(HEADERS))
                 state_files = {
                     path.name for path in (Path(temporary) / "data" / "state").glob("*.csv")

@@ -119,22 +119,26 @@ Module inventory (`src/publisher_reliability/`, LOC from `wc -l`):
 | `inference.py` | 662 | Safe retrieval, English extraction, `InferenceEngine` (BERT and RoBERTa recipes) |
 | `importer.py` | 631 | CSV / CSV.GZ projection, validation, conflict detection, idempotent import |
 | `custom_models.py` | 601 | Validation/installation of user `.zip` model bundles (schema 1 & 2) |
-| `api.py` | 563 | 26 HTTP routes, Pydantic request models, error mapping, static frontend |
+| `api.py` | 575 | 26 HTTP routes, Pydantic request models, error mapping, static frontend |
 | `official_models.py` | 459 | Checksum-authenticated import of large decoder artifacts; retained as an extension point, unreachable from any user-facing path |
 | `prediction_dataset.py` | 420 | Public-release verification + idempotent mirroring of local runs |
 | `storage.py` | 390 | Six CSV ledgers, `flock`, append+fsync, atomic rename |
 | `jobs.py` | 306 | Single FIFO worker, persisted job rows, macro-phase progress |
-| `model_scanner.py` | 301 | Scans configured roots for recognized artifacts (no symlink following) |
-| `cli.py` | 235 | `serve`, `dataset verify|import`, `models scan`, `storage verify` |
+| `model_scanner.py` | 362 | Scans configured roots for recognized artifacts (no symlink following), reusing unchanged verifications |
+| `cli.py` | 245 | `serve`, `dataset verify|import`, `models scan`, `storage verify` |
 | `identity.py` | 150 | URL normalization, UUIDv5 article IDs, publisher hostname |
 | `aggregation.py` | 137 | The three publisher-level formulas |
+| `model_scan_cache.py` | 136 | Skips re-hashing a checkpoint whose file is untouched; self-invalidating |
 | `config.py` | 85 | `PRT_*` env vars + CLI options |
 | `errors.py` | 51 | 20 stable error codes with fixed HTTP statuses |
 | `frontend/` | 1406 | `index.html` (41) + `styles.css` (223) + 9 page templates in `pages/*.html` (209) + 16 vanilla ES modules in `js/` (933) |
 
-Total application code ≈ 6.3k LOC Python + ~1.4k LOC frontend. Tests: 10 files,
-~1.6k LOC, **30 tests, all passing** (verified: `python -m unittest discover -s
-tests` → `Ran 30 tests in 1.122s / OK`).
+Total application code ≈ 6.3k LOC Python + ~1.4k LOC frontend. Tests: 13 files,
+~2.4k LOC, **64 tests, all passing** (verified: `python -m unittest discover -s
+tests` → `Ran 64 tests in 3.479s / OK`). They cover the leakage guard across every
+model family, publisher aggregation as a read-only derivation, the prediction
+export, the checkpoint scan cache, and the private mirror staying out of version
+control.
 
 ### Deliberate non-architecture
 
