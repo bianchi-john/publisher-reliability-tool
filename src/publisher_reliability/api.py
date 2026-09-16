@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from fastapi import Body, FastAPI, File, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -19,11 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import SCHEMA_VERSION, __version__
 from .aggregation import METHODS
 from .config import Config
-from .errors import AppError, HTTP_STATUS
+from .errors import LLM_UNDER_DEVELOPMENT, AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
 from .model_scanner import scan_model_roots
-from .official_models import official_catalog
 from .prediction_dataset import (
     restore_user_predictions,
     sync_user_predictions,
@@ -41,30 +40,15 @@ class ArticleInput(StrictModel):
     url: str = Field(max_length=8192)
 
 
-class ArticleListInput(StrictModel):
-    type: Literal["article_list"]
-    urls: list[str] = Field(min_length=2, max_length=50)
-
-
-class PublisherInput(StrictModel):
-    type: Literal["publisher"]
-    url: str = Field(max_length=8192)
-    requested_article_count: int = Field(ge=2, le=50)
-    allow_partial: bool = False
-
-
-EvaluationInput = Annotated[
-    Union[ArticleInput, ArticleListInput, PublisherInput],
-    Field(discriminator="type"),
-]
-
-
 class EvaluationRequest(StrictModel):
-    input: EvaluationInput
+    """One evaluation request. Only a single article can be evaluated.
+
+    A publisher-level class is not requested here: it is derived on demand from the
+    articles already classified, through the publisher aggregation endpoint.
+    """
+
+    input: ArticleInput
     model_id: str
-    aggregation_method: Literal[
-        "majority_vote", "ordinal_mean", "mean_probabilities"
-    ] | None = None
     prediction_action: Literal["reuse", "recompute"] = "reuse"
     content_retention: Literal["discard", "save_local"] = "discard"
 
@@ -408,33 +392,26 @@ def create_app(
     async def publisher(publisher_identifier: str):
         return service.publisher(publisher_identifier)
 
-    @app.get("/api/v1/evaluations")
-    async def evaluations(
-        limit: int = 25,
-        offset: int = 0,
-        publisher_id: str | None = None,
-        model_id: str | None = None,
-        method: str | None = None,
+    @app.get("/api/v1/publishers/{publisher_identifier}/aggregation")
+    async def publisher_aggregation(
+        publisher_identifier: str,
+        method: Literal[
+            "majority_vote", "ordinal_mean", "mean_probabilities"
+        ] = "majority_vote",
+        exclude: Annotated[list[str] | None, Query()] = None,
     ):
-        return paginate(
-            service.evaluations(
-                publisher_id=publisher_id, model_id=model_id, method=method
-            ),
-            limit,
-            offset,
+        # Read-only: the publisher class is derived from stored article predictions on
+        # every request and never persisted, so changing the rule or the excluded
+        # articles simply asks the same data a different question.
+        return service.publisher_aggregation(
+            publisher_identifier,
+            method=method,
+            excluded_article_ids=exclude or (),
         )
-
-    @app.get("/api/v1/evaluations/{evaluation_identifier}")
-    async def evaluation(evaluation_identifier: str):
-        return service.evaluation(evaluation_identifier)
 
     @app.get("/api/v1/models")
     async def models(family: str | None = None, status: str | None = None):
         return {"items": service.models(family=family, status=status)}
-
-    @app.get("/api/v1/models/official-catalog")
-    async def model_official_catalog():
-        return {"items": official_catalog()}
 
     @app.get("/api/v1/models/available")
     async def available_models(
@@ -500,63 +477,15 @@ def create_app(
 
     @app.post("/api/v1/models/official-upload", status_code=202)
     async def official_model_upload(files: list[UploadFile] = File(...)):
-        if not 1 <= len(files) <= 2:
-            raise AppError(
-                "INVALID_INPUT",
-                "Select one Mistral ZIP or both Llama .z01/.z02 files.",
-            )
-        tokens: list[str] = []
-        names: list[str] = []
-        total = 0
-        try:
-            for uploaded in files:
-                filename = Path(uploaded.filename or "").name
-                if not filename or filename != uploaded.filename:
-                    raise AppError("INVALID_INPUT", "Official model filename is invalid.")
-                token = f"{uuid.uuid4()}.official"
-                destination = storage.data_dir / "uploads" / token
-                tokens.append(token)
-                with destination.open("xb") as output:
-                    while chunk := await uploaded.read(1024 * 1024):
-                        total += len(chunk)
-                        if total > settings.model_upload_max_bytes:
-                            raise AppError(
-                                "PAYLOAD_TOO_LARGE",
-                                "Official model upload exceeds the combined byte limit.",
-                            )
-                        output.write(chunk)
-                names.append(filename)
-        except Exception:
-            for token in tokens:
-                (storage.data_dir / "uploads" / token).unlink(missing_ok=True)
-            raise
-        finally:
-            for uploaded in files:
-                await uploaded.close()
-        try:
-            job_id = jobs.submit(
-                "model_validation",
-                {
-                    "source_upload_ids": tokens,
-                    "source_names": names,
-                    "bundle_kind": "paper_official",
-                },
-            )
-        except Exception:
-            for token in tokens:
-                (storage.data_dir / "uploads" / token).unlink(missing_ok=True)
-            raise
-        return {"job_id": job_id}
+        # Refused before a single byte is read, so a multi-gigabyte upload is not
+        # spooled to disk only to be rejected afterwards.
+        for uploaded in files:
+            await uploaded.close()
+        raise AppError("FEATURE_UNAVAILABLE", LLM_UNDER_DEVELOPMENT)
 
     @app.post("/api/v1/evaluation-jobs", status_code=202)
     async def evaluation_job(body: EvaluationRequest):
-        value = body.model_dump(mode="json")
-        input_value = value["input"]
-        if input_value["type"] != "article" and not value.get("aggregation_method"):
-            raise AppError(
-                "INVALID_INPUT", "Aggregation method is required for publisher results."
-            )
-        return {"job_id": jobs.submit("evaluation", value)}
+        return {"job_id": jobs.submit("evaluation", body.model_dump(mode="json"))}
 
     @app.get("/api/v1/jobs")
     async def list_jobs(

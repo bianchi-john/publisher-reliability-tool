@@ -25,10 +25,8 @@ publisher-reliability serve
 
 The `models` extra installs the locked PyTorch, Transformers and safetensors
 dependencies required to scan BERT/RoBERTa checkpoints and validate custom
-encoder bundles. For Llama 3 8B or Mistral 24B QLoRA inference, use
-`uv sync --frozen --extra llm-models`; import and catalog browsing do not require
-a GPU. Use
-`uv sync --frozen` only for a lightweight stored-prediction-only environment.
+encoder bundles. Use `uv sync --frozen` only for a lightweight
+stored-prediction-only environment.
 
 Open **<http://127.0.0.1:8000>**. API documentation is available at
 **<http://127.0.0.1:8000/api/docs>**.
@@ -52,7 +50,7 @@ The service is published only on `127.0.0.1:8000`.
 | Evaluation | Stored reuse, new single-article inference and publisher aggregation |
 | Methods | Majority vote, ordinal mean and mean probabilities |
 | Import | Privacy-preserving CSV and CSV.GZ import |
-| Persistence | Seven CSV ledgers plus a private, git-ignored user-prediction mirror |
+| Persistence | Six CSV ledgers plus a private, git-ignored user-prediction mirror |
 | Access | Browser UI, REST API, OpenAPI and CLI |
 | Offline | Browsing, reuse and stored aggregation |
 
@@ -78,11 +76,8 @@ duplicating an existing `prediction_run_id`.
 ## Models and new article inference
 
 The repository does not distribute model weights. The Models page scans
-configured roots for BERT/RoBERTa state dictionaries and exact official OSF
-filenames. It also accepts direct upload of one Mistral ZIP or both Llama
-segments for a fold. Llama/Mistral family and fold are inferred automatically;
-an artifact is marked **Paper original** only after its size and SHA-256 match
-the packaged OSF manifest. Historical dataset identities remain separate.
+configured roots for BERT/RoBERTa state dictionaries, and family and fold are
+read from the exact filename. Historical dataset identities remain separate.
 
 Stored dataset predictions remain fully browseable by article, publisher,
 model/fold and class probability. Publisher aggregations created in the
@@ -110,30 +105,34 @@ and a refresh-safe table of recent local article predictions.
 The bundled interface uses the system Times New Roman serif font throughout
 and a single warm orange/terracotta light theme; there is no dark mode.
 
-The Models page also accepts constrained custom Transformers `.zip` bundles.
-Schema 1 supports complete encoder classifiers in `safetensors`; schema 2
-supports Llama 3 8B and Mistral 24B PEFT LoRA
-`AutoModelForSequenceClassification` adapters. Both require exactly five logits
-in class order 0–4, a local tokenizer, declared fold/training provenance and no
+The Models page also accepts constrained custom Transformers `.zip` bundles:
+complete encoder classifiers in `safetensors`, requiring exactly five logits in
+class order 0–4, a local tokenizer, declared fold/training provenance and no
 custom executable code. These models and their new predictions are marked
 **User custom**.
 
-Official Llama/Mistral inference faithfully reconstructs the notebook QLoRA
-recipe (NF4, double quantization, bfloat16). It requires CUDA, the locked
-`llm-models` dependencies and access to the pinned Hugging Face base revision;
-Llama's base repository is gated. On an unsuitable machine the artifact remains
-verified and consultable with a clear non-runnable status.
-
-Official artifacts are available separately from
+Checkpoint weights are available separately from
 [OSF](https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74)
 and remain outside version control.
+
+### Larger decoder models
+
+The study also fine-tuned Llama 3 8B and Mistral 24B. Support for importing and
+running them is **under development and not available in this release**: each
+fold needs a CUDA GPU and several gigabytes of weights, which the single-machine
+CPU demo this tool targets cannot assume. The model-identity, loader-recipe and
+leakage rules are written so that such a family can be added without changing
+the storage contract. Attempting the import returns `FEATURE_UNAVAILABLE` with
+an explanatory message. BERT and RoBERTa, which do run here on CPU, report
+accuracy comparable to the larger models in the study.
 
 ## Privacy and reproducibility
 
 - Protected labels, scores and provider metadata are never persisted.
 - Imported titles, article text and authors are discarded.
 - Authors and raw HTML have no storage field.
-- Every publisher evaluation records the exact model, articles and runs used.
+- Every publisher class names the model and the exact articles counted, and is
+  derived on request rather than stored.
 - Every bundled historical run includes all five class probabilities.
 - Every local article inference is mirrored to a private,
   `.gitignore`d CSV (`dataset/predictions/user-predictions.csv`) with
@@ -152,7 +151,7 @@ publisher-reliability dataset verify PATH
 # Import predictions into the configured data directory
 publisher-reliability dataset import PATH
 
-# Verify the seven CSV ledgers
+# Verify the six CSV ledgers
 publisher-reliability storage verify
 
 # Run in strict offline mode

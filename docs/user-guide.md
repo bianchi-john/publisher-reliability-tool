@@ -14,17 +14,12 @@ compact overview popover with the same counts a dashboard would show:
 - **Stored predictions** are immutable article-level outputs. The bundled
   release contains BERT and RoBERTa only, with one predicted label and all five
   class probabilities for every run.
-- **Created aggregations** are publisher-level results explicitly created in
-  Evaluate. This count can be zero even when tens of thousands of stored article
-  predictions are available.
 - **Model identities** includes historical identities from imported data and
   local runnable artifacts. A historical identity is useful for provenance but
   is not itself an installed checkpoint.
 
 The bundled release produces 19,411 normalized articles, 38,854 prediction
-runs, and 10 historical BERT/RoBERTa family/fold identities. Llama and Mistral
-outputs are not included because their five per-class probabilities were not
-available.
+runs, and 10 historical BERT/RoBERTa family/fold identities.
 
 ## 2. Make models available
 
@@ -34,8 +29,8 @@ Install the locked inference dependencies before starting the application:
 uv sync --frozen --extra models
 ```
 
-There are three supported model paths: core BERT/RoBERTa checkpoints, original
-paper Llama/Mistral checkpoints, and custom five-class Transformers.
+There are two supported model paths: core BERT/RoBERTa checkpoints and custom
+five-class Transformers.
 
 ### Core BERT or RoBERTa checkpoint
 
@@ -54,21 +49,14 @@ On first online inference the application may cache only the small tokenizer
 and configuration resources from the pinned immutable Hugging Face revision.
 It never downloads base-model weights.
 
-### Original paper Llama or Mistral model
+### Larger decoder models are not available yet
 
-1. Open **Models** and expand the official catalog.
-2. Download one `mistral_fold_N.zip`, or both
-   `llama_fold_N.pt.z01` and `llama_fold_N.pt.z02` for the same fold.
-3. Select those file(s) under **Import an original paper model from OSF**.
-4. Wait for byte-size and SHA-256 authentication. Family and fold are detected
-   automatically.
-
-The imported row is marked **Paper original**. On a machine without CUDA or the
-`llm-models` extra it remains verified but not runnable. Llama also requires
-external Hugging Face access to its gated, pinned base snapshot.
-
-The same exact filenames can be copied to a configured `models/` root and
-imported with **Rescan model directories**.
+The study also fine-tuned Llama 3 8B and Mistral 24B. Importing and running them
+is **under development and not available in this release**: each fold needs a
+CUDA GPU and several gigabytes of weights, which this single-machine CPU demo
+cannot assume. Any attempt to import one returns `FEATURE_UNAVAILABLE` with an
+explanation, and nothing is installed. BERT and RoBERTa run here on CPU and
+report comparable accuracy in the study.
 
 ### Custom Transformers model
 
@@ -86,11 +74,6 @@ Open **Models → Import a custom five-class Transformer**, review the example s
 above the upload control, select the ZIP, and wait for the validation job. A
 valid bundle is installed under the managed data directory and marked
 **User custom**.
-
-Alternatively, schema 2 accepts a Llama 3 8B or Mistral 24B PEFT LoRA
-`AutoModelForSequenceClassification` adapter with local tokenizer and a
-five-row classification head. It uses the exact base repository and immutable
-revision declared in the manifest and requires CUDA to run.
 
 The application rejects executable code, pickle/PyTorch
 weights, unsafe ZIP paths, remote tokenizer dependencies, non-finite tensors,
@@ -116,7 +99,10 @@ The selector does not show a hard-coded catalog:
 
 For known five-fold dataset articles, checkpoint fold `N` is permitted only
 when the article belongs to held-out fold `N`. Other checkpoints are hidden and
-the backend rejects direct attempts with `TRAINING_DATA_LEAKAGE`. For an
+the backend rejects direct attempts with `TRAINING_DATA_LEAKAGE`. This applies
+to every family, because all families in the study share the same
+publisher-disjoint folds: an article's held-out fold identifies the training set
+of every one of them. For an
 external URL not present in the fold registry, training membership is unknown;
 the application does not pretend that absence proves exclusion from every
 possible training corpus.
@@ -201,25 +187,29 @@ Run origin in the application ledger (`local_inference`) and row origin in the
 combined prediction dataset (`user_evaluation`) describe the same user-created
 inference at two storage boundaries.
 
-## 5. Evaluate a publisher
+## 5. Read a publisher's class
 
-Choose **Publisher**, enter its URL, select an available stored model/fold, an
-aggregation method, and a requested count from 2 to 50. Publisher mode
-aggregates only compatible leakage-safe predictions already stored for that
-publisher; it does not crawl the site or infer missing publisher articles.
+A publisher class is not something you create. It is a reading of the articles
+already classified, so it is computed when you ask for it and never stored.
 
-**Use the available articles** permits a partial aggregate only when at least
-two safe articles exist. **Require the full count** fails unless the requested
-number is available. Publisher count, aggregation method, and partial-result
-controls are hidden in single-article mode because they do not apply there.
+Open **Publishers**, or click a publisher name anywhere an article is listed.
+The page shows one class per model, each counted only over that model's
+leakage-safe articles. Two models may disagree, and that disagreement is shown
+rather than averaged away: mixing predictions from different checkpoints would
+report a number no model produced.
 
-Publisher pages distinguish:
+Two controls change the reading:
 
-- article and prediction counts already present in history; and
-- publisher evaluations explicitly created in this workspace.
+- **How article verdicts are counted** selects majority vote, ordinal mean, or
+  mean probabilities. The formula for the current choice is shown beneath it.
+- **Articles counted** lists every article of that publisher with a
+  leakage-safe prediction. Clear a checkbox to leave one out; each model is
+  recounted over what remains.
 
-An evaluation count of zero therefore does not mean that the publisher has no
-article predictions.
+Both act on the display only. Nothing is written, so a different reading is
+always one click away, and the stored predictions never change. A model needs at
+least two counted articles to report a class; below that it reports none rather
+than presenting a single article as an aggregate.
 
 ## 6. Appearance and navigation
 

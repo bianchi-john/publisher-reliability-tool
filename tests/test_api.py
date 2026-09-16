@@ -45,14 +45,19 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/v1/models/available", openapi.json()["paths"])
         self.assertIn("/api/v1/models/upload", openapi.json()["paths"])
         self.assertIn("/api/v1/models/official-upload", openapi.json()["paths"])
-
-        catalog = await self.client.get("/api/v1/models/official-catalog")
-        self.assertEqual(catalog.status_code, 200)
-        self.assertEqual(len(catalog.json()["items"]), 10)
-        self.assertEqual(
-            {row["family"] for row in catalog.json()["items"]},
-            {"llama", "mistral"},
+        self.assertNotIn(
+            "/api/v1/models/official-catalog", openapi.json()["paths"]
         )
+
+        # The paper's large decoder checkpoints are not importable in this release.
+        catalog = await self.client.get("/api/v1/models/official-catalog")
+        self.assertEqual(catalog.status_code, 404)
+        refused = await self.client.post(
+            "/api/v1/models/official-upload",
+            files={"files": ("llama_fold_1.pt.z01", b"irrelevant")},
+        )
+        self.assertEqual(refused.status_code, 501)
+        self.assertEqual(refused.json()["error"]["code"], "FEATURE_UNAVAILABLE")
 
         missing = await self.client.get(
             "/api/v1/articles/00000000-0000-0000-0000-000000000000"

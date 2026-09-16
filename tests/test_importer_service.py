@@ -7,7 +7,7 @@ from pathlib import Path
 from publisher_reliability.errors import AppError
 from publisher_reliability.importer import import_csv
 from publisher_reliability.services import ResearchService
-from publisher_reliability.storage import Storage
+from publisher_reliability.storage import HEADERS, Storage
 
 
 class ImporterServiceTest(unittest.TestCase):
@@ -276,7 +276,6 @@ class ImporterServiceTest(unittest.TestCase):
                 publisher = service.publisher_summaries()[0]
                 self.assertEqual(publisher["run_count"], 2)
                 self.assertEqual(publisher["probability_run_count"], 2)
-                self.assertEqual(publisher["evaluation_count"], 0)
 
                 unknown = service.available_models(
                     input_type="article",
@@ -307,6 +306,43 @@ class ImporterServiceTest(unittest.TestCase):
                         storage.rows["prediction_runs"][0]["article_id"],
                     )
                 self.assertEqual(raised.exception.code, "TRAINING_DATA_LEAKAGE")
+
+                # The paper's Llama and Mistral checkpoints were trained on the same
+                # publisher-disjoint folds, but the released dataset carries no
+                # predictions of their own. The guard must still recognise a training
+                # article for them, which it can only do if fold membership is a
+                # property of the article rather than of the model family.
+                dataset_article = storage.rows["prediction_runs"][0]["article_id"]
+                for family, artifact_kind in (
+                    ("llama", "paper_llama_state_dict_bundle"),
+                    ("mistral", "paper_mistral_adapter_bundle"),
+                ):
+                    self.assertFalse(
+                        any(
+                            row["family"] == family
+                            for row in storage.rows["models"]
+                        ),
+                        f"{family} must have no imported predictions in this fixture",
+                    )
+                    paper_model = {column: "" for column in HEADERS["models"]}
+                    paper_model.update(
+                        model_id=f"paper-{family}-fold-2",
+                        family=family,
+                        fold_id="2",
+                        artifact_kind=artifact_kind,
+                        official_manifest_entry_sha256="d" * 64,
+                    )
+                    with self.assertRaises(AppError) as leaked:
+                        service.assert_not_training_article(
+                            paper_model, dataset_article
+                        )
+                    self.assertEqual(leaked.exception.code, "TRAINING_DATA_LEAKAGE")
+                    self.assertEqual(leaked.exception.details["model_family"], family)
+
+                    # Its own held-out fold stays evaluable.
+                    held_out = dict(paper_model)
+                    held_out.update(model_id=f"paper-{family}-fold-1", fold_id="1")
+                    service.assert_not_training_article(held_out, dataset_article)
                 storage.upsert("models", "model_id", trained_model)
                 with self.assertRaises(AppError) as evaluated:
                     service.evaluate(
@@ -324,75 +360,54 @@ class ImporterServiceTest(unittest.TestCase):
                     "TRAINING_DATA_LEAKAGE",
                 )
 
-                result = service.evaluate(
-                    {
-                        "input": {
-                            "type": "publisher",
-                            "url": "https://example.com/",
-                            "requested_article_count": 2,
-                            "allow_partial": False,
-                        },
-                        "model_id": model_id,
-                        "aggregation_method": "majority_vote",
-                    },
-                    "test-job",
-                )
-                self.assertEqual(result["result_class"], 1)
-                evaluation = storage.rows["evaluations"][0]
-                self.assertEqual(
-                    len(json.loads(evaluation["prediction_run_ids_json"])), 2
-                )
+                # A publisher class is now derived on demand from the article
+                # predictions, never created and stored by the user.
+                publisher_id = storage.rows["prediction_runs"][0]["publisher_id"]
+                derived = service.publisher_aggregation(publisher_id)
+                self.assertEqual(derived["method"], "majority_vote")
+                self.assertEqual(len(derived["models"]), 1)
+                entry = derived["models"][0]
+                self.assertEqual(entry["used_count"], 2)
+                self.assertEqual(entry["result_class"], 1)
+                self.assertEqual(entry["family"], "bert")
 
-                # An explicit article list aggregates exactly the named articles and is
-                # never partial, unlike a publisher request bounded by a requested count.
-                listed = service.evaluate(
-                    {
-                        "input": {
-                            "type": "article_list",
-                            "urls": [
-                                "https://example.com/article-1",
-                                "https://example.com/article-2",
-                            ],
-                        },
-                        "model_id": model_id,
-                        "aggregation_method": "majority_vote",
-                    },
-                    "article-list-job",
+                # Excluding an article changes the reading without writing anything.
+                excluded_article = entry["article_ids"][0]
+                narrowed = service.publisher_aggregation(
+                    publisher_id, excluded_article_ids=[excluded_article]
                 )
-                self.assertEqual(listed["used_count"], 2)
-                self.assertFalse(listed["partial"])
-                listed_row = next(
-                    row
-                    for row in storage.rows["evaluations"]
-                    if row["evaluation_id"] == listed["evaluation_id"]
-                )
-                self.assertEqual(listed_row["input_mode"], "article_list")
-                self.assertEqual(listed_row["requested_count"], "2")
-                self.assertEqual(listed_row["normalized_hostname"], "example.com")
+                narrowed_entry = narrowed["models"][0]
+                self.assertEqual(narrowed_entry["used_count"], 1)
+                self.assertEqual(narrowed_entry["excluded_count"], 1)
+                self.assertIsNone(narrowed_entry["result_class"])
+                self.assertIn("two leakage-safe", narrowed_entry["unavailable_reason"])
 
-                for bad_input, expected in (
-                    ({"type": "article_list", "urls": ["https://example.com/a"]},
-                     "Article list must contain 2 to 50 URLs."),
-                    ({"type": "article_list", "urls": [
-                        "https://example.com/article-1",
-                        "https://example.com/article-1",
-                     ]}, "Article URLs must be distinct."),
-                    ({"type": "article_list", "urls": [
-                        "https://example.com/article-1",
-                        "https://other.example/article-2",
-                     ]}, "All articles must share one publisher."),
-                ):
-                    with self.assertRaises(AppError) as rejected:
-                        service.evaluate(
-                            {
-                                "input": bad_input,
-                                "model_id": model_id,
-                                "aggregation_method": "majority_vote",
+                # The counting rule is a parameter of the question, not of the data.
+                for method in ("ordinal_mean", "mean_probabilities"):
+                    other = service.publisher_aggregation(publisher_id, method=method)
+                    self.assertEqual(other["method"], method)
+                    self.assertEqual(other["models"][0]["used_count"], 2)
+                with self.assertRaises(AppError) as bad_method:
+                    service.publisher_aggregation(publisher_id, method="nonsense")
+                self.assertEqual(bad_method.exception.code, "INVALID_INPUT")
+
+                # Evaluating several articles at once is no longer an operation.
+                with self.assertRaises(AppError) as rejected:
+                    service.evaluate(
+                        {
+                            "input": {
+                                "type": "publisher",
+                                "url": "https://example.com/",
+                                "requested_article_count": 2,
                             },
-                            "article-list-reject",
-                        )
-                    self.assertEqual(rejected.exception.code, "INVALID_INPUT")
-                    self.assertEqual(rejected.exception.message, expected)
+                            "model_id": model_id,
+                        },
+                        "publisher-reject",
+                    )
+                self.assertEqual(rejected.exception.code, "INVALID_INPUT")
+                self.assertEqual(
+                    rejected.exception.message, "Unknown evaluation input type."
+                )
 
 
 if __name__ == "__main__":

@@ -29,8 +29,10 @@ models, and weights remain third-party material.
 2. A publisher method aggregates 2–50 compatible article runs from one exact
    model and one normalized publisher.
 
-Every persisted run is immutable. Every publisher evaluation stores the exact
-ordered run and article IDs it used. A newer run never changes an older result.
+Every persisted run is immutable. A publisher class is not persisted at all: it
+is derived on request from the stored article runs, and it names the model and
+the exact articles counted. A newer run never changes an older result, but it
+does enter the next reading of its publisher.
 
 ## 3. Dataset inputs
 
@@ -83,13 +85,12 @@ Projection rules:
 The generated bundled release contains 19,429 released URLs. Runtime
 normalization yields 19,411 article IDs, 38,854 unique runs, and 10 historical
 BERT/RoBERTa family/fold identities. Every run has one complete five-class
-probability vector. Llama/Mistral hard labels are deliberately absent because
-their class probabilities were not available.
+probability vector.
 
 Normalization also reveals 16 canonical article identities assigned to more
 than one test fold (32 article/family memberships across BERT and RoBERTa).
 Their historical predictions remain consultable, but no fold checkpoint is
-treated as leakage-safe for a new article or publisher evaluation. Publisher
+treated as leakage-safe for a new article or a derived publisher class. Publisher
 selection excludes those identities; an explicit article or article-list
 request fails with `TRAINING_DATA_LEAKAGE`. The application never guesses a
 fold from conflicting evidence.
@@ -129,13 +130,9 @@ Official artifacts are manually obtained from:
 
 <https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74>
 
-The package contains `official-model-manifest-v1.json` with one immutable entry
-per official family/fold: expected artifact digest, built-in loader recipe and
-version, class order, input length/padding, output-relevant runtime options,
-base/tokenizer repositories, and immutable revisions. The application never
-executes code from an artifact. Core BERT/RoBERTa checkpoints cache only pinned
-tokenizer resources. Llama/Mistral QLoRA inference acquires the pinned base
-snapshot through standard Hugging Face loading when it is not already cached.
+The application never executes code from an artifact. Core BERT/RoBERTa
+checkpoints cache only pinned tokenizer resources and never download base-model
+weights.
 
 ### 5.1 Core CPU demo
 
@@ -148,41 +145,32 @@ Both use `torch.load(..., map_location="cpu", weights_only=True)`, strict tensor
 keys/shapes, `eval()`, and softmax over five logits. Core compatibility requires
 a frozen CPU float32 reference fixture.
 
-### 5.2 Official paper Llama/Mistral
+### 5.2 Larger decoder models: extension point, not a shipped feature
 
-The official catalog contains five folds for each family:
+The study also fine-tuned Llama 3 8B and Mistral 24B on the same
+publisher-disjoint folds. This release neither imports nor runs them: each fold
+requires a CUDA GPU and several gigabytes of weights, which the single-machine
+CPU demo cannot assume, so the effort went into an architecture that can accept
+such a family rather than into a path most readers could not execute. Any import
+attempt is refused with `FEATURE_UNAVAILABLE`.
 
-| Family | Imported artifact | Notebook-derived inference recipe |
-| --- | --- | --- |
-| Llama 3 8B | two OSF ZIP segments reconstructed as one full quantized state dictionary | `meta-llama/Meta-Llama-3-8B`, NF4 double quantization/bfloat16, LoRA r=8 α=16, dynamic truncation to 256 |
-| Mistral 24B | one OSF PEFT adapter ZIP | `mistralai/Mistral-Small-24B-Base-2501`, NF4 double quantization/bfloat16, LoRA r=16 α=32, dynamic padding and truncation to 1024 |
-
-Both are `AutoModelForSequenceClassification` models producing five logits;
-softmax yields probabilities and argmax yields one class. They are multiclass
-single-label classifiers, not prompt-based generative or multi-label systems.
-
-Paper provenance requires an exact complete filename set, published byte size
-and SHA-256. The registered model includes the manifest-entry digest and
-`paper_official` provenance. CUDA, locked PEFT/bitsandbytes dependencies and the
-pinned base snapshot are runtime requirements, not import-authentication
-requirements.
-
-The supplied training notebooks name the two base repositories but do not
-record immutable training-time commits. The revisions in the packaged manifest
-are therefore frozen reconstruction references selected on 2026-07-27, not a
-claim about the unrecorded commit used during original training. This
-limitation is retained in the scientific record instead of silently following
-each repository's moving `main` branch.
+What remains open for that extension is deliberate: model identity is
+content-addressed over output-relevant settings rather than over an architecture
+name, the loader registry is keyed by family, the leakage guard records fold
+membership per article and therefore already covers any future family, and the
+`models.csv` contract accepts a further family and artifact kind without a schema
+change. The two encoder families that do run here report accuracy comparable to
+the larger models in the study.
 
 ### 5.3 Custom Transformers bundle
 
 A user model is accepted only as the constrained PRT bundle documented in
 `custom-model-bundle.md`: ZIP container, declarative `prt-model.json`, local
-For schema 1 it contains a Hugging Face `config.json`, local tokenizer, and
-exactly one full `model.safetensors` from the encoder allowlist. Schema 2
-contains a local tokenizer and PEFT LoRA `adapter_model.safetensors` for the
-exact Llama or Mistral base above. Both declare five classes and use a
-`custom_...` family plus held-out fold `1..5`.
+It contains a Hugging Face `config.json`, local tokenizer, and exactly one full
+`model.safetensors` from the encoder allowlist, declares five classes, and uses
+a `custom_...` family plus held-out fold `1..5`. The LoRA adapter variant of this
+contract targets the larger decoder bases and is refused for the reason given in
+5.2.
 
 Validation is local-only and uses `trust_remote_code=false`. It rejects
 `auto_map`, Python/native modules, pickle/PyTorch checkpoint files, unsafe ZIP
@@ -303,13 +291,24 @@ For the imported five-fold corpus, `<family>_fold_id=N` means that the stored
 prediction was produced for held-out test fold `N`. The corresponding local
 checkpoint fold `N` was trained on the other four folds.
 
+Fold membership is a property of the article, not of the model family. Every
+family in the study was split by the same publisher-disjoint
+`StratifiedKFold(n_splits=5, shuffle=True, random_state=42)` over the same
+publisher list, so an article held out in fold `N` is held out in fold `N` for
+every family, and was in the training set of the other four folds of every
+family. The released dataset carries BERT and RoBERTa predictions only;
+recording the registry per family would therefore leave any other family with no
+fold evidence at all, and the guard would pass every article for exactly those
+models. The registry is keyed by article so the guard applies uniformly to every
+family, including one added later.
+
 Before any new inference, the service compares the normalized article identity
-with the imported fold registry for the selected family:
+with the imported fold registry:
 
 - checkpoint fold `N` may evaluate a known article assigned to test fold `N`;
 - checkpoint fold `N` must reject a known article assigned to any other fold
-  with `TRAINING_DATA_LEAKAGE`;
-- publisher evaluation excludes every known article that is not in the
+  with `TRAINING_DATA_LEAKAGE`, whatever the checkpoint's family;
+- a derived publisher class excludes every known article that is not in the
   checkpoint's held-out fold;
 - the guard is checked by the service for single articles, explicit lists and
   publisher candidates, not only by frontend filtering.

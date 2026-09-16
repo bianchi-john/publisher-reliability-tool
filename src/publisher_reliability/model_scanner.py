@@ -12,9 +12,7 @@ from .identity import sha256_json
 from .inference import CORE_MODELS
 from .official_models import (
     MANAGED_ARTIFACT_KINDS,
-    import_official_model,
     llm_runtime_status,
-    official_manifest,
     verify_managed_model,
 )
 from .storage import Storage, json_field, utc_now
@@ -174,6 +172,8 @@ def scan_model_roots(
     discovered: list[dict[str, object]] = []
     rejected: list[dict[str, str]] = []
     seen_digests: set[str] = set()
+    # Kept at zero: importing the paper's large decoder checkpoints is not a
+    # shipped feature yet, so a scan never registers one.
     official_registered = 0
 
     for root_index, configured_root in enumerate(roots, start=1):
@@ -223,41 +223,6 @@ def scan_model_roots(
                     timestamp=timestamp,
                 )
             )
-
-        registered_manifest_digests = {
-            row["official_manifest_entry_sha256"]
-            for row in storage.rows["models"]
-            if row["official_manifest_entry_sha256"]
-            and row["artifact_available"] == "true"
-        }
-        for entry in official_manifest()["models"]:
-            entry_digest = sha256_json(entry)
-            if entry_digest in registered_manifest_digests:
-                continue
-            names = [str(file["name"]) for file in entry["files"]]
-            sources = [root / name for name in names]
-            if not all(
-                source.is_file() and not source.is_symlink()
-                for source in sources
-            ):
-                continue
-            try:
-                import_official_model(
-                    storage,
-                    sources,
-                    source_names=names,
-                    max_uncompressed_bytes=8_589_934_592,
-                )
-            except AppError as exc:
-                rejected.append(
-                    {
-                        "locator": f"root-{root_index}/{' + '.join(names)}",
-                        "error": exc.message,
-                    }
-                )
-            else:
-                official_registered += 1
-                registered_manifest_digests.add(entry_digest)
 
     historical = [
         row for row in storage.rows["models"] if row["artifact_kind"] == "historical_virtual"

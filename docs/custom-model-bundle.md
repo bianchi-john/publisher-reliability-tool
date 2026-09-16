@@ -15,16 +15,7 @@ Encoder validation and inference:
 uv sync --frozen --extra models
 ```
 
-Llama 3 8B or Mistral 24B adapter inference:
-
-```bash
-uv sync --frozen --extra llm-models
-```
-
-LLM bundles can be validated and registered without CUDA, but remain
-`resource_unavailable` until a CUDA device is present.
-
-## Schema 1: complete encoder classifier
+## Encoder classifier bundle
 
 The ZIP contains one full, unsharded safe model:
 
@@ -58,51 +49,18 @@ Allowed model types are `albert`, `bert`, `camembert`, `deberta`,
 `deberta-v2`, `distilbert`, `electra`, `modernbert`, `mpnet`, `rembert`,
 `roberta`, and `xlm-roberta`.
 
-## Schema 2: Llama/Mistral PEFT classifier
+## Adapter bundles for larger decoder models
 
-This is a LoRA adapter for `AutoModelForSequenceClassification`, not a
-prompt-based generative model:
+A second schema exists for LoRA sequence-classification adapters over the
+study's larger decoder bases (Llama 3 8B, Mistral 24B). **It is under
+development and refused in this release**: an upload declaring
+`"schema_version": 2` returns `FEATURE_UNAVAILABLE` and installs nothing.
 
-```text
-my-adapter/
-├── prt-model.json
-├── adapter_config.json
-├── adapter_model.safetensors
-├── tokenizer_config.json
-├── tokenizer.json
-└── optional tokenizer resources
-```
-
-Mistral example:
-
-```json
-{
-  "schema_version": 2,
-  "model_kind": "peft_sequence_classifier",
-  "architecture": "mistral",
-  "display_name": "My Mistral classifier",
-  "family": "custom_mistral_experiment",
-  "fold_id": 1,
-  "class_order": [0, 1, 2, 3, 4],
-  "max_tokens": 1024,
-  "padding_policy": "dynamic_longest",
-  "base_model": "mistralai/Mistral-Small-24B-Base-2501",
-  "base_revision": "<40-character commit SHA>",
-  "training_data": {"kind": "five_fold", "held_out_fold": 1}
-}
-```
-
-For Llama use:
-
-- `architecture`: `llama`;
-- `base_model`: `meta-llama/Meta-Llama-3-8B`;
-- `max_tokens`: at most `256`;
-- dynamic padding.
-
-For Mistral, `max_tokens` is at most `1024`. In both cases
-`base_revision` must be an immutable 40-character commit SHA. The adapter must
-declare PEFT `LORA`, task `SEQ_CLS`, a `score` or `classifier` module to save,
-compatible target modules, and a head with exactly five rows.
+Each such fold needs a CUDA GPU and several gigabytes of base weights, which the
+single-machine CPU demo cannot assume. The manifest vocabulary, validation rules
+and loader recipe are kept in the codebase so the family can be enabled without
+changing the storage contract or the model-identity rules. BERT and RoBERTa,
+which do run here on CPU, report comparable accuracy in the study.
 
 ## Shared rules and validation
 

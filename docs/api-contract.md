@@ -65,6 +65,7 @@ contains one of these codes in its `error_code` field.
 | `IMPORT_INVALID` | 422 | Dataset schema/container/row conflict prevents requested import result |
 | `STORAGE_ERROR` | 503 | Lock, structure, reference, write, fsync, or space failure |
 | `PROCESS_INTERRUPTED` | 409 | A queued job lost its acquired source or a running job ended with the process |
+| `FEATURE_UNAVAILABLE` | 501 | A documented extension point exists but the feature is not finished in this release |
 | `INTERNAL_ERROR` | 500 | Unexpected failure hidden behind a safe message |
 
 Synchronous status is exactly the table value. Job creation returns `202` once
@@ -173,7 +174,7 @@ The attachment is named `article-predictions.csv`. Column names match the
 user-prediction block of `dataset/predictions/predictions.csv`. No option can
 include saved or ephemeral content, and no column exposes an artifact path.
 
-## 6. Publishers and evaluations
+## 6. Publishers
 
 ### `GET /api/v1/publishers`
 
@@ -184,19 +185,22 @@ is invented from article URLs.
 
 ### `GET /api/v1/publishers/{publisher_id}`
 
-Returns the derived summary, counts by model/class, 20 newest articles, and 20
-newest evaluation summaries.
+Returns the derived summary, counts by model/class, and the 20 newest articles.
 
-### `GET /api/v1/evaluations`
+### `GET /api/v1/publishers/{publisher_id}/aggregation`
 
-Paginated immutable evaluations filtered by `publisher_id`, `model_id`, or
-`method`; newest first.
+Derives the publisher class from stored article runs and writes nothing. Query
+parameters are `method` (`majority_vote` default, `ordinal_mean`,
+`mean_probabilities`) and a repeatable `exclude=<article_id>`.
 
-### `GET /api/v1/evaluations/{evaluation_id}`
-
-Returns result, method/version, requested/used counts, partial flag, exact
-ordered article IDs and run summaries, class counts or mean probabilities, and
-scientific warnings. It never retargets newer runs.
+Each model is aggregated only over its own leakage-safe articles and never mixed
+with another model's predictions; one run per article per model is counted, the
+newest by effective time. The response returns the method, the excluded IDs, the
+exact article set considered with canonical URLs, and one entry per model with
+available/used/excluded counts, result class, ordinal mean, mean probabilities
+and class counts. A model with fewer than two counted articles reports no class
+and states why. An unknown method is `INVALID_INPUT`; an unknown publisher is
+`NOT_FOUND`.
 
 ## 7. Models
 
@@ -209,19 +213,11 @@ revisions, input policy, provenance (`paper_official`, `user_custom`,
 `paper_dataset`, or `local_checkpoint`), and safe status detail. Optional `family`/`status`
 filters are supported. This endpoint is also the model detail source.
 
-### `GET /api/v1/models/official-catalog`
-
-Returns the ten immutable paper-model entries for Llama 3 8B and Mistral 24B:
-display name, family, fold, pinned base revision, required OSF filenames, byte
-sizes and direct download links. Checksums remain enforced server-side.
-
 ### `POST /api/v1/models/scan`
 
 Body is `{}`. Creates a `model_validation` job that scans configured roots and
-the internal managed-model root, validates recognized official artifacts, and
-runs required fixtures. Exact official Mistral filenames and complete Llama
-`.z01`/`.z02` pairs are authenticated and imported automatically. It accepts no path. Returns
-`202 {"job_id":"uuid"}`.
+the internal managed-model root for recognized BERT/RoBERTa checkpoints and runs
+required fixtures. It accepts no path. Returns `202 {"job_id":"uuid"}`.
 
 ### `GET /api/v1/models/available`
 
@@ -270,109 +266,36 @@ key/shape mismatch.
 
 Successful validation atomically moves the extracted bundle under
 `<data-dir>/managed-models/<model_id>` and registers it in `models.csv` as
-`custom_transformer_bundle` or `custom_peft_adapter_bundle`. Schema 1 accepts
-the documented encoder allowlist; schema 2 accepts only compatible Llama 3 8B
-or Mistral 24B PEFT five-class sequence classifiers. Terminal success/failure deletes the acquired ZIP.
-The returned job result includes model ID, family, fold and validation status.
+`custom_transformer_bundle`, accepting the documented encoder allowlist. A
+bundle declaring the LoRA adapter schema for the study's larger decoder bases is
+refused with `FEATURE_UNAVAILABLE` while that support is under development.
+Terminal success/failure deletes the acquired ZIP. The returned job result
+includes model ID, family, fold and validation status.
 
 ### `POST /api/v1/models/official-upload`
 
-Multipart with `files`: one `mistral_fold_N.zip`, or both
-`llama_fold_N.pt.z01` and `llama_fold_N.pt.z02`. The combined stream is limited
-to 8 GiB. Family and fold are inferred from the complete filename set, then
-each file must match the exact published byte size and SHA-256 in
-`official-model-manifest-v1.json`.
-
-Mistral is safely extracted as a PEFT adapter. Llama's two independently zipped
-segments are streamed in order into one managed state dictionary. The model is
-registered with `paper_official` provenance and the manifest-entry digest.
-Validation can succeed with `dependency_missing` or `resource_unavailable`;
-only runnable models are offered for new inference.
+Reserved for importing the study's larger decoder checkpoints (Llama 3 8B,
+Mistral 24B). That support is under development, so the endpoint refuses every
+request with `501 FEATURE_UNAVAILABLE` before reading any upload bytes, and
+registers nothing.
 
 ## 8. Evaluation
 
 ### `POST /api/v1/evaluation-jobs`
 
-Creates one `evaluation` job and returns `202 {"job_id":"uuid"}`. Shared fields
-are `model_id`, `prediction_action` (`reuse` default or `recompute`), and
-`content_retention` (`discard` default or `save_local`).
-
-Single article:
+Creates one `evaluation` job and returns `202 {"job_id":"uuid"}`. One article is
+the only accepted input. Fields are `input`, `model_id`, `prediction_action`
+(`reuse` default or `recompute`), and `content_retention` (`discard` default or
+`save_local`).
 
 ```json
 {"input":{"type":"article","url":"https://example.org/a"},"model_id":"sha256","prediction_action":"reuse","content_retention":"discard"}
 ```
 
-Explicit list:
-
-```json
-{"input":{"type":"article_list","urls":["https://example.org/a","https://example.org/b"]},"model_id":"sha256","aggregation_method":"majority_vote","prediction_action":"reuse","content_retention":"discard"}
-```
-
-Publisher:
-
-```json
-{"input":{"type":"publisher","url":"https://example.org/","requested_article_count":10,"allow_partial":true},"model_id":"sha256","aggregation_method":"majority_vote","prediction_action":"reuse","content_retention":"discard"}
-```
-
-For single-article input, `aggregation_method`, `requested_article_count` and
-`allow_partial` do not apply and the frontend hides them. For publisher input,
-`allow_partial=true` means that a result may be created from the available
-leakage-safe subset when it contains at least two articles; `false` requires the
-full requested count.
-
-Lists contain 2–50 distinct same-publisher URLs. A runnable exact model creates
-missing list runs sequentially; publisher URL input aggregates only the stored
-eligible runs already known for that publisher and does not crawl for links.
-A historical or missing-artifact model may reuse stored exact runs but cannot
-create missing runs or recompute. For a single article, missing-run `reuse` and
-explicit `recompute` retrieve, extract and infer with the selected runnable
-local model. `reuse + save_local` may retrieve content for an existing run
-without inference; if retrieval resolves to another article, the job returns
-`INVALID_URL` and stores nothing. Network/canonical/extraction failures appear
-on the accepted job.
-
-A successful single-article job exposes the following `result` through
-`GET /api/v1/jobs/{job_id}`:
-
-```json
-{
-  "article_id": "uuid",
-  "canonical_url": "https://example.org/a",
-  "prediction_run_id": "uuid",
-  "predicted_class": 2,
-  "probabilities": [0.02, 0.08, 0.71, 0.15, 0.04],
-  "model_id": "sha256",
-  "family": "bert",
-  "fold_id": 1,
-  "origin": "local_inference",
-  "reused": false
-}
-```
-
-`origin` is `bundled_import`, `user_import`, or `local_inference`; `reused`
-states whether an existing exact run was selected. The probability array always
-uses class order `[0,1,2,3,4]`.
-
-When `origin=local_inference`, the committed authoritative run is also mirrored
-to a private, git-ignored `dataset/predictions/user-predictions.csv` as one
-`prediction_origin=user_evaluation` row keyed by the same
-`prediction_run_id`. This mirror file is never part of the tracked release, so
-a user's own evaluations never enter version control. The side effect adds no
-API field and repeated synchronization does not create another row.
-
-Before model execution, the service enforces the cross-validation leakage rule
-from the scientific contract for single articles, explicit lists and publisher
-candidates. A known article outside the selected checkpoint's held-out fold
-fails with `TRAINING_DATA_LEAKAGE`; publisher selection excludes unsafe known
-candidates.
-
-Explicit lists run in submitted order, require distinct submitted and resolved
-canonical article IDs, and require every item to succeed before an evaluation
-row is written. Publisher stored-run candidates use effective latest-run time
-descending then canonical URL ascending. If either workflow fails, any
-prediction run/content already committed remains an article-level result and is
-not presented as a publisher evaluation.
+Evaluating several articles as one operation is not offered: any other `input`
+type is rejected by request validation. A publisher-level class is obtained
+instead from `GET /api/v1/publishers/{publisher_id}/aggregation`, which derives
+it from the runs already stored and persists nothing.
 
 ## 9. Jobs
 

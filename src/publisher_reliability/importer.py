@@ -609,24 +609,12 @@ def _remove_previous_bundled_release(storage: Storage) -> None:
         if row["origin"] == "bundled_import"
         and row["source_import_id"] in old_import_ids
     }
-    kept_evaluations = []
-    for evaluation in storage.rows["evaluations"]:
-        try:
-            run_ids = json.loads(evaluation["prediction_run_ids_json"])
-        except json.JSONDecodeError:
-            run_ids = []
-        if not any(run_id in removed_run_ids for run_id in run_ids):
-            kept_evaluations.append(evaluation)
     kept_runs = [
         row
         for row in storage.rows["prediction_runs"]
         if row["prediction_run_id"] not in removed_run_ids
     ]
-    referenced_model_ids = {
-        row["model_id"] for row in kept_runs
-    } | {
-        row["model_id"] for row in kept_evaluations
-    }
+    referenced_model_ids = {row["model_id"] for row in kept_runs}
     kept_models = [
         row
         for row in storage.rows["models"]
@@ -638,7 +626,6 @@ def _remove_previous_bundled_release(storage: Storage) -> None:
         for row in storage.rows["imports"]
         if row["import_id"] not in old_import_ids
     ]
-    storage.replace("evaluations", kept_evaluations)
     storage.replace("prediction_runs", kept_runs)
     storage.replace("models", kept_models)
     storage.replace("imports", kept_imports)

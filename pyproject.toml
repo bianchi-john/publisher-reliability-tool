@@ -28,6 +28,10 @@ models = [
   "torch==2.7.1",
   "transformers==4.53.2",
 ]
+# Dependencies of the prepared extension point for large decoder models. That
+# import path is refused in this release, so nothing installed here is reachable
+# from a user-facing path yet; the pins are kept so the family can be enabled
+# without re-resolving the locked environment.
 llm-models = [
   "accelerate==1.9.0",
   "bitsandbytes==0.46.1",

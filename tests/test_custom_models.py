@@ -91,7 +91,14 @@ class CustomModelImportTest(unittest.TestCase):
                 self.assertTrue((installed / "model.safetensors").is_file())
                 self.assertTrue((installed / "prt-model.json").is_file())
 
-    def test_imports_custom_peft_classifier_with_user_provenance(self) -> None:
+    def test_refuses_peft_adapter_while_llm_support_is_unfinished(self) -> None:
+        """A schema-2 LoRA bundle is the Llama/Mistral path, which is not shipped yet.
+
+        The contract and loader remain in the codebase as the extension point, so the
+        refusal must come from the manifest check rather than from a missing feature
+        crashing somewhere deeper.
+        """
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "custom-mistral.zip"
@@ -117,33 +124,15 @@ class CustomModelImportTest(unittest.TestCase):
                 archive.writestr("tokenizer.json", "{}")
 
             with Storage(root / "data") as storage:
-                with (
-                    patch(
-                        "publisher_reliability.custom_models._validate_peft_adapter",
-                        return_value={
-                            "architecture": "mistral",
-                            "model_type": "mistral",
-                            "parameter_count": 100,
-                            "tensor_count": 10,
-                        },
-                    ),
-                    patch(
-                        "publisher_reliability.official_models.llm_runtime_status",
-                        return_value=("resource_unavailable", False, "CUDA required."),
-                    ),
-                ):
-                    result = import_custom_transformer_bundle(
+                with self.assertRaises(AppError) as refused:
+                    import_custom_transformer_bundle(
                         storage,
                         source,
                         max_uncompressed_bytes=1024 * 1024,
                     )
-
-                self.assertEqual(result["provenance"], "user_custom")
-                model = storage.rows["models"][0]
-                self.assertEqual(model["artifact_kind"], "custom_peft_adapter_bundle")
-                self.assertEqual(model["loader_recipe"], "custom_peft_sequence_classification")
-                self.assertFalse(model["official_manifest_entry_sha256"])
-                self.assertEqual(model["status"], "resource_unavailable")
+                self.assertEqual(refused.exception.code, "FEATURE_UNAVAILABLE")
+                self.assertIn("under development", refused.exception.message)
+                self.assertEqual(storage.rows["models"], [])
 
 
 if __name__ == "__main__":

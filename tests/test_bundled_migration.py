@@ -72,19 +72,12 @@ class BundledReleaseMigrationTest(unittest.TestCase):
                     )
                 )
                 service = ResearchService(storage, offline=True)
-                service.evaluate(
-                    {
-                        "input": {
-                            "type": "publisher",
-                            "url": "https://example.com/",
-                            "requested_article_count": 2,
-                            "allow_partial": False,
-                        },
-                        "model_id": bundled_model["model_id"],
-                        "aggregation_method": "majority_vote",
-                    },
-                    "migration-test",
+                # A publisher class is derived, never stored, so removing the bundled
+                # release cannot orphan a saved aggregation.
+                derived = service.publisher_aggregation(
+                    storage.rows["prediction_runs"][0]["publisher_id"]
                 )
+                self.assertTrue(derived["models"])
                 local = dict(bundled_model)
                 local.update(
                     model_id="local-preserved",
@@ -111,7 +104,7 @@ class BundledReleaseMigrationTest(unittest.TestCase):
                         for run in storage.rows["prediction_runs"]
                     )
                 )
-                self.assertEqual(storage.rows["evaluations"], [])
+                self.assertNotIn("evaluations", storage.rows)
                 self.assertTrue(
                     any(
                         model["model_id"] == "local-preserved"

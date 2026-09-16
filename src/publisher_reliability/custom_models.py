@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from .errors import AppError
+from .errors import LLM_UNDER_DEVELOPMENT, AppError
 from .identity import sha256_json
 from .storage import Storage, json_field, utc_now
 
@@ -226,6 +226,11 @@ def _manifest(root: Path) -> dict[str, object]:
             "Custom manifest does not satisfy the PRT Transformer bundle contract.",
         )
     schema_version = manifest["schema_version"]
+    if schema_version == 2:
+        # Schema 2 is the LoRA adapter contract for Llama and Mistral. The validation
+        # and loading code below stays as the extension point, but a user cannot
+        # install one until that path is finished.
+        raise AppError("FEATURE_UNAVAILABLE", LLM_UNDER_DEVELOPMENT)
     if schema_version == 1:
         contract_invalid = bool(
             manifest.get("model_kind")

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable
 
-from .aggregation import WARNING, aggregate
+from .aggregation import METHODS, WARNING, aggregate
 from .errors import AppError
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
@@ -129,26 +129,48 @@ class ResearchService:
             return "user_custom"
         return "local_checkpoint"
 
-    def _imported_fold_registry(self) -> dict[tuple[str, str], set[int]]:
-        registry: dict[tuple[str, str], set[int]] = defaultdict(set)
+    def _imported_fold_registry(self) -> dict[str, set[int]]:
+        """Map each imported article to the cross-validation fold that held it out.
+
+        The fold is recorded per article rather than per model family because every
+        family in the study was split the same way: one publisher-disjoint
+        ``StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`` over the same
+        publisher list. An article held out in fold 3 is therefore held out in fold 3
+        for BERT, RoBERTa, Llama and Mistral alike, and was in the training set of the
+        other four folds of every family.
+
+        This matters because the released dataset only carries BERT and RoBERTa
+        predictions. Keying the registry by family would leave the paper's Llama and
+        Mistral checkpoints with no recorded folds at all, so the leakage guard would
+        silently pass every article for exactly the models whose training set is
+        hardest to reconstruct.
+        """
+
+        registry: dict[str, set[int]] = defaultdict(set)
         models = self.models_by_id
         for run in self.storage.rows["prediction_runs"]:
             if run["origin"] not in {"bundled_import", "user_import"}:
                 continue
             model = models.get(run["model_id"])
             if model is not None:
-                registry[(run["article_id"], model["family"])].add(
-                    int(model["fold_id"])
-                )
+                registry[run["article_id"]].add(int(model["fold_id"]))
         return registry
 
     @staticmethod
     def _fold_is_safe(
         model: dict[str, str],
         article_identifier: str,
-        registry: dict[tuple[str, str], set[int]],
+        registry: dict[str, set[int]],
     ) -> bool:
-        assigned = registry.get((article_identifier, model["family"]), set())
+        """Whether this checkpoint may evaluate this article without leakage.
+
+        Safe means one of: the article is unknown to the imported dataset, or it was
+        held out in exactly the fold this checkpoint was validated on. An article
+        recorded against several folds is never safe, because no single held-out fold
+        can be established for it.
+        """
+
+        assigned = registry.get(article_identifier, set())
         return not assigned or (
             len(assigned) == 1 and int(model["fold_id"]) in assigned
         )
@@ -314,9 +336,8 @@ class ResearchService:
     ) -> list[dict[str, object]]:
         """Derive publishers from the hostnames present in prediction runs.
 
-        Counting stored predictions and created aggregations separately matters: a
-        publisher with thousands of article predictions and no aggregation is the
-        normal state, not an empty one.
+        A publisher-level class is not counted here because none is stored: it is
+        derived on demand from these runs by ``publisher_aggregation``.
         """
 
         runs: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -326,15 +347,8 @@ class ResearchService:
             if model_id and run["model_id"] != model_id:
                 continue
             runs[run["publisher_id"]].append(run)
-        evaluations: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for evaluation in self.storage.rows["evaluations"]:
-            evaluations[evaluation["publisher_id"]].append(evaluation)
-
         result = []
         for pub_id, rows in runs.items():
-            latest_evaluation = max(
-                (row["created_at"] for row in evaluations.get(pub_id, [])), default=""
-            )
             result.append(
                 {
                     "publisher_id": pub_id,
@@ -345,12 +359,9 @@ class ResearchService:
                     "probability_run_count": sum(
                         bool(row["prob_class_0"]) for row in rows
                     ),
-                    "evaluation_count": len(evaluations.get(pub_id, [])),
-                    "latest_evaluation_at": latest_evaluation or None,
                 }
             )
         result.sort(key=lambda row: str(row["normalized_hostname"]))
-        result.sort(key=lambda row: str(row["latest_evaluation_at"] or ""), reverse=True)
         return result
 
     def publisher(self, identifier: str) -> dict[str, object]:
@@ -377,18 +388,6 @@ class ResearchService:
             for item in self.article_summaries()
             if item["publisher_id"] == identifier
         ][:20]
-        evaluations = [
-            self.evaluation_summary(row)
-            for row in sorted(
-                (
-                    row
-                    for row in self.storage.rows["evaluations"]
-                    if row["publisher_id"] == identifier
-                ),
-                key=lambda row: row["created_at"],
-                reverse=True,
-            )[:20]
-        ]
         return {
             **summary,
             "counts_by_model_class": {
@@ -396,59 +395,131 @@ class ResearchService:
                 for model, counts in class_counts.items()
             },
             "articles": articles,
-            "evaluations": evaluations,
             "warning": WARNING,
         }
 
-    @staticmethod
-    def evaluation_summary(row: dict[str, str]) -> dict[str, object]:
-        return {
-            **row,
-            "requested_count": int(row["requested_count"]),
-            "used_count": int(row["used_count"]),
-            "partial": row["partial"] == "true",
-            "result_class": int(row["result_class"]),
-            "ordinal_mean": float(row["ordinal_mean"]) if row["ordinal_mean"] else None,
-        }
+    def publisher_aggregation(
+        self,
+        identifier: str,
+        *,
+        method: str = "majority_vote",
+        excluded_article_ids: Iterable[str] = (),
+    ) -> dict[str, object]:
+        """Derive one publisher-level class per model, without storing anything.
 
-    def evaluations(self, **filters: str | None) -> list[dict[str, object]]:
-        rows = [
-            row
-            for row in self.storage.rows["evaluations"]
-            if not any(value and row[key] != value for key, value in filters.items())
-        ]
-        rows.sort(key=lambda row: row["created_at"], reverse=True)
-        return [self.evaluation_summary(row) for row in rows]
+        A publisher's reliability class is not a separate record a user creates; it is
+        a reading of the article predictions already held, and it changes with the
+        counting rule and with which articles are considered. So it is recomputed on
+        every request from the current runs instead of being frozen into a ledger row.
 
-    def evaluation(self, identifier: str) -> dict[str, object]:
-        row = next(
+        Each model is aggregated only over its own leakage-safe articles and never
+        mixed with another model's predictions: two checkpoints trained on different
+        folds are two separate measurements of the same publisher, and averaging them
+        together would report a number that no model actually produced.
+        """
+
+        if method not in {row["method"] for row in METHODS}:
+            raise AppError("INVALID_INPUT", "Unknown aggregation method.")
+        summary = next(
             (
-                row
-                for row in self.storage.rows["evaluations"]
-                if row["evaluation_id"] == identifier
+                item
+                for item in self.publisher_summaries()
+                if item["publisher_id"] == identifier
             ),
             None,
         )
-        if row is None:
-            raise AppError("NOT_FOUND", "Evaluation was not found.")
-        run_ids = json.loads(row["prediction_run_ids_json"])
-        runs = [self.run_summary(self.runs_by_id[run_id]) for run_id in run_ids]
-        counts = Counter(int(run["predicted_class"]) for run in runs)
-        probabilities = [
-            float(row[f"prob_class_{index}"])
-            if row[f"prob_class_{index}"]
-            else None
-            for index in range(5)
-        ]
+        if summary is None:
+            raise AppError("NOT_FOUND", "Publisher was not found.")
+
+        excluded = {str(value) for value in excluded_article_ids}
+        fold_registry = self._imported_fold_registry()
+        models = self.models_by_id
+        by_model: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
+        # The exact article set the caller may exclude from, URLs included, so the
+        # interface never has to guess it from a paginated run listing.
+        considered: dict[str, str] = {}
+        for run in self.storage.rows["prediction_runs"]:
+            if run["publisher_id"] != identifier:
+                continue
+            model = models.get(run["model_id"])
+            if model is None or not self._fold_is_safe(
+                model, run["article_id"], fold_registry
+            ):
+                continue
+            # One run per article per model: a page re-evaluated many times must not
+            # count more than a page evaluated once.
+            current = by_model[run["model_id"]].get(run["article_id"])
+            if current is None or newest_runs([current, run])[0] is run:
+                by_model[run["model_id"]][run["article_id"]] = run
+            considered[run["article_id"]] = run["canonical_url"]
+
+        results: list[dict[str, object]] = []
+        for model_identifier, runs_by_article in by_model.items():
+            model = models[model_identifier]
+            eligible = [
+                run
+                for article, run in runs_by_article.items()
+                if article not in excluded
+            ]
+            entry: dict[str, object] = {
+                "model_id": model_identifier,
+                "family": model["family"],
+                "fold_id": int(model["fold_id"]),
+                "display_name": model["display_name"],
+                "provenance": self.model_provenance(model),
+                "available_count": len(runs_by_article),
+                "used_count": len(eligible),
+                "excluded_count": len(runs_by_article) - len(eligible),
+            }
+            if len(eligible) < 2:
+                entry.update(
+                    result_class=None,
+                    ordinal_mean=None,
+                    probabilities=None,
+                    class_counts={str(index): 0 for index in range(5)},
+                    unavailable_reason=(
+                        "At least two leakage-safe articles are required for an "
+                        "aggregate."
+                    ),
+                )
+            else:
+                try:
+                    calculation = aggregate(newest_runs(eligible), method)
+                except AppError as exc:
+                    entry.update(
+                        result_class=None,
+                        ordinal_mean=None,
+                        probabilities=None,
+                        class_counts={str(index): 0 for index in range(5)},
+                        unavailable_reason=exc.message,
+                    )
+                else:
+                    entry.update(
+                        result_class=calculation["result_class"],
+                        ordinal_mean=calculation["ordinal_mean"] or None,
+                        probabilities=calculation["probabilities"],
+                        class_counts=calculation["class_counts"],
+                        unavailable_reason=None,
+                    )
+            entry["article_ids"] = sorted(runs_by_article)
+            results.append(entry)
+
+        results.sort(key=lambda row: (str(row["family"]), int(row["fold_id"])))
         return {
-            **self.evaluation_summary(row),
-            "article_ids": json.loads(row["article_ids_json"]),
-            "runs": runs,
-            "class_counts": {str(index): counts.get(index, 0) for index in range(5)},
-            "mean_probabilities": (
-                probabilities if all(value is not None for value in probabilities) else None
-            ),
-            "warnings": json.loads(row["warnings_json"]),
+            "publisher_id": identifier,
+            "normalized_hostname": summary["normalized_hostname"],
+            "method": method,
+            "excluded_article_ids": sorted(excluded),
+            "articles": [
+                {
+                    "article_id": article,
+                    "canonical_url": url,
+                    "excluded": article in excluded,
+                }
+                for article, url in sorted(considered.items(), key=lambda kv: kv[1])
+            ],
+            "models": results,
+            "warning": WARNING,
         }
 
     def models(self, *, family: str | None = None, status: str | None = None):
@@ -590,7 +661,7 @@ class ResearchService:
         self,
         matching: list[dict[str, str]],
         local_models: list[dict[str, str]],
-        fold_registry: dict[tuple[str, str], set[int]],
+        fold_registry: dict[str, set[int]],
         required: int,
     ) -> tuple[list[dict[str, object]], bool]:
         """Options that reuse stored runs, and whether any family/fold exists locally.
@@ -659,7 +730,7 @@ class ResearchService:
     def _new_inference_options(
         self,
         local_models: list[dict[str, str]],
-        fold_registry: dict[tuple[str, str], set[int]],
+        fold_registry: dict[str, set[int]],
         article_identifier: str,
         already_offered: set[str],
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
@@ -676,7 +747,7 @@ class ResearchService:
         for local_model in local_models:
             family = local_model["family"]
             fold_id = int(local_model["fold_id"])
-            assigned_folds = fold_registry.get((article_identifier, family), set())
+            assigned_folds = fold_registry.get(article_identifier, set())
             if len(assigned_folds) > 1:
                 blocked.append(
                     {
@@ -804,9 +875,14 @@ class ResearchService:
         self,
         model: dict[str, str],
         article_identifier: str,
-        fold_registry: dict[tuple[str, str], set[int]] | None = None,
+        fold_registry: dict[str, set[int]] | None = None,
     ) -> None:
-        """Reject known training exposure or ambiguous imported fold membership."""
+        """Reject known training exposure or ambiguous imported fold membership.
+
+        Applies to every family, including the paper's Llama and Mistral checkpoints,
+        whose own predictions are absent from the released dataset but which were
+        trained on the same publisher-disjoint folds.
+        """
 
         family = model["family"]
         registry = (
@@ -814,7 +890,7 @@ class ResearchService:
             if fold_registry is not None
             else self._imported_fold_registry()
         )
-        assigned_folds = registry.get((article_identifier, family), set())
+        assigned_folds = registry.get(article_identifier, set())
         if len(assigned_folds) > 1:
             raise AppError(
                 "TRAINING_DATA_LEAKAGE",
@@ -997,7 +1073,11 @@ class ResearchService:
         *,
         on_progress: Callable[[str, int], None] | None = None,
     ) -> dict[str, object]:
-        """Run one evaluation, reporting named phases so a caller can show real progress.
+        """Classify one article, reporting named phases so a caller can show progress.
+
+        One article is the only thing a user evaluates. A publisher-level class is not
+        produced here: it is a reading over the articles already classified, derived on
+        demand by ``publisher_aggregation`` and never stored.
 
         ``on_progress`` receives a human-readable phase and a 0-100 percentage at each
         step that can take noticeable time (retrieval, checkpoint loading, inference,
@@ -1023,61 +1103,17 @@ class ResearchService:
         input_value = request.get("input")
         if not isinstance(input_value, dict):
             raise AppError("INVALID_INPUT", "Evaluation input is required.")
-        input_type = input_value.get("type")
-        fold_registry = self._imported_fold_registry()
-
-        # A single article yields one prediction; the other two modes combine several
-        # predictions into one publisher-level result and share the aggregation tail.
-        if input_type == "article":
-            return self._evaluate_article(
-                input_value,
-                model,
-                model_identifier,
-                fold_registry,
-                job_id=job_id,
-                action=action,
-                retention=retention,
-                report=report,
-            )
-
-        method = str(request.get("aggregation_method", ""))
-        if method not in {"majority_vote", "ordinal_mean", "mean_probabilities"}:
-            raise AppError("INVALID_INPUT", "Aggregation method is required.")
-
-        if input_type == "article_list":
-            selected, hostname, requested, partial = self._runs_for_article_list(
-                input_value,
-                model,
-                model_identifier,
-                fold_registry,
-                job_id=job_id,
-                action=action,
-                retention=retention,
-                report=report,
-            )
-            input_mode = "article_list"
-        elif input_type == "publisher":
-            selected, hostname, requested, partial = self._runs_for_publisher(
-                input_value,
-                model,
-                model_identifier,
-                fold_registry,
-                action=action,
-                report=report,
-            )
-            input_mode = "publisher"
-        else:
+        if input_value.get("type") != "article":
             raise AppError("INVALID_INPUT", "Unknown evaluation input type.")
 
-        return self._store_aggregation(
-            selected=selected,
-            method=method,
-            hostname=hostname,
-            requested=requested,
-            partial=partial,
-            input_mode=input_mode,
-            model_identifier=model_identifier,
+        return self._evaluate_article(
+            input_value,
+            model,
+            model_identifier,
+            self._imported_fold_registry(),
             job_id=job_id,
+            action=action,
+            retention=retention,
             report=report,
         )
 
@@ -1086,7 +1122,7 @@ class ResearchService:
         input_value: dict[str, object],
         model: dict[str, str],
         model_identifier: str,
-        fold_registry: dict[tuple[str, str], set[int]],
+        fold_registry: dict[str, set[int]],
         *,
         job_id: str,
         action: str,
@@ -1147,171 +1183,6 @@ class ResearchService:
             "model_provenance": self.model_provenance(model),
             "origin": run["origin"],
             "reused": reused,
-        }
-
-    def _runs_for_article_list(
-        self,
-        input_value: dict[str, object],
-        model: dict[str, str],
-        model_identifier: str,
-        fold_registry: dict[tuple[str, str], set[int]],
-        *,
-        job_id: str,
-        action: str,
-        retention: str,
-        report: Callable[[str, int], None],
-    ) -> tuple[list[dict[str, str]], str, int, bool]:
-        """Collect one run per explicitly listed article, inferring the missing ones.
-
-        Every URL must belong to the same publisher, because the result is attributed
-        to that publisher; mixing hostnames would produce an aggregate that describes
-        no single source.
-        """
-
-        raw_urls = input_value.get("urls")
-        if not isinstance(raw_urls, list) or not 2 <= len(raw_urls) <= 50:
-            raise AppError("INVALID_INPUT", "Article list must contain 2 to 50 URLs.")
-        canonical_urls = [normalize_url(str(url)) for url in raw_urls]
-        if len(set(canonical_urls)) != len(canonical_urls):
-            raise AppError("INVALID_INPUT", "Article URLs must be distinct.")
-        hostnames = {normalized_hostname(url) for url in canonical_urls}
-        if len(hostnames) != 1:
-            raise AppError("INVALID_INPUT", "All articles must share one publisher.")
-
-        selected = []
-        for position, canonical in enumerate(canonical_urls, start=1):
-            report(
-                f"processing article {position} of {len(canonical_urls)}",
-                10 + round(70 * (position - 1) / len(canonical_urls)),
-            )
-            self.assert_not_training_article(
-                model, article_id(canonical), fold_registry
-            )
-            run = (
-                self._latest_run(article_id(canonical), model_identifier)
-                if action == "reuse"
-                else None
-            )
-            if run is None:
-                run = self._create_inference_run(
-                    model,
-                    canonical,
-                    job_id=job_id,
-                    action=action,
-                    retention=retention,
-                )
-            selected.append(run)
-        # Every requested article contributed, so the result is never partial.
-        return selected, hostnames.pop(), len(selected), False
-
-    def _runs_for_publisher(
-        self,
-        input_value: dict[str, object],
-        model: dict[str, str],
-        model_identifier: str,
-        fold_registry: dict[tuple[str, str], set[int]],
-        *,
-        action: str,
-        report: Callable[[str, int], None],
-    ) -> tuple[list[dict[str, str]], str, int, bool]:
-        """Select the newest leakage-safe stored runs already held for one publisher.
-
-        This mode never retrieves anything: it aggregates predictions that exist, which
-        is why an unknown publisher simply has too few of them rather than triggering a
-        crawl. One run per article keeps a single heavily re-evaluated page from
-        dominating the aggregate.
-        """
-
-        if action == "recompute":
-            raise AppError(
-                "INVALID_INPUT",
-                "Publisher recompute requires an explicit article list.",
-            )
-        canonical = normalize_url(str(input_value.get("url", "")))
-        hostname = normalized_hostname(canonical)
-        try:
-            requested = int(input_value.get("requested_article_count", 0))
-        except (TypeError, ValueError) as exc:
-            raise AppError("INVALID_INPUT", "Requested count must be an integer.") from exc
-        if not 2 <= requested <= 50:
-            raise AppError("INVALID_INPUT", "Requested count must be between 2 and 50.")
-        allow_partial = bool(input_value.get("allow_partial", False))
-
-        report("selecting leakage-safe stored predictions", 40)
-        candidates: dict[str, dict[str, str]] = {}
-        for run in self.storage.rows["prediction_runs"]:
-            if (
-                run["normalized_hostname"] == hostname
-                and run["model_id"] == model_identifier
-            ):
-                if not self._fold_is_safe(model, run["article_id"], fold_registry):
-                    continue
-                current = candidates.get(run["article_id"])
-                if current is None or newest_runs([current, run])[0] is run:
-                    candidates[run["article_id"]] = run
-        selected = newest_runs(candidates.values())[:requested]
-        if len(selected) < 2 or (len(selected) < requested and not allow_partial):
-            raise AppError(
-                "INSUFFICIENT_ARTICLES",
-                "The publisher does not have enough compatible stored predictions.",
-            )
-        return selected, hostname, requested, len(selected) < requested
-
-    def _store_aggregation(
-        self,
-        *,
-        selected: list[dict[str, str]],
-        method: str,
-        hostname: str,
-        requested: int,
-        partial: bool,
-        input_mode: str,
-        model_identifier: str,
-        job_id: str,
-        report: Callable[[str, int], None],
-    ) -> dict[str, object]:
-        """Combine the selected runs into one publisher result and record it.
-
-        The contributing run IDs are stored with the result so the aggregate can be
-        recomputed and audited later; the evaluation itself is append-only.
-        """
-
-        report("aggregating the selected predictions", 75)
-        calculation = aggregate(selected, method)
-        report("saving the aggregation", 92)
-        evaluation_id = str(uuid.uuid4())
-        probabilities = calculation["probabilities"] or ("", "", "", "", "")
-        row: dict[str, object] = {
-            "evaluation_id": evaluation_id,
-            "publisher_id": publisher_id(hostname),
-            "normalized_hostname": hostname,
-            "model_id": model_identifier,
-            "method": method,
-            "method_version": "1",
-            "input_mode": input_mode,
-            "requested_count": requested,
-            "used_count": len(selected),
-            "partial": partial,
-            "result_class": calculation["result_class"],
-            "ordinal_mean": calculation["ordinal_mean"],
-            **{
-                f"prob_class_{index}": probabilities[index] for index in range(5)
-            },
-            "article_ids_json": json_field([run["article_id"] for run in selected]),
-            "prediction_run_ids_json": json_field(
-                [run["prediction_run_id"] for run in selected]
-            ),
-            "job_id": job_id,
-            "created_at": utc_now(),
-            "warnings_json": json_field([WARNING]),
-        }
-        self.storage.append("evaluations", row)
-        return {
-            "evaluation_id": evaluation_id,
-            "publisher_id": row["publisher_id"],
-            "result_class": calculation["result_class"],
-            "used_count": len(selected),
-            "partial": partial,
         }
 
     def _latest_run(

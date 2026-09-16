@@ -35,20 +35,20 @@ The MVP shall:
   endpoints;
 - verify/import the bundled public prediction manifest on first startup;
 - import user CSV or CSV.GZ files after safe projection and validation;
-- persist essential models, runs, evaluations, imports, jobs, and explicitly
-  saved local content in seven inspectable CSV ledgers;
+- persist essential models, runs, imports, jobs, and explicitly saved local
+  content in six inspectable CSV ledgers;
 - mirror every locally inferred article run into a private, git-ignored
   `dataset/predictions/user-predictions.csv` with explicit origin, exact label,
   probabilities and provenance, entirely separate from the tracked
   `predictions.csv` release, which the application never modifies;
 - derive article and publisher views from persisted prediction runs;
-- scan configured model roots and accept browser uploads of supported official
-  artifacts;
+- scan configured model roots for supported checkpoints;
 - provide BERT and RoBERTa as the core CPU demo;
-- authenticate and import the paper's Llama 3 8B and Mistral 24B checkpoints
-  using an immutable OSF filename/size/SHA-256 manifest;
-- import constrained five-class custom encoder or Llama/Mistral PEFT sequence
-  classifiers using local declarative metadata, tokenizer and `safetensors`;
+- refuse, with an explicit `FEATURE_UNAVAILABLE` explanation, any attempt to
+  import the study's larger decoder checkpoints (Llama 3 8B, Mistral 24B),
+  whose support is still under development;
+- import constrained five-class custom encoder classifiers using local
+  declarative metadata, tokenizer and `safetensors`;
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
@@ -128,7 +128,7 @@ Startup order is:
    port is available before data-directory mutation;
 3. create the data directory and operational subdirectories if absent, then
    acquire its exclusive lock; creation occurs only after port reservation;
-4. create all seven ledgers only when `state/` is absent; an existing partial
+4. create all six ledgers only when `state/` is absent; an existing partial
    state directory is `STORAGE_ERROR`, not a fresh store;
 5. load and structurally verify the complete store, marking previously running
    jobs `PROCESS_INTERRUPTED`; malformed records fail closed and are not
@@ -173,11 +173,12 @@ historical-only identities. On first online inference for a compatible core
 checkpoint, the application caches only its tokenizer/configuration resources
 from a pinned immutable official revision.
 
-BERT/RoBERTa CPU behavior is part of the core gate. Exact official Llama/Mistral
-files are authenticated against the packaged OSF manifest; their QLoRA
-inference requires CUDA and a pinned Hugging Face base snapshot. A custom upload
-is one self-contained `.zip` using the exact encoder or PEFT format in
-`custom-model-bundle.md`. Validation runs as a `model_validation` job, installs
+BERT/RoBERTa CPU behavior is part of the core gate. The study's larger decoder
+checkpoints are not importable in this release: each fold needs a CUDA GPU and
+several gigabytes of weights, so the demo ships the two encoder families, whose
+reported accuracy is comparable, and keeps the identity and loader contracts
+open for a later decoder family. A custom upload is one self-contained `.zip`
+using the exact encoder format in `custom-model-bundle.md`. Validation runs as a `model_validation` job, installs
 a successful bundle under `managed-models`, preserves official-versus-custom
 provenance, and never imports executable artifact code.
 
@@ -324,7 +325,7 @@ without a CDN.
 | FR-006 | Article and publisher history shall remain browsable and aggregable offline. |
 | FR-007 | `reuse` shall select the latest exact-model immutable run without creating another run. |
 | FR-008 | `recompute` and missing-run inference shall create new immutable runs with exact provenance and idempotently mirror each run to the prediction dataset as `user_evaluation`. |
-| FR-009 | Every publisher evaluation shall reference the exact ordered runs and articles used. |
+| FR-009 | A publisher class shall be derived on request from stored article runs, never persisted, and shall report the model and exact articles counted. |
 | FR-010 | The three aggregation methods shall implement the scientific formulas and availability rules exactly. |
 | FR-011 | Bundled and user-imported predictions shall contain all five finite class probabilities; values shall never be fabricated. |
 | FR-012 | Exact model identity shall include every output-relevant setting and exclude filesystem location. |
@@ -339,7 +340,7 @@ without a CDN.
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
-| FR-024 | Model import shall authenticate original Llama 3 8B/Mistral 24B paper artifacts against the packaged OSF size/SHA-256 manifest and mark them `paper_official`; custom import shall accept only the documented five-class encoder or Llama/Mistral PEFT sequence-classifier contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches. |
+| FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches; importing the study's larger decoder checkpoints shall be refused with `FEATURE_UNAVAILABLE` while that support is under development. |
 
 ## 10. Non-functional requirements
 

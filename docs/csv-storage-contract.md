@@ -5,7 +5,7 @@
 
 ## 1. Scope
 
-The demo stores essential persistent state in seven UTF-8 CSV ledgers. It is a
+The demo stores essential persistent state in six UTF-8 CSV ledgers. It is a
 single-process research store, not a transactional database. Files are designed
 to be inspected with Python or a spreadsheet and reconstructed at startup.
 
@@ -16,7 +16,6 @@ to be inspected with Python or a spreadsheet and reconstructed at startup.
 │   ├── meta.csv
 │   ├── models.csv
 │   ├── prediction_runs.csv
-│   ├── evaluations.csv
 │   ├── imports.csv
 │   ├── jobs.csv
 │   └── local_content.csv
@@ -40,7 +39,7 @@ are operational; losing managed artifact bytes disables new inference but does
 not lose historical scientific records.
 
 A fresh store exists only when `state/` is absent. The application then creates
-the directory and all seven header files as one initialization step. If
+the directory and all six header files as one initialization step. If
 `state/` already exists, every ledger must exist with its exact header; missing
 or extra state CSV files are `STORAGE_ERROR` and are never auto-created.
 
@@ -81,7 +80,7 @@ IDs and immutable rows are never reused for another scientific result.
 
 One process holds `.writer.lock`; a process mutex serializes all writes.
 
-Immutable ledgers (`prediction_runs.csv`, `evaluations.csv`, `imports.csv`) use
+Immutable ledgers (`prediction_runs.csv`, `imports.csv`) use
 one complete CSV record append followed by flush/fsync. Any malformed record,
 including a truncated final record, is `STORAGE_ERROR`; startup does not guess,
 trim, or silently repair authoritative state.
@@ -147,14 +146,17 @@ Exactly one data row. Unknown schema versions fail startup.
 model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha256,official_manifest_entry_sha256,loader_recipe,loader_recipe_version,base_model,base_revision,tokenizer_source,tokenizer_revision,class_order_json,max_tokens,padding_policy,adapter_config_sha256,runtime_scientific_json,status,artifact_available,runnable,status_detail,registered_at,last_validated_at
 ```
 
-- `family`: `bert`, `roberta`, `llama`, or `mistral` for paper/local models;
-  custom model bundles use a validated `custom_...` slug.
+- `family`: `bert` or `roberta` for paper/local models; custom model bundles
+  use a validated `custom_...` slug. The column also accepts a further paper
+  family without a schema change, which is what a later decoder family would
+  use.
 - `status`: `compatible`, `validated_not_runnable`, `historical_only`,
   `artifact_missing`, `dependency_missing`, `resource_unavailable`, or
   `invalid`.
-- `artifact_kind`: `pytorch_state_dict`, `paper_llama_state_dict_bundle`,
-  `paper_mistral_adapter_bundle`, `custom_transformer_bundle`,
-  `custom_peft_adapter_bundle`, or `historical_virtual`.
+- `artifact_kind`: `pytorch_state_dict`, `custom_transformer_bundle`, or
+  `historical_virtual`. Rows written by earlier releases may still carry a
+  managed decoder-bundle kind; they remain readable and are reported as
+  non-runnable.
 - `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.
 - `artifact_locator` is deployment metadata and excluded from identity; API
   output reduces it to a root label and relative path.
@@ -191,27 +193,7 @@ ledger field. An article is `dataset` when it has at least one
 an imported article later evaluated locally remains `dataset` and carries the
 additional user-evaluation flag.
 
-### 5.4 `evaluations.csv`
-
-```text
-evaluation_id,publisher_id,normalized_hostname,model_id,method,method_version,input_mode,requested_count,used_count,partial,result_class,ordinal_mean,prob_class_0,prob_class_1,prob_class_2,prob_class_3,prob_class_4,article_ids_json,prediction_run_ids_json,job_id,created_at,warnings_json
-```
-
-- Immutable append-only publisher result.
-- `input_mode`: `article_list` or `publisher`.
-- `article_ids_json` and `prediction_run_ids_json` are equally sized ordered
-  arrays of 2–50 exact IDs; every run resolves to its paired article, publisher,
-  and evaluation model.
-- `method`: `majority_vote`, `ordinal_mean`, or `mean_probabilities`.
-- `partial=true` exactly when `used_count < requested_count`.
-- Article-list `requested_count` equals `used_count` and `partial=false`.
-  Publisher `requested_count` is the submitted `2..50`; `used_count` is
-  `2..requested_count`.
-
-Keeping ordered membership in this row avoids a separate join ledger and makes
-the scientific provenance directly inspectable.
-
-### 5.5 `imports.csv`
+### 5.4 `imports.csv`
 
 ```text
 import_id,source_kind,source_name,content_sha256,transport_sha256,schema_version,status,source_rows,accepted_rows,rejected_rows,duplicate_rows,protected_columns_json,warnings_json,started_at,completed_at
@@ -236,7 +218,7 @@ with the repository generator's UTF-8 RFC-4180 field order, and SHA-256 their
 concatenation. Editorial/blocked fields are excluded. CSV and CSV.GZ therefore
 share identity; the bundled manifest part boundaries do not affect it.
 
-### 5.6 `jobs.csv`
+### 5.5 `jobs.csv`
 
 ```text
 job_id,job_type,status,phase,progress,request_json,result_json,error_code,error_message,created_at,started_at,finished_at,updated_at
@@ -267,7 +249,7 @@ independent commits can leave an unregistered managed artifact. It is harmless
 operational data, is ignored by startup, and becomes eligible for registration
 only through a later explicit scan and full validation.
 
-### 5.7 `local_content.csv`
+### 5.6 `local_content.csv`
 
 ```text
 article_id,canonical_url,title,text,content_saved_at
@@ -279,7 +261,7 @@ content. It contains title and validated extracted body only after explicit
 exports reveal only a `content_saved` boolean.
 
 Confirmed deletion rewrites this ledger without the target row using the small
-mutable-file rule. It does not modify prediction runs/evaluations or claim to
+mutable-file rule. It does not modify prediction runs or claim to
 delete user backups and external copies.
 
 ## 6. Import projection and conflicts

@@ -1,4 +1,4 @@
-"""Inspectable seven-ledger CSV persistence."""
+"""Inspectable six-ledger CSV persistence."""
 
 from __future__ import annotations
 
@@ -34,13 +34,6 @@ HEADERS = {
         "inference_started_at", "inference_completed_at", "duration_ms", "device",
         "software_versions_json", "recorded_at",
     ],
-    "evaluations": [
-        "evaluation_id", "publisher_id", "normalized_hostname", "model_id", "method",
-        "method_version", "input_mode", "requested_count", "used_count", "partial",
-        "result_class", "ordinal_mean", "prob_class_0", "prob_class_1",
-        "prob_class_2", "prob_class_3", "prob_class_4", "article_ids_json",
-        "prediction_run_ids_json", "job_id", "created_at", "warnings_json",
-    ],
     "imports": [
         "import_id", "source_kind", "source_name", "content_sha256",
         "transport_sha256", "schema_version", "status", "source_rows",
@@ -56,7 +49,7 @@ HEADERS = {
         "article_id", "canonical_url", "title", "text", "content_saved_at",
     ],
 }
-IMMUTABLE = {"prediction_runs", "evaluations", "imports"}
+IMMUTABLE = {"prediction_runs", "imports"}
 MUTABLE = {"models", "jobs", "local_content"}
 
 
@@ -112,7 +105,7 @@ class Storage:
         self.close()
 
     def _initialize_or_validate(self) -> None:
-        """Create the seven ledgers, or refuse to open a directory that is not them.
+        """Create the six ledgers, or refuse to open a directory that is not them.
 
         Partial or unexpected state fails closed rather than being repaired: silently
         recreating a missing ledger would hide data loss behind an apparently healthy
@@ -136,12 +129,14 @@ class Storage:
         if not self.state_dir.is_dir():
             raise AppError("STORAGE_ERROR", "State path is not a directory.")
 
+        self._migrate_schema_1_store()
+
         actual = {path.name for path in self.state_dir.glob("*.csv")}
         expected = {f"{name}.csv" for name in HEADERS}
         if actual != expected:
             raise AppError(
                 "STORAGE_ERROR",
-                "State directory does not contain the seven exact ledgers.",
+                "State directory does not contain the six exact ledgers.",
                 {"missing": sorted(expected - actual), "extra": sorted(actual - expected)},
             )
         for name, expected_header in HEADERS.items():
@@ -152,6 +147,59 @@ class Storage:
                 raise AppError("STORAGE_ERROR", f"Cannot read {name}.csv.") from exc
             if actual_header != expected_header:
                 raise AppError("STORAGE_ERROR", f"Invalid header in {name}.csv.")
+
+    def _migrate_schema_1_store(self) -> None:
+        """Bring a schema-1 store forward by dropping the retired evaluations ledger.
+
+        Schema 1 kept publisher aggregations the user had explicitly created. They are
+        now derived on demand from the article predictions instead, so the ledger has
+        no writer and is removed rather than left to rot as a file nothing updates.
+        Every aggregation it held can be recomputed from the runs that produced it.
+
+        The migration runs only on a store that is exactly schema 1 plus that one extra
+        file; anything else still fails closed, so an unrelated stray CSV is never
+        deleted on the assumption that it is ours.
+        """
+
+        retired = self.state_dir / "evaluations.csv"
+        meta_path = self.state_dir / "meta.csv"
+        if not retired.is_file() or not meta_path.is_file():
+            return
+        present = {path.name for path in self.state_dir.glob("*.csv")}
+        if present != {f"{name}.csv" for name in HEADERS} | {"evaluations.csv"}:
+            return
+        try:
+            with meta_path.open(encoding="utf-8", newline="") as stream:
+                meta_rows = list(csv.DictReader(stream))
+        except (OSError, UnicodeError, csv.Error) as exc:
+            raise AppError("STORAGE_ERROR", "Cannot read meta.csv.") from exc
+        if len(meta_rows) != 1 or meta_rows[0].get("schema_version") != "1":
+            return
+
+        retired.unlink()
+        self.replace_meta_schema_version()
+
+    def replace_meta_schema_version(self) -> None:
+        """Rewrite meta.csv with the current schema version, atomically."""
+
+        meta_path = self.state_dir / "meta.csv"
+        try:
+            with meta_path.open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            temporary = meta_path.with_suffix(".csv.tmp")
+            with temporary.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(
+                    stream, fieldnames=HEADERS["meta"], lineterminator="\n"
+                )
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({**row, "schema_version": SCHEMA_VERSION})
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, meta_path)
+            self._fsync_directory(self.state_dir)
+        except OSError as exc:
+            raise AppError("STORAGE_ERROR", "Could not migrate meta.csv.") from exc
 
     def path(self, name: str) -> Path:
         if name not in HEADERS:
@@ -194,7 +242,6 @@ class Storage:
         keys = {
             "models": "model_id",
             "prediction_runs": "prediction_run_id",
-            "evaluations": "evaluation_id",
             "imports": "import_id",
             "jobs": "job_id",
             "local_content": "article_id",
@@ -205,19 +252,9 @@ class Storage:
                 raise AppError("STORAGE_ERROR", f"Duplicate identifier in {ledger}.csv.")
 
         model_ids = {row["model_id"] for row in rows["models"]}
-        run_ids = {row["prediction_run_id"] for row in rows["prediction_runs"]}
         for run in rows["prediction_runs"]:
             if run["model_id"] not in model_ids:
                 raise AppError("STORAGE_ERROR", "Prediction run references a missing model.")
-        for evaluation in rows["evaluations"]:
-            if evaluation["model_id"] not in model_ids:
-                raise AppError("STORAGE_ERROR", "Evaluation references a missing model.")
-            try:
-                references = json.loads(evaluation["prediction_run_ids_json"])
-            except json.JSONDecodeError as exc:
-                raise AppError("STORAGE_ERROR", "Evaluation contains invalid JSON.") from exc
-            if any(reference not in run_ids for reference in references):
-                raise AppError("STORAGE_ERROR", "Evaluation references a missing run.")
 
     def verify(self) -> dict[str, int]:
         self.reload()

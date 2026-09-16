@@ -150,7 +150,6 @@ async function loadSystemPopover() {
         <div class="popover-row"><span>Articles</span><b>${Number(d.articles).toLocaleString()}</b></div>
         <div class="popover-row"><span>Stored predictions</span><b>${Number(d.historical_predictions).toLocaleString()}</b></div>
         <div class="popover-row"><span>Publishers</span><b>${Number(d.publishers).toLocaleString()}</b></div>
-        <div class="popover-row"><span>Created aggregations</span><b>${Number(c.evaluations).toLocaleString()}</b></div>
         <div class="popover-row"><span>Model identities</span><b>${Number(c.models).toLocaleString()}</b></div>
       </div>
       <div class="popover-section">
@@ -217,7 +216,7 @@ async function articles(_id, params) {
     ["Article URL", "Source", "Publisher", "Models", "Predictions", "Latest label"],
     data.items.map(row => `<tr class="${row.source_type === "user_evaluation" ? "user-article-row" : "dataset-article-row"}"><td><a class="url detail-link" href="#article/${encodeURIComponent(row.article_id)}" title="${escapeHtml(row.canonical_url)}">${escapeHtml(row.canonical_url)}</a>${shortId(row.article_id)}</td>
       <td>${articleSourceBadges(row)}</td>
-      <td>${escapeHtml(row.normalized_hostname)}</td><td>${row.model_count}</td><td>${row.run_count}</td>
+      <td><a class="detail-link" href="#publisher/${encodeURIComponent(row.publisher_id)}">${escapeHtml(row.normalized_hostname)}</a></td><td>${row.model_count}</td><td>${row.run_count}</td>
       <td><span class="class-chip">Class ${row.latest_predicted_class}</span></td></tr>`)
   ) + pager(pageBase, data.page);
 }
@@ -225,7 +224,8 @@ async function articles(_id, params) {
 async function articleDetail(id) {
   const row = await api(`/api/v1/articles/${encodeURIComponent(id)}`);
   content.innerHTML = pageHead("Article prediction history", row.normalized_hostname,
-    row.canonical_url, `<a class="button secondary" href="#articles">Back to articles</a>`) + `
+    row.canonical_url,
+    `<a class="button secondary" href="#publisher/${encodeURIComponent(row.publisher_id)}">Publisher class</a>`) + `
     <div class="article-source-banner ${row.source_type === "user_evaluation" ? "user-source-panel" : "dataset-source-panel"}">
       ${articleSourceBadges(row)}
       <b>${row.source_type === "user_evaluation" ? "Created through a user evaluation" : "Originally represented in an imported dataset"}</b>
@@ -247,15 +247,39 @@ async function articleDetail(id) {
 
 async function publishers(_id, params) {
   const offset = Number(params.get("offset") || 0);
-  content.innerHTML = pageHead("Dataset coverage", "Publishers",
-    "Predictions are imported article-level outputs; aggregations are publisher results explicitly created in this workspace.") + `<div class="loading">Loading publishers…</div>`;
+  content.innerHTML = pageHead("Publisher reliability", "Publishers",
+    "A publisher's class is read from the articles already classified. Open one to choose how its article verdicts are counted.") + `<div class="loading">Loading publishers…</div>`;
   const data = await api(`/api/v1/publishers?limit=25&offset=${offset}`);
   content.querySelector(".loading").outerHTML = table(
-    ["Publisher", "Articles", "Models", "Predictions", "With probabilities", "Created aggregations"],
+    ["Publisher", "Articles", "Models", "Predictions", "With probabilities"],
     data.items.map(row => `<tr><td><a class="detail-link" href="#publisher/${encodeURIComponent(row.publisher_id)}"><b>${escapeHtml(row.normalized_hostname)}</b></a><br>${shortId(row.publisher_id)}</td>
       <td>${row.article_count}</td><td>${row.model_count}</td><td>${row.run_count}</td>
-      <td>${row.probability_run_count}</td><td>${row.evaluation_count}</td></tr>`)
+      <td>${row.probability_run_count}</td></tr>`)
   ) + pager("publishers", data.page);
+}
+
+function aggregationResults(payload) {
+  if (!payload.models.length) {
+    return `<div class="empty notice">No leakage-safe prediction is stored for this publisher, so no class can be read for it.</div>`;
+  }
+  return table(
+    ["Model / fold", "Articles used", "Publisher class", "Ordinal mean", "Class counts"],
+    payload.models.map(row => {
+      const excluded = row.excluded_count
+        ? `<br><span class="muted">${row.excluded_count} excluded</span>`
+        : "";
+      const verdict = row.result_class === null
+        ? `<span class="muted">${escapeHtml(row.unavailable_reason || "Not available")}</span>`
+        : `<span class="class-chip">Class ${row.result_class}</span>`;
+      const counts = Object.entries(row.class_counts)
+        .map(([cls, n]) => `${cls}:${n}`).join("  ");
+      return `<tr><td><b>${escapeHtml(modelLabel(row))}</b><br><span class="muted">${escapeHtml(provenanceLabel(row.provenance))}</span></td>
+        <td>${row.used_count} of ${row.available_count}${excluded}</td>
+        <td>${verdict}</td>
+        <td class="mono">${row.ordinal_mean === null ? "—" : Number(row.ordinal_mean).toFixed(3)}</td>
+        <td class="mono">${escapeHtml(counts)}</td></tr>`;
+    })
+  );
 }
 
 async function publisherDetail(id, params) {
@@ -264,14 +288,32 @@ async function publisherDetail(id, params) {
     api(`/api/v1/publishers/${encodeURIComponent(id)}`),
     api(`/api/v1/prediction-runs?publisher_id=${encodeURIComponent(id)}&limit=100&offset=${offset}`),
   ]);
-  content.innerHTML = pageHead("Publisher dataset history", publisher.normalized_hostname,
-    "Every stored BERT/RoBERTa prediction is listed below with its complete five-class probability vector.",
+
+  content.innerHTML = pageHead("Publisher reliability", publisher.normalized_hostname,
+    "This class is derived from the article predictions below, not stored. Change how the verdicts are counted, or leave articles out, and it is recomputed.",
     `<a class="button secondary" href="#publishers">Back to publishers</a>`) + `
     <div class="grid detail-metrics">
       <section class="card"><div class="muted">Articles</div><div class="metric">${publisher.article_count}</div></section>
       <section class="card"><div class="muted">Stored predictions</div><div class="metric">${publisher.run_count}</div></section>
-      <section class="card"><div class="muted">Created aggregations</div><div class="metric">${publisher.evaluation_count}</div></section>
+      <section class="card"><div class="muted">Models</div><div class="metric">${publisher.model_count}</div></section>
     </div>
+    <section class="card full">
+      <h2>Publisher class</h2>
+      <div class="row">
+        <label>How article verdicts are counted<select id="aggregation-method">
+          <option value="majority_vote">Majority vote</option>
+          <option value="ordinal_mean">Ordinal mean</option>
+          <option value="mean_probabilities">Mean probabilities</option>
+        </select>
+          <small id="method-formula">Most frequent hard class; ties resolve to the smallest class.</small></label>
+      </div>
+      <div id="aggregation-results" class="loading">Reading the article predictions…</div>
+      <p class="warning">${warning}</p>
+    </section>
+    <section class="section-block"><h2>Articles counted</h2>
+      <p class="muted">Every article of this publisher with a leakage-safe prediction is counted. Clear a checkbox to leave it out; each model is recounted over what remains.</p>
+      <div id="exclusion-list" class="exclusion-list loading">Loading articles…</div>
+    </section>
     <section class="section-block"><h2>Stored predictions</h2>
     ${table(
       ["Article", "Model / fold", "Class", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Run"],
@@ -279,14 +321,58 @@ async function publisherDetail(id, params) {
         <td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
         <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
         <td>${shortId(run.prediction_run_id)}</td></tr>`)
-    )}${pager(`publisher/${encodeURIComponent(id)}`, runs.page)}</section>
-    <section class="section-block"><h2>Created publisher aggregations</h2>
-      ${publisher.evaluations.length ? table(
-        ["Created", "Model", "Method", "Articles used", "Result"],
-        publisher.evaluations.map(item => `<tr><td>${escapeHtml(item.created_at)}</td><td>${shortId(item.model_id)}</td>
-          <td>${escapeHtml(item.method)}</td><td>${item.used_count}</td><td><span class="class-chip">${item.result_class}</span></td></tr>`)
-      ) : `<div class="empty notice">No publisher aggregation has been created yet. The stored predictions above are still fully available for consultation.</div>`}
-    </section><p class="warning">${warning}</p>`;
+    )}${pager(`publisher/${encodeURIComponent(id)}`, runs.page)}</section>`;
+
+  const methodField = document.querySelector("#aggregation-method");
+  const formula = document.querySelector("#method-formula");
+  const output = document.querySelector("#aggregation-results");
+  const formulas = {
+    majority_vote: "Most frequent hard class; ties resolve to the smallest class.",
+    ordinal_mean: "Mean of the class indices, rounded half upward.",
+    mean_probabilities: "Component-wise mean of the five probabilities; needs complete vectors.",
+  };
+
+  const exclusionList = document.querySelector("#exclusion-list");
+  const excludedIds = new Set();
+
+  function renderExclusionList(articles) {
+    exclusionList.className = "exclusion-list";
+    exclusionList.innerHTML = articles.map(item => `
+      <label class="exclusion-item">
+        <input type="checkbox" class="article-toggle" value="${escapeHtml(item.article_id)}"${item.excluded ? "" : " checked"}>
+        <a class="url detail-link" href="#article/${encodeURIComponent(item.article_id)}" title="${escapeHtml(item.canonical_url)}">${escapeHtml(item.canonical_url)}</a>
+      </label>`).join("");
+    exclusionList.querySelectorAll(".article-toggle").forEach(box => {
+      box.addEventListener("change", () => {
+        if (box.checked) excludedIds.delete(box.value); else excludedIds.add(box.value);
+        refresh();
+      });
+    });
+  }
+
+  async function refresh(withArticles = false) {
+    const excluded = [...excludedIds]
+      .map(value => `&exclude=${encodeURIComponent(value)}`).join("");
+    output.className = "loading";
+    output.textContent = "Reading the article predictions…";
+    try {
+      const payload = await api(
+        `/api/v1/publishers/${encodeURIComponent(id)}/aggregation?method=${encodeURIComponent(methodField.value)}${excluded}`
+      );
+      output.className = "";
+      output.innerHTML = aggregationResults(payload);
+      if (withArticles) renderExclusionList(payload.articles);
+    } catch (error) {
+      output.className = "";
+      output.innerHTML = errorCard(error.message);
+    }
+  }
+
+  methodField.addEventListener("change", () => {
+    formula.textContent = formulas[methodField.value];
+    refresh();
+  });
+  await refresh(true);
 }
 
 async function waitForJob(jobId, output) {
@@ -325,52 +411,38 @@ function renderModelTables(items) {
 
 async function models() {
   content.innerHTML = pageHead("Checkpoint inventory", "Models",
-    "Import authenticated paper checkpoints or compatible user-created five-class Transformers. Their provenance remains distinct in every prediction.",
+    "Add BERT or RoBERTa checkpoints, or import a compatible user-created five-class Transformer. Their provenance remains distinct in every prediction.",
     `<button id="scan">Rescan model directories</button>`) + `
-    <section class="card full"><h2>Import an original paper model from OSF</h2>
-      <p>Download one Mistral ZIP or both Llama segments for the same fold from the catalog below, then select the file or files here. Family and fold are detected automatically from exact size and SHA-256 checksums.</p>
-      <p class="warning">Llama 3 8B and Mistral 24B inference requires the <span class="mono">llm-models</span> extra, CUDA and access to the pinned base model. A verified checkpoint can be stored even when this machine cannot run it.</p>
-      <form id="official-model-upload"><div class="row">
-        <label>Official OSF file(s)<input required multiple name="files" type="file" accept=".zip,.z01,.z02,application/zip"></label>
-        <button>Authenticate and import</button>
-      </div></form>
-      <details><summary>Official Llama/Mistral catalog</summary><div id="official-catalog" class="loading">Loading OSF manifest…</div></details>
-    </section>
     <section class="card full"><h2>Import a custom five-class Transformer</h2>
       <ol>
-        <li>For an encoder, export the complete classifier with safe serialization. For Llama/Mistral, export a PEFT LoRA sequence-classification adapter and tokenizer.</li>
+        <li>Export the complete classifier with safe serialization (<span class="mono">safetensors</span>) together with its tokenizer.</li>
         <li>Add <span class="mono">prt-model.json</span> to that same folder, then compress the complete folder as one <span class="mono">.zip</span>.</li>
         <li>The model must output exactly five logits in class order 0–4. Imported predictions are marked <b>User custom</b>.</li>
       </ol>
-      <details><summary>Custom Llama/Mistral manifest example</summary>
-        <p class="muted">Required: prt-model.json, adapter_config.json, adapter_model.safetensors, tokenizer_config.json and tokenizer.json. Executable custom code and pickle checkpoints are rejected.</p>
+      <details><summary>Manifest example</summary>
+        <p class="muted">Required alongside the manifest: config.json, model.safetensors, tokenizer_config.json and the tokenizer resources. Executable custom code and pickle checkpoints are rejected.</p>
         <pre class="mono">${escapeHtml(`{
-  "schema_version": 2,
-  "model_kind": "peft_sequence_classifier",
-  "architecture": "mistral",
-  "display_name": "My custom Mistral classifier",
-  "family": "custom_mistral_experiment",
+  "schema_version": 1,
+  "display_name": "My custom encoder classifier",
+  "family": "custom_encoder_experiment",
   "fold_id": 1,
   "class_order": [0, 1, 2, 3, 4],
-  "max_tokens": 1024,
-  "padding_policy": "dynamic_longest",
-  "base_model": "mistralai/Mistral-Small-24B-Base-2501",
-  "base_revision": "<40-character commit SHA>",
+  "max_tokens": 256,
+  "padding_policy": "fixed_max_length",
   "training_data": {"kind": "five_fold", "held_out_fold": 1}
 }`)}</pre>
-        <p class="muted">The schema 1 full-safetensors encoder contract remains supported.</p>
       </details>
       <form id="custom-model-upload"><div class="row">
         <label>Choose the complete custom-model ZIP<input required name="file" type="file" accept=".zip,application/zip"></label>
         <button>Validate and import</button>
       </div></form>
+      <p class="notice">Support for the paper's larger decoder checkpoints (Llama 3 8B, Mistral 24B) is still under development and not available in this release. They need a CUDA GPU and several gigabytes per fold; BERT and RoBERTa run on CPU and report comparable accuracy.</p>
     </section>
     <div id="scan-state" class="notice" aria-live="polite">Loading model inventory…</div>
     <div id="model-tables" class="loading">Loading models…</div>`;
   const scanButton = document.querySelector("#scan");
   const scanState = document.querySelector("#scan-state");
   const tables = document.querySelector("#model-tables");
-  const catalogElement = document.querySelector("#official-catalog");
 
   async function loadInventory() {
     const data = await api("/api/v1/models");
@@ -398,26 +470,6 @@ async function models() {
   }
 
   scanButton.addEventListener("click", runScan);
-  document.querySelector("#official-model-upload").addEventListener("submit", async event => {
-    event.preventDefault();
-    const uploadButton = event.currentTarget.querySelector("button");
-    uploadButton.disabled = true;
-    scanState.textContent = "Uploading and authenticating official OSF checkpoint…";
-    try {
-      const submitted = await api("/api/v1/models/official-upload", {
-        method: "POST",
-        body: new FormData(event.currentTarget),
-      });
-      const job = await waitForJob(submitted.job_id, scanState);
-      scanState.textContent = job.result.message;
-      event.currentTarget.reset();
-      await loadInventory();
-    } catch (error) {
-      scanState.innerHTML = errorCard(error.message);
-    } finally {
-      uploadButton.disabled = false;
-    }
-  });
   document.querySelector("#custom-model-upload").addEventListener("submit", async event => {
     event.preventDefault();
     const uploadButton = event.currentTarget.querySelector("button");
@@ -438,16 +490,7 @@ async function models() {
       uploadButton.disabled = false;
     }
   });
-  const [items, catalog] = await Promise.all([
-    loadInventory(),
-    api("/api/v1/models/official-catalog"),
-  ]);
-  catalogElement.className = "";
-  catalogElement.innerHTML = table(
-    ["Model", "Required OSF files"],
-    catalog.items.map(row => `<tr><td><b>${escapeHtml(row.display_name)}</b><br><span class="muted">${escapeHtml(row.base_model)} @ ${escapeHtml(row.base_revision.slice(0, 12))}…</span></td>
-      <td>${row.files.map(file => `<a href="${escapeHtml(file.download_url)}" target="_blank" rel="noopener">${escapeHtml(file.name)}</a> <span class="muted">(${(Number(file.size) / 1024 / 1024 / 1024).toFixed(2)} GiB)</span>`).join("<br>")}</td></tr>`)
-  );
+  const items = await loadInventory();
   if (!items.some(row => row.identity_kind === "local") && !sessionStorage.getItem("prt-model-scan-started")) {
     sessionStorage.setItem("prt-model-scan-started", "true");
     await runScan();
@@ -471,38 +514,27 @@ async function jobsPage() {
 }
 
 async function evaluate() {
-  content.innerHTML = pageHead("Stored prediction workflow", "Evaluate",
-    "Enter an article or publisher first. New articles can be classified by runnable local models; stored dataset predictions are reused when available.") + `
+  content.innerHTML = pageHead("Article classification", "Evaluate",
+    "Classify one article. A publisher's class is not created here: it is read from the articles already classified, under Publishers.") + `
     <section class="card full"><form id="evaluation">
       <div class="row">
-        <label>Input type<select name="type"><option value="article">Single article</option><option value="publisher">Publisher</option></select></label>
-        <label class="grow">Article or publisher URL<input required name="url" type="url" placeholder="https://publisher.example/article"></label>
+        <label class="grow">Article URL<input required name="url" type="url" placeholder="https://publisher.example/article"></label>
       </div>
       <div class="row evaluation-options">
         <label>Available model<select required disabled name="model_id"><option value="">Enter a valid URL first</option></select></label>
-        <label class="publisher-only">Aggregation method<select name="method"><option value="majority_vote">Majority vote</option><option value="ordinal_mean">Ordinal mean</option><option value="mean_probabilities">Mean probabilities</option></select>
-          <small>How the selected article predictions are combined into one publisher result.</small></label>
-        <label class="publisher-only">Requested safe articles<input name="count" type="number" min="2" max="50" value="10">
-          <small>Maximum number of held-out article predictions to aggregate.</small></label>
-        <label class="publisher-only"><span>When fewer articles are available</span><select name="partial"><option value="true">Use the available articles</option><option value="false">Require the full count</option></select>
-          <small>“Use available” creates a partial result with at least two safe articles; “require” fails unless the requested count is reached.</small></label>
       </div>
-      <div id="model-availability" class="notice" aria-live="polite">Models will be detected from stored predictions for this input.</div>
+      <div id="model-availability" class="notice" aria-live="polite">Models will be detected from stored predictions for this article.</div>
       <div class="row evaluation-actions"><button disabled>Start evaluation</button></div>
     </form><div id="evaluation-result" aria-live="polite"></div></section>
     <section class="section-block"><h2>Recent user article evaluations</h2>
-      <p class="muted">New local predictions remain visible here after a refresh. Open an article for its complete model history.</p>
+      <p class="muted">New local predictions remain visible here after a refresh. Open an article for its complete model history, or a publisher to read its class.</p>
       <div id="recent-article-evaluations" class="loading">Loading user evaluations…</div>
     </section>
-    <section class="section-block"><h2>Previously created publisher aggregations</h2><div id="saved-evaluations" class="loading">Loading aggregations…</div></section>
     <p class="warning">${warning}</p>`;
 
   const form = document.querySelector("#evaluation");
-  const typeField = form.elements.type;
   const urlField = form.elements.url;
   const modelField = form.elements.model_id;
-  const countField = form.elements.count;
-  const partialField = form.elements.partial;
   const availability = document.querySelector("#model-availability");
   const submit = form.querySelector("button[type='submit'], button:not([type])");
   let timer;
@@ -512,24 +544,17 @@ async function evaluate() {
     document.querySelector("#recent-article-evaluations").outerHTML = `<div id="recent-article-evaluations">${
       recent.items.length
         ? table(
-          ["Article", "Model / fold", "Predicted label", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Created"],
+          ["Article", "Publisher", "Model / fold", "Predicted label", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Created"],
           recent.items.map(run => `<tr class="user-article-row">
             <td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a>
               <span class="source-badge user-source">User evaluation</span></td>
+            <td><a class="detail-link" href="#publisher/${encodeURIComponent(run.publisher_id)}">${escapeHtml(run.normalized_hostname)}</a></td>
             <td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
             <td><span class="class-chip">Class ${run.predicted_class}</span></td>${probabilityCells(run)}
             <td>${escapeHtml(run.inference_completed_at || run.recorded_at)}</td></tr>`)
         )
         : `<div class="empty notice">No user article evaluation has been completed yet.</div>`
     }</div>`;
-  }
-
-  function updateFieldState() {
-    const publisher = typeField.value === "publisher";
-    form.querySelectorAll(".publisher-only").forEach(element => { element.hidden = !publisher; });
-    form.elements.method.disabled = !publisher;
-    countField.disabled = !publisher;
-    partialField.disabled = !publisher;
   }
 
   async function refreshAvailable() {
@@ -540,18 +565,13 @@ async function evaluate() {
       submit.disabled = true;
       availability.hidden = false;
       availability.className = "notice";
-      availability.textContent = "Models will be detected from stored predictions for this input.";
+      availability.textContent = "Models will be detected from stored predictions for this article.";
       return;
     }
     availability.hidden = false;
     availability.className = "notice";
     availability.textContent = "Detecting compatible stored predictions…";
-    const query = new URLSearchParams({
-      input_type: typeField.value,
-      url: urlField.value,
-      requested_count: countField.value || "2",
-      allow_partial: partialField.value,
-    });
+    const query = new URLSearchParams({input_type: "article", url: urlField.value});
     try {
       const data = await api(`/api/v1/models/available?${query}`);
       const eligible = data.items.filter(row => row.eligible);
@@ -591,44 +611,28 @@ async function evaluate() {
     clearTimeout(timer);
     timer = setTimeout(refreshAvailable, 350);
   }
-  typeField.addEventListener("change", () => { updateFieldState(); refreshAvailable(); });
   urlField.addEventListener("input", scheduleRefresh);
-  countField.addEventListener("change", refreshAvailable);
-  partialField.addEventListener("change", refreshAvailable);
-  updateFieldState();
 
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const data = new FormData(form);
-    const type = data.get("type");
-    const input = type === "article"
-      ? {type, url: data.get("url")}
-      : {type, url: data.get("url"), requested_article_count: Number(data.get("count")), allow_partial: data.get("partial") === "true"};
-    const body = {input, model_id: data.get("model_id"), prediction_action: "reuse", content_retention: "discard"};
-    if (type !== "article") body.aggregation_method = data.get("method");
+    const body = {
+      input: {type: "article", url: data.get("url")},
+      model_id: data.get("model_id"),
+      prediction_action: "reuse",
+      content_retention: "discard",
+    };
     const output = document.querySelector("#evaluation-result");
     output.innerHTML = progressCard("submitting evaluation", 0);
     try {
       const job = await api("/api/v1/evaluation-jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
       const completed = await waitForJob(job.job_id, output);
-      if (type === "article") {
-        output.innerHTML = articlePredictionResult(completed.result);
-        await loadRecentArticleEvaluations();
-      } else {
-        output.innerHTML = `<p class="notice">Evaluation completed: Class ${completed.result.result_class}, using ${completed.result.used_count} article(s).</p>`;
-      }
+      output.innerHTML = articlePredictionResult(completed.result);
+      await loadRecentArticleEvaluations();
     } catch (error) { output.innerHTML = errorCard(error.message); }
   });
 
   await loadRecentArticleEvaluations();
-  const evaluations = await api("/api/v1/evaluations?limit=25");
-  document.querySelector("#saved-evaluations").outerHTML = evaluations.items.length
-    ? table(
-      ["Publisher", "Model", "Method", "Articles", "Result", "Created"],
-      evaluations.items.map(row => `<tr><td>${escapeHtml(row.normalized_hostname)}</td><td>${shortId(row.model_id)}</td>
-        <td>${escapeHtml(row.method)}</td><td>${row.used_count}</td><td><span class="class-chip">${row.result_class}</span></td><td>${escapeHtml(row.created_at)}</td></tr>`)
-    )
-    : `<div class="empty notice">No publisher aggregation has been created yet. This does not mean the imported article predictions are missing; browse them under Articles or Publishers.</div>`;
 }
 
 const routes = {

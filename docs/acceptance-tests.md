@@ -48,7 +48,7 @@ without source and all jobs left running become failed with
 `PROCESS_INTERRUPTED`. Committed rows remain visible even if their job is
 failed.
 
-### AT-007 — Seven exact ledgers
+### AT-007 — Six exact ledgers
 
 A fresh store contains exactly the seven documented CSV ledgers with exact
 UTF-8 headers and reconstructs every persisted API resource without another
@@ -143,7 +143,7 @@ credentials, absolute artifact path, or production stack trace.
 ### AT-021 — Offline browsing and aggregation
 
 With outbound connections blocked, bundled articles, publishers, runs, imports,
-and evaluations can be browsed/exported and stored compatible runs aggregated.
+and derived publisher classes can be browsed/exported and read offline.
 
 ### AT-022 — Strict offline transport
 
@@ -192,7 +192,7 @@ probabilities; restarting adds no duplicate, and the tracked
 
 Without `save_local`, extracted title/body/authors/HTML persist nowhere. With
 explicit consent, only title/body appear in `local_content.csv` and dedicated
-GET. Confirmed DELETE removes active content, preserves runs/evaluations, and
+GET. Confirmed DELETE removes active content, preserves prediction runs, and
 warns that backups are unchanged. DELETE returns `INVALID_INPUT` while any
 evaluation job is running. Content-only retrieval for a reused run performs no
 inference and stores nothing if canonical identity changes.
@@ -205,13 +205,14 @@ return `INVALID_INPUT` and create no evaluation. Candidates run in submitted
 order; URLs converging to one canonical article also fail. Any later failure
 leaves earlier article-level runs/content valid but creates no evaluation.
 
-### AT-030 — Publisher evaluation
+### AT-030 — Derived publisher class
 
-A publisher request uses only eligible stored runs under the documented
-effective-time/URL ordering, stops at requested count, never crawls for links,
-and never creates extra run/content.
-With at least two but fewer than requested, `allow_partial=true` records a
-partial evaluation; false returns `INSUFFICIENT_ARTICLES`.
+A publisher class is read from stored runs and never written: the request creates
+no row in any ledger. Each model is counted separately over its own leakage-safe
+articles and never mixed with another model's predictions. Changing the counting
+rule, or excluding articles, changes the reported class without changing stored
+data; fewer than two counted articles reports no class for that model. Evaluating
+several articles as one operation is not offered by the API or the interface.
 
 ### AT-031 — Majority vote
 
@@ -261,7 +262,7 @@ returns `NETWORK_REQUIRED` if they are not already cached.
 ### AT-038 — Missing artifact preserves history
 
 Removing a registered artifact changes availability/runnability only. Its exact
-historical runs/evaluations remain browseable and aggregable; restoring identical
+historical runs remain browseable and aggregable; restoring identical
 bytes restores the same model ID. Restart refreshes availability of that known
 locator but does not discover an unrelated newly copied artifact until scan.
 
@@ -315,8 +316,8 @@ commands execute synchronously and create no job requiring a server worker.
 
 ### AT-044 — Restart persistence
 
-After a clean restart, models, runs, evaluations, imports, jobs, and explicitly
-saved content reproduce the same public resources from the seven CSV ledgers.
+After a clean restart, models, runs, imports, jobs, and explicitly
+saved content reproduce the same public resources from the six CSV ledgers.
 Mirrored `user_evaluation` dataset rows restore a missing local run and are then
 resynchronized idempotently; original rows and their stable content digest are
 unchanged.
@@ -330,14 +331,14 @@ matches class and reference probabilities within absolute `1e-6`, relative
 
 ## H. Custom Transformer import
 
-### AT-046 — Valid official and custom Transformer imports
+### AT-046 — Valid custom Transformer import
 
-An exact OSF Mistral ZIP or complete Llama segment pair passes byte-size and
-SHA-256 authentication, installs below `managed-models/<model_id>` and is
-marked `paper_official`. A custom allowlisted five-label encoder or compatible
-Llama/Mistral PEFT sequence classifier is marked `user_custom`. Both register
-exact digest/input/fold provenance and delete the upload. Runnable hardware
-produces a five-probability local run; missing CUDA is reported explicitly.
+A custom allowlisted five-label encoder bundle installs below
+`managed-models/<model_id>`, is marked `user_custom`, registers exact
+digest/input/fold provenance and deletes the upload. It then produces a
+five-probability local run. Importing one of the study's larger decoder
+checkpoints, by upload or by LoRA-adapter bundle, is refused with
+`FEATURE_UNAVAILABLE` and registers nothing.
 
 ### AT-047 — Unsafe or incompatible custom bundle
 
@@ -346,8 +347,6 @@ files, `auto_map`, `trust_remote_code`, unknown manifest fields, missing local
 tokenizer, unsupported base/model types, labels other than five, invalid fold
 convention, non-finite values, or strict key/shape mismatch fail without
 registration or an installed bundle.
-Official-looking files with a missing Llama segment, wrong byte size, or wrong
-SHA-256 also fail and never receive paper provenance.
 
 ## I. Optional stress and fault suite
 
@@ -381,15 +380,16 @@ historical model IDs.
 ### AT-052 — Training-data leakage guard
 
 Given a known article assigned to test fold 2, local BERT/RoBERTa fold 1 are
-hidden with `TRAINING_DATA_LEAKAGE`. Direct service/API attempts to infer with
-those checkpoints also fail with that code. Publisher and explicit-list
+hidden with `TRAINING_DATA_LEAKAGE`. A checkpoint of any family is blocked for
+that article on the same evidence, because fold membership is recorded per
+article rather than per family. Direct service/API attempts to infer with those
+checkpoints also fail with that code. Publisher and explicit-list
 workflows exclude or reject the same unsafe article; fold-1 held-out articles
 remain eligible. A local inference over an external URL does not add that URL
 to the imported fold registry and therefore cannot manufacture a later leakage
-block. If normalization maps one article/family identity to more than one
-imported fold, its stored runs remain consultable but every checkpoint is
-blocked for direct evaluation and the identity is excluded from publisher
-aggregation.
+block. If normalization maps one article identity to more than one imported fold, its
+stored runs remain consultable but every checkpoint is blocked for direct
+evaluation and the identity is excluded from publisher aggregation.
 
 ### AT-053 — Availability explanation and conditional controls
 
@@ -407,5 +407,5 @@ Starting with the obsolete four-family bundled import and then loading the
 current manifest removes old bundled runs, their unreferenced historical model
 identities, obsolete bundled import row and any publisher aggregation that
 references a removed bundled run. It then imports exactly 38,854 BERT/RoBERTa
-runs. User imports, their models/runs/evaluations, saved content, jobs and local
+runs. User imports, their models and runs, saved content, jobs and local
 checkpoint registrations are unchanged.

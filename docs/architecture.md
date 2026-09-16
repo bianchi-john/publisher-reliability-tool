@@ -80,7 +80,7 @@ restored before all local runs are synchronized again. Thus the mirror can aid
 recovery but never creates a competing run ID or duplicate on restart, and
 never touches the tracked release.
 
-- Immutable scientific rows (`prediction_runs.csv`, `evaluations.csv`, and
+- Immutable scientific rows (`prediction_runs.csv` and
   `imports.csv`) are appended, flushed, and fsynced.
 - Small mutable state (`models.csv`, `jobs.csv`, `local_content.csv`) is written
   completely to a sibling temporary file, verified, fsynced, and atomically
@@ -96,7 +96,7 @@ never touches the tracked release.
 There is no transaction ledger, record versioning, compaction, commit
 watermark, or snapshot history.
 
-The seven ledgers are loaded into simple in-memory row lists. Query services
+The six ledgers are loaded into simple in-memory row lists. Query services
 derive temporary dictionaries/groupings as needed; there is no separate index
 format or cache invalidation layer. Offset pagination reflects committed state
 at each request, so a concurrent local write can shift later pages, which is
@@ -182,13 +182,12 @@ follows symlinks; a candidate containing a symlink is rejected. API clients can
 scan configured roots or upload an artifact but cannot submit arbitrary server
 paths.
 
-The internal `<data-dir>/managed-models` directory stores successful official
-and custom imports. Startup does not rerun their full Transformers validation; a
-scan verifies the registered directory digest and marks a missing or altered
-bundle unavailable. Startup scans configured roots for BERT/RoBERTa checkpoints
-and exact OSF Llama/Mistral file sets so copied, removed, or restored
-checkpoints are reflected before readiness; the UI/API
-scan remains available for changes made while the service is running.
+The internal `<data-dir>/managed-models` directory stores successful custom
+imports. Startup does not rerun their full Transformers validation; a scan
+verifies the registered directory digest and marks a missing or altered bundle
+unavailable. Startup scans configured roots for BERT/RoBERTa checkpoints so
+copied, removed, or restored checkpoints are reflected before readiness; the
+UI/API scan remains available for changes made while the service is running.
 
 Upload validation moves a successful artifact into that root before the
 atomic model-ledger registration. A crash in between may leave an unregistered
@@ -204,14 +203,16 @@ Historical runs remain browseable and aggregable when an artifact disappears.
 The exact file/directory digest is checked again before a model is loaded, so a
 checkpoint changed after scanning cannot run under its previous scientific ID.
 
-BERT and RoBERTa loaders and fixtures are core. Official Llama 3 8B and Mistral
-24B use built-in, notebook-derived QLoRA sequence-classification recipes and
-are identified by exact OSF checksums. Custom import accepts only the fixed PRT
-manifest vocabulary: an allowlisted complete encoder or a PEFT adapter for
-those two exact bases. `auto_map`, `trust_remote_code`, Python/native files, and
-pickle weights are rejected. LLM artifacts can be valid but non-runnable when
-CUDA, dependencies or pinned base access is unavailable. Unknown artifacts are
-reported and ignored.
+BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
+fixed PRT manifest vocabulary: an allowlisted complete encoder classifier.
+`auto_map`, `trust_remote_code`, Python/native files, and pickle weights are
+rejected. Unknown artifacts are reported and ignored.
+
+A quantized decoder family (Llama 3 8B, Mistral 24B) is the intended next
+extension: the loader registry, managed-bundle layout and model-identity rules
+already accommodate one, but importing such a checkpoint is refused with
+`FEATURE_UNAVAILABLE` until that path is finished, because each fold requires a
+CUDA GPU and several gigabytes that the CPU demo cannot assume.
 
 ## 10. Local HTTP boundary
 
@@ -252,7 +253,8 @@ recovery UI, and high-availability behavior are outside the demo.
 
 ## 12. Invariants
 
-1. A publisher evaluation always names exact immutable runs from one model.
+1. A publisher class always names exact immutable runs from one model and is
+   computed on request, never stored.
 2. Protected reference data never crosses the import projection.
 3. Authors/raw HTML never persist; title/body require explicit consent.
 4. `reuse` creates no run when an exact run exists; a missing-run `reuse` and

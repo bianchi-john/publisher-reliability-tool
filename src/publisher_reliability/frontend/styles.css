@@ -167,6 +167,18 @@ tr:last-child td { border-bottom: 0; }
 .probability-track { height: 11px; overflow: hidden; border-radius: 999px; background: var(--track); }
 .probability-track span { display: block; height: 100%; border-radius: inherit; background: var(--track-fill); }
 .probability-result.predicted .probability-track span { background: var(--accent); }
+.exclusion-list {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px;
+  max-height: 320px; overflow-y: auto; overflow-x: hidden;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+}
+.exclusion-item {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 5px 6px; border-radius: 7px; font-weight: 400;
+}
+.exclusion-item:hover { background: var(--accent-soft); }
+.exclusion-item input { min-height: auto; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.exclusion-item .url { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 .notice { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
 .notice-warning { border-color: var(--warning); background: var(--warning-bg); color: var(--warning-ink); }
 .error-card {
