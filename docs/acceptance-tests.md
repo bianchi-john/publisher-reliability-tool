@@ -2,7 +2,7 @@
 
 **Status:** Normative verification contract
 
-AT-001–AT-047 and AT-051–AT-055 form the core release gate on a normal CPU
+AT-001–AT-047 and AT-051–AT-056 form the core release gate on a normal CPU
 workstation. AT-048–AT-050 are optional stress/fault tests. Optional failures
 are reported but do not block the core demo.
 
@@ -422,3 +422,10 @@ is running or the typed confirmation does not match, and its response counts
 exactly what was removed. After a restart, none of the purged rows returns,
 because the mirror that would have restored them was removed before the
 ledger, not after.
+
+### AT-056 — Unconfirmed job-history clear
+
+Clearing job history takes no confirmation and no request body, unlike the
+purges above: one action deletes every job row and reports how many were
+removed. It returns `INVALID_INPUT` and removes nothing while any job is
+`queued` or `running`.

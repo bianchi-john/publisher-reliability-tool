@@ -96,7 +96,27 @@ h2 { margin: 0 0 16px; font-size: 20px; }
 p { max-width: 760px; }
 .eyebrow { margin-bottom: 8px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .intro { color: var(--muted); font-size: 17px; }
-.page-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+/* A grid, not a flex row, for one reason: flex can only align the buttons against the
+   whole text block, so they always land above or below the intro paragraph, never
+   level with it. Here the action sits in the paragraph's own grid row, so "the same
+   height as the text" is structural rather than a calculation that drifts with the
+   title size or the number of lines the paragraph wraps to. */
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+  margin-bottom: 30px;
+}
+/* The templates keep eyebrow, title and intro inside one wrapper; this promotes them
+   to grid items in place, so no page markup has to change. */
+.page-head > div:first-child { display: contents; }
+.page-head .eyebrow, .page-head h1, .page-head .intro { grid-column: 1; }
+.page-head .intro { margin: 8px 0 0; }
+.page-head > .toolbar, .page-head > button, .page-head > .button {
+  grid-column: 2;
+  grid-row: 3;
+  align-self: start;
+}
 .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
 .card { grid-column: span 4; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
 .card.wide { grid-column: span 8; }
@@ -105,6 +125,9 @@ p { max-width: 760px; }
 .muted, .empty { color: var(--muted); }
 .warning { padding: 16px 18px; border-left: 4px solid var(--warning); border-radius: 8px; background: var(--warning-bg); color: var(--warning-ink); }
 .toolbar, form .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+/* A page-head toolbar holds a small, fixed set of action buttons that must stay on
+   one row; form rows (inputs that can genuinely run out of space) keep wrapping. */
+.page-head .toolbar { flex-wrap: nowrap; flex-shrink: 0; }
 form .row + .row, form .row + .notice, form .notice + .row { margin-top: 18px; }
 form .row.evaluation-actions { align-items: center; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 label { display: grid; gap: 5px; color: var(--nav-ink); font-size: 13px; font-weight: 600; }
@@ -117,8 +140,7 @@ input[type="search"] { min-width: 280px; }
 textarea { width: min(720px, 100%); min-height: 110px; resize: vertical; }
 button, .button { cursor: pointer; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; }
 button.secondary, .button.secondary { background: var(--surface); color: var(--accent); }
-button.danger, .button.danger { border-color: var(--red); background: var(--surface); color: var(--red); }
-button.danger:hover { background: var(--failed-bg); }
+button.danger, .button.danger { border-color: var(--red); background: var(--red); color: var(--on-accent); }
 /* The offset keeps the ring on the page background instead of on the control, so its
    contrast is read against that background: this one clears 12:1 on every surface
    here, where the previous colour stayed below the 3:1 minimum on all of them. */
@@ -222,6 +244,24 @@ tr:last-child td { border-bottom: 0; }
 .loading { color: var(--muted); animation: pulse 1.2s ease-in-out infinite alternate; }
 footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface); font-size: 12px; }
 @keyframes pulse { to { opacity: .45; } }
+/* A page-drawn confirmation box, not a native window.confirm()/prompt(): those native
+   dialogs are suppressed in some embedded browser contexts (for example VS Code's
+   built-in preview), where a script calling them just silently gets no answer. This
+   is plain DOM, so it renders the same everywhere the rest of the page does. */
+.dialog-overlay {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+  padding: 16px; background: rgba(15, 26, 36, .5);
+}
+.dialog-box { width: min(440px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.dialog-box h2 { margin: 0 0 10px; }
+.dialog-box p { margin: 0; color: var(--muted); font-size: 14px; }
+.dialog-box label { margin-top: 16px; }
+/* Reserves its line before any text arrives, so the box does not visibly grow the
+   instant the first character is typed. */
+.dialog-hint { min-height: 18px; margin: 14px 0 0; font-size: 13px; font-weight: 650; }
+.dialog-hint.mismatch { color: var(--warning-ink); }
+.dialog-hint.match { color: var(--accent); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 @media (max-width: 820px) {
   .topbar { padding: 0 16px; }
   .shell { display: block; }
@@ -229,7 +269,9 @@ footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); co
   nav a { flex: 0 0 auto; margin: 0; }
   main { padding: 28px 18px 60px; }
   .card, .card.wide { grid-column: 1 / -1; }
-  .page-head { align-items: start; flex-direction: column; }
+  /* One column: the action drops below the paragraph instead of beside it. */
+  .page-head { grid-template-columns: minmax(0, 1fr); }
+  .page-head > .toolbar, .page-head > button, .page-head > .button { grid-column: 1; grid-row: auto; margin-top: 18px; }
   .result-heading { align-items: stretch; flex-direction: column; }
   .predicted-label { width: 100%; }
   .probability-result { grid-template-columns: 1fr; gap: 5px; }

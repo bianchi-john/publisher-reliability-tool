@@ -118,6 +118,16 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
             {"deleted_predictions": 0, "deleted_saved_content": 0},
         )
 
+    async def test_clear_jobs_needs_no_confirmation_body(self) -> None:
+        paths = (await self.client.get("/api/openapi.json")).json()["paths"]
+        self.assertEqual(set(paths["/api/v1/jobs"]), {"get", "delete"})
+
+        # Unlike /api/v1/user-data, this one asks for nothing beyond the method: no
+        # request body, no confirmation phrase.
+        response = await self.client.delete("/api/v1/jobs")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 0})
+
     async def test_only_single_articles_can_be_evaluated(self) -> None:
         """A publisher class is read, never requested as an evaluation."""
 

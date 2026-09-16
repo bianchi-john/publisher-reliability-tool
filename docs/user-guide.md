@@ -237,3 +237,11 @@ all use the system Times New Roman serif font, so nothing is fetched from a
 font or style CDN. The top bar remains mounted while navigating; the current
 page is retained until the next page is ready so the header and scrollbar do
 not flicker between tabs.
+
+## 7. Jobs
+
+**Jobs** lists every model scan, dataset import and evaluation the worker has
+run. **Clear jobs** deletes that history immediately, with no confirmation
+step: it is disposable operational record-keeping, not something built by
+using the tool, unlike **Clear user data** in §4. It refuses while anything is
+queued or running rather than deleting around a job in progress.

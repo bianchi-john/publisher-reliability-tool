@@ -101,6 +101,29 @@ class JobManager:
         self._queue.put(None)
         self._thread.join(timeout=5)
 
+    def clear(self) -> int:
+        """Delete every job row, refusing while one is still queued or running.
+
+        A running job's own completion write reads the current row and rewrites the
+        ledger through it (see `_update`); wiping the ledger out from under that would
+        make it reappear as an orphaned single row instead of being cleared. A queued
+        job would fare worse: `_execute` looks its row up by ID when the worker gets to
+        it, finds nothing, and silently returns without ever running it, leaving
+        whoever is polling that job to receive a confusing `NOT_FOUND` instead of a
+        result. Refusing here trades a rare, easy-to-retry error for never hitting
+        either.
+        """
+
+        if any(
+            row["status"] in {"queued", "running"} for row in self.storage.rows["jobs"]
+        ):
+            raise AppError(
+                "INVALID_INPUT", "Jobs cannot be cleared while one is queued or running."
+            )
+        removed = len(self.storage.rows["jobs"])
+        self.storage.replace("jobs", [])
+        return removed
+
     def list(self, *, status: str | None = None, job_type: str | None = None):
         rows = [
             self._public(row)

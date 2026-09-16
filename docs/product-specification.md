@@ -320,6 +320,13 @@ again only when every acquired source they require still exists. A queued job
 with a missing source and every running job fail as `PROCESS_INTERRUPTED`;
 terminal job handling cleans its acquired temporary upload.
 
+An unconfirmed action on the Jobs page deletes every job row outright: this is
+disposable operational history, not user-produced data, so it carries none of
+the confirmation the purges in §7.5–7.6 require. It still refuses while any
+job is `queued` or `running`, because the ledger disappearing out from under a
+live job either loses a queued one before it runs or lets a running one
+resurrect its own row when it finishes.
+
 The UI has Evaluate, Articles, Publishers, Models, and Jobs. Evaluate is the
 default and first navigation item. The top-bar status control (`Ready ·
 local`/`Ready · offline`) opens a small popover with workspace counts and
@@ -360,6 +367,7 @@ without a CDN.
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
 | FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches; importing the study's larger decoder checkpoints shall be refused with `FEATURE_UNAVAILABLE` while that support is under development. |
 | FR-025 | A confirmed bulk purge shall permanently delete every local prediction, its saved content, and its private mirror, in an order that cannot resurrect a deleted run on restart, without touching bundled or user-imported dataset rows. |
+| FR-026 | Clearing job history shall need no confirmation and shall delete every job row, but shall refuse outright while any job is queued or running. |
 
 ## 10. Non-functional requirements
 

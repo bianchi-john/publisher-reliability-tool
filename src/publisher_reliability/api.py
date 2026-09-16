@@ -514,6 +514,10 @@ def create_app(
     async def get_job(job_identifier: str):
         return jobs.get(job_identifier)
 
+    @app.delete("/api/v1/jobs")
+    async def clear_jobs():
+        return {"deleted": jobs.clear()}
+
     @app.get("/api/v1/imports")
     async def imports(limit: int = 25, offset: int = 0):
         return paginate(service.imports(), limit, offset)

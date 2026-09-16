@@ -1,9 +1,9 @@
 /** #jobs — the history of the background worker's queue. */
 
 import {api} from "../api.js";
-import {table} from "../components.js";
+import {errorCard, table} from "../components.js";
 import {escapeHtml, shortId, statusPill} from "../format.js";
-import {content, mount, replaceLoading} from "../view.js";
+import {content, mount} from "../view.js";
 
 const PAGE_SIZE = 25;
 
@@ -16,14 +16,47 @@ function resultCell(row) {
 
 export async function jobsPage() {
   mount("jobs");
-  // Refresh simply re-renders the whole page.
-  content.querySelector("#refresh").addEventListener("click", jobsPage);
 
-  const data = await api(`/api/v1/jobs?limit=${PAGE_SIZE}`);
-  replaceLoading(table(
-    ["Created", "Type", "Status", "Phase", "Progress", "Result"],
-    data.items.map(row => `<tr><td>${escapeHtml(row.created_at)}</td><td>${escapeHtml(row.job_type)}</td>
+  const notice = content.querySelector("#page-notice");
+  const showError = (message) => { notice.hidden = false; notice.className = ""; notice.innerHTML = errorCard(message); };
+  const showNotice = (html) => { notice.hidden = false; notice.className = "notice"; notice.innerHTML = html; };
+  const hideNotice = () => { notice.hidden = true; notice.innerHTML = ""; };
+
+  const list = content.querySelector("#job-list");
+
+  /** Refresh just the table, so a notice shown above it survives the reload. */
+  async function loadJobs() {
+    list.className = "loading";
+    list.textContent = "Loading jobs…";
+    const data = await api(`/api/v1/jobs?limit=${PAGE_SIZE}`);
+    list.className = "";
+    list.innerHTML = table(
+      ["Created", "Type", "Status", "Phase", "Progress", "Result"],
+      data.items.map(row => `<tr><td>${escapeHtml(row.created_at)}</td><td>${escapeHtml(row.job_type)}</td>
       <td>${statusPill(row.status)}</td><td>${escapeHtml(row.phase || "—")}</td><td>${row.progress}%</td>
       <td>${resultCell(row)}</td></tr>`),
-  ));
+    );
+  }
+
+  content.querySelector("#refresh").addEventListener("click", async () => {
+    hideNotice();
+    await loadJobs();
+  });
+
+  // Clear jobs asks for no confirmation: unlike the local-evaluation purge, this is
+  // disposable operational history, not something a user spent effort producing, and
+  // the backend itself still refuses outright rather than corrupting anything if a
+  // job is queued or running.
+  content.querySelector("#clear-jobs").addEventListener("click", async () => {
+    hideNotice();
+    try {
+      const result = await api("/api/v1/jobs", {method: "DELETE"});
+      showNotice(`<b>${result.deleted}</b> job record(s) were cleared.`);
+      await loadJobs();
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+
+  await loadJobs();
 }

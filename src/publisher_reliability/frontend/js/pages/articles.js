@@ -88,32 +88,78 @@ export async function articlesPage(_id, params) {
     }
   });
 
+  // --- Clear user data: a page-drawn confirmation box, not window.confirm()/prompt().
+  // Embedded browser contexts (for example VS Code's built-in preview) can suppress
+  // those native dialogs outright, silently returning no answer; a box built out of
+  // ordinary page elements renders the same everywhere the rest of the page does.
   const clearButton = content.querySelector("#clear-user-data");
-  clearButton.addEventListener("click", async () => {
-    const typed = window.prompt(
-      `This permanently deletes every article you evaluated locally, any content ` +
-      `you saved alongside one, and the private file that would otherwise restore ` +
-      `them after a restart. The shared dataset is not affected. This cannot be ` +
-      `undone.\n\nType ${CLEAR_CONFIRMATION_PHRASE} to confirm.`
-    );
-    if (typed === null || typed !== CLEAR_CONFIRMATION_PHRASE) return;
-    clearButton.disabled = true;
-    hideNotice();
+  const dialog = content.querySelector("#clear-confirm");
+  const dialogInput = content.querySelector("#clear-confirm-input");
+  const dialogHint = content.querySelector("#clear-confirm-hint");
+  const dialogCancel = content.querySelector("#clear-confirm-cancel");
+  const dialogSubmit = content.querySelector("#clear-confirm-submit");
+
+  function openClearDialog() {
+    dialog.hidden = false;
+    dialogInput.value = "";
+    dialogHint.className = "dialog-hint";
+    dialogHint.textContent = "";
+    dialogSubmit.disabled = true;
+    dialogInput.focus();
+  }
+
+  function closeClearDialog() {
+    dialog.hidden = true;
+    clearButton.focus();
+  }
+
+  clearButton.addEventListener("click", openClearDialog);
+  dialogCancel.addEventListener("click", closeClearDialog);
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) closeClearDialog();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeClearDialog();
+  });
+  dialogInput.addEventListener("input", () => {
+    const typed = dialogInput.value;
+    const matches = typed === CLEAR_CONFIRMATION_PHRASE;
+    dialogSubmit.disabled = !matches;
+    if (!typed) {
+      // Nothing typed yet: neither a warning nor a confirmation has anything to say.
+      dialogHint.className = "dialog-hint";
+      dialogHint.textContent = "";
+    } else if (matches) {
+      dialogHint.className = "dialog-hint match";
+      dialogHint.textContent = "Confirmed. Click “Delete permanently” to continue.";
+    } else {
+      dialogHint.className = "dialog-hint mismatch";
+      dialogHint.textContent = `Doesn't match "${CLEAR_CONFIRMATION_PHRASE}" yet.`;
+    }
+  });
+
+  dialogSubmit.addEventListener("click", async () => {
+    const typed = dialogInput.value;
+    if (typed !== CLEAR_CONFIRMATION_PHRASE) return;
+    dialogSubmit.disabled = true;
+    dialogCancel.disabled = true;
     try {
       const result = await api("/api/v1/user-data", {
         method: "DELETE",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({confirmation: typed}),
       });
+      dialog.hidden = true;
       showNotice(
         `<b>${result.deleted_predictions}</b> local prediction(s) and ` +
         `<b>${result.deleted_saved_content}</b> saved article(s) were deleted.`
       );
       await loadArticles();
     } catch (error) {
+      dialog.hidden = true;
       showError(error.message);
     } finally {
-      clearButton.disabled = false;
+      dialogCancel.disabled = false;
     }
   });
 

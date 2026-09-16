@@ -333,6 +333,15 @@ The frontend polls this endpoint about once per second while a job runs.
 Failed jobs return HTTP
 `200`; absent jobs return `NOT_FOUND`.
 
+### `DELETE /api/v1/jobs`
+
+Deletes every job row and returns `200 {"deleted":<int>}`. No request body or
+confirmation is required: unlike the purges above, this is disposable
+operational history, not something a user produced. It refuses with
+`INVALID_INPUT` while any job is `queued` or `running`, leaving every row
+untouched, rather than risk a queued job vanishing before the worker ever runs
+it or a running job's own completion write resurrecting its row afterward.
+
 ## 10. Imports
 
 ### `GET /api/v1/imports`
