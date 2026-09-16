@@ -1,0 +1,27 @@
+<header class="page-head">
+  <div>
+    <div class="eyebrow">Article prediction history</div>
+    <h1>{{hostname}}</h1>
+    <p class="intro">{{canonicalUrl}}</p>
+  </div>
+  <a class="button secondary" href="#publisher/{{publisherId}}">Publisher class</a>
+</header>
+
+<div class="article-source-banner {{sourcePanelClass}}">
+  {{sourceBadges}}
+  <b>{{sourceSentence}}</b>
+  <span>{{datasetRunCount}} imported prediction(s) · {{localRunCount}} local user evaluation(s)</span>
+</div>
+
+<div class="grid detail-metrics">
+  <section class="card"><div class="muted">Models</div><div class="metric">{{modelCount}}</div></section>
+  <section class="card"><div class="muted">Stored predictions</div><div class="metric">{{runCount}}</div></section>
+  <section class="card"><div class="muted">Latest class</div><div class="metric">{{latestClass}}</div></section>
+</div>
+
+<section class="section-block">
+  <h2>Every model prediction</h2>
+  {{predictionTable}}
+</section>
+
+<p class="warning">{{warning}}</p>

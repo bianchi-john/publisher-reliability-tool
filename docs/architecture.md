@@ -60,6 +60,16 @@ Supporting modules are `config`, `api`, `imports`, `jobs`, `identity`,
 plugin discovery, or generic event buses; ordinary Python composition is the
 extension mechanism.
 
+The frontend is plain HTML, CSS and vanilla ES modules, with no build step. Each
+screen's static markup is an ordinary HTML file in `frontend/pages/`, containing
+`{{placeholder}}` slots; the module of the same name in `frontend/js/pages/`
+fills those slots and wires up that screen's controls. Shared code is split by
+concern: `api.js` (the only module that calls the backend), `format.js`
+(escaping and label names), `components.js` (reusable fragments such as tables
+and error cards), `job-progress.js`, `topbar.js`, `templates.js` (loads and
+fills the page files) and `router.js`. To change how a screen looks, edit its
+HTML file; to change what it does, edit its page module.
+
 ## 5. Storage approach
 
 `csv-storage-contract.md` defines seven authoritative CSV ledgers. Articles and

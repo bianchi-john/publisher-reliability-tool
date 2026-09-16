@@ -57,7 +57,13 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-publisher_reliability = ["frontend/*", "*.json"]
+publisher_reliability = [
+    "frontend/*",
+    "frontend/pages/*.html",
+    "frontend/js/*.js",
+    "frontend/js/pages/*.js",
+    "*.json",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

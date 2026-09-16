@@ -201,6 +201,18 @@ def create_app(
         response.headers["X-Request-ID"] = request.state.request_id
         return response
 
+    @app.middleware("http")
+    async def revalidate_frontend_assets(request: Request, call_next):
+        # The frontend is plain files with stable names and no build step. Without an
+        # explicit policy a browser caches them heuristically, so it can keep running a
+        # previous page shell — and then request a script the current one no longer has.
+        # "no-cache" does not forbid storing the file, only serving it without asking
+        # first, so the ETag round-trip still makes the reload cheap.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError):
         return error_response(exc, getattr(request.state, "request_id", None))

@@ -1,0 +1,29 @@
+<header class="page-head">
+  <div>
+    <div class="eyebrow">Article classification</div>
+    <h1>Evaluate</h1>
+    <p class="intro">Classify one article. A publisher's class is not created here: it is read from the articles already classified, under Publishers.</p>
+  </div>
+</header>
+
+<section class="card full">
+  <form id="evaluation">
+    <div class="row">
+      <label class="grow">Article URL<input required name="url" type="url" placeholder="https://publisher.example/article"></label>
+    </div>
+    <div class="row evaluation-options">
+      <label>Available model<select required disabled name="model_id"><option value="">Enter a valid URL first</option></select></label>
+    </div>
+    <div id="model-availability" class="notice" aria-live="polite">Models will be detected from stored predictions for this article.</div>
+    <div class="row evaluation-actions"><button disabled>Start evaluation</button></div>
+  </form>
+  <div id="evaluation-result" aria-live="polite"></div>
+</section>
+
+<section class="section-block">
+  <h2>Recent user article evaluations</h2>
+  <p class="muted">New local predictions remain visible here after a refresh. Open an article for its complete model history, or a publisher to read its class.</p>
+  <div id="recent-article-evaluations" class="loading">Loading user evaluations…</div>
+</section>
+
+<p class="warning">{{warning}}</p>

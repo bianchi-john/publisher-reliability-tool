@@ -115,26 +115,26 @@ Module inventory (`src/publisher_reliability/`, LOC from `wc -l`):
 
 | Module | LOC | Responsibility |
 | --- | ---: | --- |
-| `services.py` | 1004 | `ResearchService`: all read queries, `available_models()`, `evaluate()` |
-| `api.py` | 574 | 30 HTTP routes, Pydantic request models, error mapping, static frontend |
-| `custom_models.py` | 566 | Validation/installation of user `.zip` model bundles (schema 1 & 2) |
-| `inference.py` | 543 | Safe retrieval, English extraction, `InferenceEngine` (4 loader recipes) |
-| `importer.py` | 589 | CSV / CSV.GZ projection, validation, conflict detection, idempotent import |
-| `prediction_dataset.py` | 490 | Public-release verification + idempotent mirroring of local runs |
-| `official_models.py` | 445 | Checksum-authenticated import of large decoder artifacts; retained as an extension point, unreachable from any user-facing path |
-| `storage.py` | 312 | Seven CSV ledgers, `flock`, append+fsync, atomic rename |
-| `model_scanner.py` | 303 | Scans configured roots for recognized artifacts (no symlink following) |
-| `jobs.py` | 253 | Single FIFO worker, persisted job rows, macro-phase progress |
-| `cli.py` | 200 | `serve`, `dataset verify|import`, `models scan`, `storage verify` |
-| `aggregation.py` | 117 | The three publisher-level formulas |
-| `identity.py` | 110 | URL normalization, UUIDv5 article IDs, publisher hostname |
-| `config.py` | 79 | `PRT_*` env vars + CLI options |
-| `errors.py` | 41 | 18 stable error codes with fixed HTTP statuses |
-| `frontend/` | ~930 | `index.html` (52) + `app.js` (642, vanilla ES modules) + `styles.css` (240) |
+| `services.py` | 1292 | `ResearchService`: all read queries, `available_models()`, `evaluate()` |
+| `inference.py` | 662 | Safe retrieval, English extraction, `InferenceEngine` (BERT and RoBERTa recipes) |
+| `importer.py` | 631 | CSV / CSV.GZ projection, validation, conflict detection, idempotent import |
+| `custom_models.py` | 601 | Validation/installation of user `.zip` model bundles (schema 1 & 2) |
+| `api.py` | 563 | 26 HTTP routes, Pydantic request models, error mapping, static frontend |
+| `official_models.py` | 459 | Checksum-authenticated import of large decoder artifacts; retained as an extension point, unreachable from any user-facing path |
+| `prediction_dataset.py` | 420 | Public-release verification + idempotent mirroring of local runs |
+| `storage.py` | 390 | Six CSV ledgers, `flock`, append+fsync, atomic rename |
+| `jobs.py` | 306 | Single FIFO worker, persisted job rows, macro-phase progress |
+| `model_scanner.py` | 301 | Scans configured roots for recognized artifacts (no symlink following) |
+| `cli.py` | 235 | `serve`, `dataset verify|import`, `models scan`, `storage verify` |
+| `identity.py` | 150 | URL normalization, UUIDv5 article IDs, publisher hostname |
+| `aggregation.py` | 137 | The three publisher-level formulas |
+| `config.py` | 85 | `PRT_*` env vars + CLI options |
+| `errors.py` | 51 | 20 stable error codes with fixed HTTP statuses |
+| `frontend/` | 1406 | `index.html` (41) + `styles.css` (223) + 9 page templates in `pages/*.html` (209) + 16 vanilla ES modules in `js/` (933) |
 
-Total application code ≈ 5.2k LOC Python + ~0.9k LOC frontend. Tests: 10 files,
-~1.4k LOC, **30 tests, all passing** (verified: `python -m unittest discover -s
-tests` → `Ran 30 tests in 1.449s / OK`).
+Total application code ≈ 6.3k LOC Python + ~1.4k LOC frontend. Tests: 10 files,
+~1.6k LOC, **30 tests, all passing** (verified: `python -m unittest discover -s
+tests` → `Ran 30 tests in 1.122s / OK`).
 
 ### Deliberate non-architecture
 

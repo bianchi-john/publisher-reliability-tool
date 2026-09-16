@@ -1,0 +1,21 @@
+<header class="page-head">
+  <div>
+    <div class="eyebrow">Prediction history</div>
+    <h1>Articles &amp; predictions</h1>
+    <p class="intro">Dataset articles and articles classified by the user are identified separately. Open one to inspect every model output and probability.</p>
+  </div>
+  <a class="button secondary" href="/api/v1/articles/export{{exportQuery}}">Export predictions CSV</a>
+</header>
+
+<div class="source-tabs" aria-label="Filter articles by source">
+  <a class="{{allTab}}" href="#articles">All articles</a>
+  <a class="{{datasetTab}}" href="#articles?source=dataset">Dataset articles</a>
+  <a class="{{userTab}}" href="#articles?source=user_evaluation">User-evaluated articles</a>
+</div>
+
+<div class="source-legend">
+  <span><span class="source-dot dataset-source"></span><b>Dataset article:</b> at least one imported prediction.</span>
+  <span><span class="source-dot user-source"></span><b>User evaluated:</b> a new article classified locally through Evaluate.</span>
+</div>
+
+<div class="loading">Loading articles…</div>

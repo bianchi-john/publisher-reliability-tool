@@ -1,0 +1,21 @@
+<section class="evaluation-result-card" aria-labelledby="prediction-result-title">
+  <div class="result-heading">
+    <div>
+      <div class="eyebrow">Evaluation completed</div>
+      <h2 id="prediction-result-title">Predicted label</h2>
+    </div>
+    <div class="predicted-label">Class {{predictedClass}}</div>
+  </div>
+  <div class="result-meta">
+    <span class="source-badge {{sourceClass}}">{{sourceText}}</span>
+    <span><b>Model:</b> {{modelLabel}}</span>
+    <span class="source-badge">{{provenance}}</span>
+  </div>
+  <h3>Probabilities for every class</h3>
+  <div class="probability-results">{{probabilityBars}}</div>
+  <div class="result-actions">
+    <a class="button secondary" href="#article/{{articleId}}">Open complete prediction history</a>
+    <span class="muted">Run {{runId}}</span>
+  </div>
+  <p class="warning">{{warning}}</p>
+</section>

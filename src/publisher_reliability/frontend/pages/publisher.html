@@ -1,0 +1,39 @@
+<header class="page-head">
+  <div>
+    <div class="eyebrow">Publisher reliability</div>
+    <h1>{{hostname}}</h1>
+    <p class="intro">This class is derived from the article predictions below, not stored. Change how the verdicts are counted, or leave articles out, and it is recomputed.</p>
+  </div>
+  <a class="button secondary" href="#publishers">Back to publishers</a>
+</header>
+
+<div class="grid detail-metrics">
+  <section class="card"><div class="muted">Articles</div><div class="metric">{{articleCount}}</div></section>
+  <section class="card"><div class="muted">Stored predictions</div><div class="metric">{{runCount}}</div></section>
+  <section class="card"><div class="muted">Models</div><div class="metric">{{modelCount}}</div></section>
+</div>
+
+<section class="card full">
+  <h2>Publisher class</h2>
+  <div class="row">
+    <label>How article verdicts are counted<select id="aggregation-method">
+      <option value="majority_vote">Majority vote</option>
+      <option value="ordinal_mean">Ordinal mean</option>
+      <option value="mean_probabilities">Mean probabilities</option>
+    </select>
+      <small id="method-formula">Most frequent hard class; ties resolve to the smallest class.</small></label>
+  </div>
+  <div id="aggregation-results" class="loading">Reading the article predictions…</div>
+  <p class="warning">{{warning}}</p>
+</section>
+
+<section class="section-block">
+  <h2>Articles counted</h2>
+  <p class="muted">Every article of this publisher with a leakage-safe prediction is counted. Clear a checkbox to leave it out; each model is recounted over what remains.</p>
+  <div id="exclusion-list" class="exclusion-list loading">Loading articles…</div>
+</section>
+
+<section class="section-block">
+  <h2>Stored predictions</h2>
+  {{storedPredictions}}
+</section>
