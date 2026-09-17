@@ -49,8 +49,9 @@ The MVP shall:
   whose support is still under development;
 - import constrained five-class custom encoder classifiers using local
   declarative metadata, tokenizer and `safetensors`;
-- evaluate one article, 2–50 explicit same-publisher articles, or one publisher
-  with a requested count of 2–50;
+- evaluate exactly one article per request; no multi-article or publisher-wide
+  evaluation operation exists, because a publisher class is derived from the
+  articles already classified rather than produced by an operation;
 - reuse exact stored runs or explicitly create a new immutable run;
 - aggregate exact compatible runs with the six scientific methods, always
   reporting the dispersion of the articles behind each result;
@@ -88,7 +89,7 @@ The stable MVP surface is:
 publisher-reliability serve [OPTIONS]
 publisher-reliability dataset verify PATH
 publisher-reliability dataset import PATH
-publisher-reliability models scan
+publisher-reliability models scan [--full]
 publisher-reliability storage verify
 ```
 
@@ -107,10 +108,17 @@ publisher-reliability storage verify
 The host is fixed to `127.0.0.1`. `dataset verify` accepts CSV, CSV.GZ, or the
 official manifest directory and changes no state. `dataset import` accepts CSV
 or CSV.GZ and uses the same importer as the UI. `models scan` scans configured
-roots plus the internal managed-upload root. `storage verify` checks headers,
-row types, identifiers, references,
-and malformed final rows. There is no compaction or migration command in schema
-version 1.
+roots plus the internal managed-upload root, reusing the recorded verification of
+any checkpoint whose file is unchanged; `--full` ignores that record and re-reads
+every byte. `storage verify` checks headers, row types, identifiers, references,
+and malformed final rows. There is no compaction command. The store is at schema
+version 2; the only migration is applied automatically at startup, and it retires
+the schema-1 `evaluations.csv` ledger, whose contents are now derived on request
+instead of stored.
+
+`dataset import`, `models scan` and `storage verify` each accept `--data-dir` to
+act on a workspace other than the configured default; `dataset verify` takes no
+options, because it opens a throwaway workspace and changes nothing.
 
 The non-server commands perform their work synchronously and print macro
 progress. They call the same verification/import/model-scan service functions
@@ -172,9 +180,10 @@ is running. A checkpoint is fully verified — hashed and structurally validated
 the first time it is seen and whenever its file changes; a checkpoint left
 untouched since the previous scan reuses that recorded result, so restarting does
 not re-read gigabytes for nothing. `publisher-reliability models scan --full`
-re-reads every byte on demand. The Models page reports compatible, validated-not-runnable,
-dependency-missing, resource-unavailable, artifact-missing, paper-official, custom and
-historical-only identities. On first online inference for a compatible core
+re-reads every byte on demand. The Models page reports each identity's status — `compatible`,
+`historical_only`, `artifact_missing`, `dependency_missing`,
+`resource_unavailable` or `invalid` — alongside its separate provenance
+(`paper_official`, `user_custom`, `paper_dataset` or `local_checkpoint`). On first online inference for a compatible core
 checkpoint, the application caches only its tokenizer/configuration resources
 from a pinned immutable official revision.
 
@@ -246,23 +255,17 @@ dataset article evaluated locally retains both facts.
 
 For a five-fold imported corpus, checkpoint fold `N` may evaluate known
 articles assigned to held-out test fold `N` and must not evaluate known articles
-assigned to any other fold. The same rule filters publisher candidates and is
-enforced again by the backend. Unknown external URLs have no registered fold
+assigned to any other fold. The same rule decides which articles a derived
+publisher class may count, and is enforced by the service rather than by
+frontend filtering alone. Unknown external URLs have no registered fold
 membership; their absence is not represented as proof of training exclusion.
 A local inference never creates fold-membership evidence for a previously
 unknown URL.
 
-Every evaluation stores the ordered article and prediction-run IDs actually
-used. A later run cannot change an earlier evaluation.
-
-Explicit-list candidates run in submitted order and all must succeed. Submitted
-and online-resolved canonical article IDs must remain distinct; otherwise the
-job fails `INVALID_INPUT`. On any failure no evaluation is written, while
-already committed individual runs/content stay valid. Publisher stored
-candidates are ordered by effective latest-run time descending then canonical
-URL ascending. Publisher input does not discover or infer additional articles.
-Publisher failure or partial success does not roll back previously committed
-individual runs/content.
+An evaluation writes exactly one immutable prediction run and nothing else. No
+record of the evaluation as an operation is kept beyond its job row, because
+there is no longer an aggregate for it to belong to: a later run never alters an
+earlier one, and it simply enters the next reading of its publisher.
 
 ### 7.4 Import
 
@@ -319,8 +322,9 @@ sentences, not opaque codes:
 - evaluation reports every step that can take noticeable time, so the interface
   is never frozen on one value: checking the selected model, retrieving and
   extracting the page, verifying and loading the checkpoint, classifying the
-  text, then saving. Reuse of a stored prediction and publisher aggregation
-  report their own shorter sequences;
+  text, then saving. Reuse of a stored prediction reports its own shorter
+  sequence. Publisher aggregation is not a job at all: it is a synchronous
+  read-only request, so it has no phases to report;
 - import: `parsing`, then terminal `saving` (upload reception precedes job
   creation);
 - model validation: `scanning`, then terminal `saving`.
@@ -374,7 +378,7 @@ without a CDN.
 | FR-019 | The local API shall validate Host and reject non-loopback configuration. |
 | FR-020 | UI, API and the prediction CSV shall expose model, fold, run, contributing articles where applicable, method, all available probabilities, dataset-versus-user origin, and scientific limitations. |
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
-| FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold for single, list, and publisher workflows. |
+| FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold, and such an article shall be excluded from every derived publisher class. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
 | FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches; importing the study's larger decoder checkpoints shall be refused with `FEATURE_UNAVAILABLE` while that support is under development. |
 | FR-025 | A confirmed bulk purge shall permanently delete every local prediction, its saved content, and its private mirror, in an order that cannot resurrect a deleted run on restart, without touching bundled or user-imported dataset rows. |

@@ -26,13 +26,17 @@ background worker. CSV remains inspectable and replaceable with ordinary tools.
 ## 3. Process and data flow
 
 ```text
-browser/CLI -> FastAPI service -> Storage (seven authoritative CSV files)
+browser/CLI -> FastAPI service -> Storage (six authoritative CSV files)
+                         |
+                         +-> AggregationMethod        (synchronous, read-only:
+                         |                             a publisher class is
+                         |                             derived per request and
+                         |                             never written)
                          |
                          +-> FIFO job worker
                                -> ArticleRetriever
                                -> ModelLoader
                                -> InferenceService
-                               -> AggregationMethod
                                       |
                                       +-> PredictionDatasetMirror
                                           -> dataset/predictions/user-predictions.csv
@@ -68,10 +72,15 @@ verified, not that its bytes were re-read now: it does not lower the bar against
 someone who can already write to the model directory, but silent corruption that
 preserves size and timestamp is no longer caught automatically.
 
-Supporting modules are `config`, `api`, `imports`, `jobs`, `identity`,
-`language`, and `frontend`. Avoid registries, dependency injection frameworks,
-plugin discovery, or generic event buses; ordinary Python composition is the
-extension mechanism.
+The modules behind those boundaries are `storage`, `prediction_dataset`,
+`model_scanner` with `model_scan_cache`, `custom_models` and `official_models`,
+`inference` (which owns both retrieval and the loaders), `services` and
+`aggregation`. Supporting them are `config`, `api`, `openapi_examples`, `cli`,
+`jobs`, `identity`, `errors` and `frontend`. Language detection has no module of
+its own: `langdetect` is called at the one point in `inference` where extracted
+text is validated. Avoid registries, dependency injection frameworks, plugin
+discovery, or generic event buses; ordinary Python composition is the extension
+mechanism.
 
 The frontend is plain HTML, CSS and vanilla ES modules, with no build step. Each
 screen's static markup is an ordinary HTML file in `frontend/pages/`, containing
@@ -85,7 +94,7 @@ HTML file; to change what it does, edit its page module.
 
 ## 5. Storage approach
 
-`csv-storage-contract.md` defines seven authoritative CSV ledgers. Articles and
+`csv-storage-contract.md` defines six authoritative CSV ledgers. Articles and
 publishers are derived at startup from canonical URL, publisher hostname, and
 prediction-run data. This avoids synchronizing a second entity store.
 
@@ -162,9 +171,12 @@ Offline normalization:
 7. preserve order, duplicates, `+`, percent encoding, path case, and trailing
    slash for every retained component.
 
-Online resolution follows at most five safe redirects and uses the first
-same-publisher canonical link from the already downloaded HTML; it does not
-request that link. Article identity is the normalized canonical URL and its
+Online resolution follows at most five safe redirects and then normalizes the
+URL the final response was served from. A `<link rel="canonical">` in the page
+body is deliberately *not* consulted: it is publisher-controlled content, it
+would let a page reassign its own identity, and honouring it could move an
+article onto an identity whose imported fold differs from the one the leakage
+guard already cleared. Article identity is the normalized canonical URL and its
 persisted ID is UUIDv5. Publisher identity is the normalized hostname with one
 leading `www.` removed; the URL port is not part of publisher identity and
 registrable-domain guessing is not used.
@@ -220,12 +232,28 @@ registers the already matching artifact. No separate upload transaction or
 orphan ledger is introduced.
 
 Built-in official recipes determine scientific model identity independently of
-filesystem location. States are `compatible`, `validated_not_runnable`,
-`historical_only`, `artifact_missing`, `dependency_missing`,
-`resource_unavailable`, and `invalid`.
+filesystem location. States are `compatible`, `historical_only`,
+`artifact_missing`, `dependency_missing`, `resource_unavailable`, and `invalid`.
 Historical runs remain browseable and aggregable when an artifact disappears.
 The exact file/directory digest is checked again before a model is loaded, so a
 checkpoint changed after scanning cannot run under its previous scientific ID.
+
+A scan reconciles the ledger against the filesystem, and two rules keep that
+reconciliation from producing a store that can no longer be opened:
+
+- a local row that a prediction run still names is never deleted, only marked
+  `artifact_missing`. Because identity is content-addressed, the same bytes
+  refiled under another family or fold become a *different* model, so the old
+  identity can disappear from a scan while its runs remain; dropping the row
+  would leave those runs pointing at nothing, which `Storage.reload` rejects;
+- when a checkpoint that was absent during mirror restore comes back, the scan
+  rediscovers the identity that `restore_user_predictions` had recreated as a
+  historical placeholder. Only the rediscovered local row is written: emitting
+  both would duplicate a model identifier, which `Storage.reload` also rejects.
+
+Symmetrically, an import registers a historical identity only for a family/fold
+it actually published runs for, so a wholly rejected import leaves no model row
+explaining no prediction.
 
 BERT and RoBERTa loaders and fixtures are core. Custom import accepts only the
 fixed PRT manifest vocabulary: an allowlisted complete encoder classifier.
@@ -269,7 +297,8 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |
 | Missing artifact | Preserve historical model identity and runs |
 | Private prediction mirror is unwritable | Preserve the committed state run, fail the dependent inference operation, and report storage failure |
-| Purge | Rewrite active local-content file; backups remain the user's responsibility |
+| Confirmed delete of one article's saved content | Rewrite the active local-content file; backups remain the user's responsibility |
+| Confirmed clear of all local user data | Remove the private mirror first, then the `local_inference` runs and saved content; imported rows and the tracked release are untouched |
 
 Manual stopped-server copying of the data directory is the backup and restore
 procedure. Exhaustive ENOSPC matrices, automatic backup rotation, online

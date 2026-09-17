@@ -54,7 +54,7 @@ contains one of these codes in its `error_code` field.
 | `INVALID_INPUT` | 422 | Schema, range, duplicate input, mixed publisher, or unsupported option |
 | `INVALID_HOST` | 421 | Host is not the configured local origin |
 | `INVALID_URL` | 422 | URL syntax, encoding, scheme, or hostname is invalid |
-| `NOT_FOUND` | 404 | Requested article, run, publisher, evaluation, model, job, import, or content is absent |
+| `NOT_FOUND` | 404 | Requested article, run, publisher, model, job, import, or content is absent |
 | `PAYLOAD_TOO_LARGE` | 413 | Request, upload, field, or extracted body exceeds a demo limit |
 | `NETWORK_REQUIRED` | 409 | Strict offline/local state cannot satisfy the operation |
 | `NETWORK_ERROR` | 502 | DNS, timeout, TLS, robots denial, unsafe address, or upstream HTTP failure |
@@ -65,7 +65,7 @@ contains one of these codes in its `error_code` field.
 | `MODEL_NOT_RUNNABLE` | 409 | Historical, missing, incompatible, dependency, or resource state cannot infer |
 | `TRAINING_DATA_LEAKAGE` | 409 | Selected checkpoint was trained on the known fold-indexed dataset article |
 | `PROBABILITIES_REQUIRED` | 409 | Selected exact runs lack complete probabilities |
-| `INSUFFICIENT_ARTICLES` | 422 | Fewer than two compatible successful runs or requested count unmet |
+| `INSUFFICIENT_ARTICLES` | 422 | Fewer than two compatible leakage-safe runs to aggregate |
 | `IMPORT_INVALID` | 422 | Dataset schema/container/row conflict prevents requested import result |
 | `STORAGE_ERROR` | 503 | Lock, structure, reference, write, fsync, or space failure |
 | `PROCESS_INTERRUPTED` | 409 | A queued job lost its acquired source or a running job ended with the process |
@@ -196,9 +196,11 @@ Bad confirmation is `INVALID_INPUT`.
 ### `GET /api/v1/publishers`
 
 Derived publisher list. Filters: `q` over hostname and `model_id`; order is
-latest evaluation descending then hostname ascending. Items return IDs,
-hostname, article/run/evaluation counts, and latest evaluation time. No homepage
-is invented from article URLs.
+hostname ascending. Items return the publisher ID and normalized hostname, the
+distinct article count, the run count, the distinct model count, and how many of
+those runs carry a complete probability vector. No publisher-level class is
+included, because none is stored: it is derived on request by the aggregation
+endpoint below. No homepage is invented from article URLs.
 
 ### `GET /api/v1/publishers/{publisher_id}`
 
@@ -230,8 +232,10 @@ counted articles reports no class and states why. An unknown method is
 
 ### `GET /api/v1/models`
 
-Returns every historical/registered model with family, fold, model ID, core or
-optional support level, status, artifact availability, runnable flag, redacted
+Returns every historical/registered model with family, fold, model ID, support
+level (`core` for BERT/RoBERTa, `paper_llm` for a study decoder checkpoint,
+`custom` for an imported bundle, `optional` otherwise), status, artifact
+availability, runnable flag, redacted
 root-relative locator, digest, recipe/version, immutable base/tokenizer
 revisions, input policy, provenance (`paper_official`, `user_custom`,
 `paper_dataset`, or `local_checkpoint`), and safe status detail. Optional `family`/`status`

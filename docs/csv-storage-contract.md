@@ -113,7 +113,9 @@ Minimum commit units are deliberately explicit:
 - new prediction: one append-only prediction-run row followed by an idempotent
   private user-prediction mirror update keyed by `prediction_run_id`;
 - content save/delete: one complete `local_content.csv` replacement;
-- model registration/status: one complete `models.csv` replacement;
+- model registration/status: one complete `models.csv` replacement, which
+  registers a historical identity only for a family/fold that actually
+  published runs in that import;
 - job admission/status/result: one complete `jobs.csv` replacement;
 - local-data purge: private mirror file removal, then a complete
   `local_content.csv` replacement, then a complete `prediction_runs.csv`
@@ -144,7 +146,10 @@ mirror. Repeated synchronization adds nothing when a `prediction_run_id` is
 already present.
 
 No compaction, record versions, tombstones, transaction ledger, commit
-sequence, or pagination snapshot is part of schema version 1.
+sequence, or pagination snapshot is part of schema version 2. The one migration
+the store performs runs at startup and only retires the schema-1
+`evaluations.csv` ledger, whose stored aggregates are now derived on request;
+any other unexpected file in `state/` still fails closed.
 
 ## 5. Ledger schemas
 
@@ -166,9 +171,8 @@ model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha
   use a validated `custom_...` slug. The column also accepts a further paper
   family without a schema change, which is what a later decoder family would
   use.
-- `status`: `compatible`, `validated_not_runnable`, `historical_only`,
-  `artifact_missing`, `dependency_missing`, `resource_unavailable`, or
-  `invalid`.
+- `status`: `compatible`, `historical_only`, `artifact_missing`,
+  `dependency_missing`, `resource_unavailable`, or `invalid`.
 - `artifact_kind`: `pytorch_state_dict`, `custom_transformer_bundle`, or
   `historical_virtual`. Rows written by earlier releases may still carry a
   managed decoder-bundle kind; they remain readable and are reported as
@@ -311,7 +315,11 @@ bytes and modification time.
 ## 7. Verification, backup, and recovery
 
 Startup/storage verify checks exact headers, UTF-8/CSV structure, unique
-identifiers, and model/run/evaluation references. Scientific numeric values,
+identifiers, and that every prediction run names a model that exists. Those two
+checks are strict, and any writer that rewrites `models.csv` has to respect
+them: a model row a run still names is downgraded to `artifact_missing` rather
+than deleted, and a rediscovered artifact replaces the historical placeholder
+holding its identity instead of being written beside it. Scientific numeric values,
 URL identities, and JSON payloads are validated by their ingestion/service
 boundaries; the dataset verifier additionally checks probabilities, origin
 counts, and checksums. Structural corruption fails closed.
@@ -321,5 +329,8 @@ placing that copy at the configured path and running `storage verify`. The
 application does not trim malformed records, rotate backups, or compact
 ledgers.
 
-Purge affects active `local_content.csv` only. Users must manually delete any
-backup or external copy that should no longer contain saved title/body.
+Deleting one article's saved content affects active `local_content.csv` only.
+Clearing all local user data additionally removes the private mirror and every
+`local_inference` row, in the fixed order given in §4. Neither touches imported
+rows or the tracked release, and users must manually delete any backup or
+external copy that should no longer contain saved title/body.

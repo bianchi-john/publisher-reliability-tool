@@ -169,10 +169,11 @@ the larger models in the study.
 ### 5.3 Custom Transformers bundle
 
 A user model is accepted only as the constrained PRT bundle documented in
-`custom-model-bundle.md`: ZIP container, declarative `prt-model.json`, local
-It contains a Hugging Face `config.json`, local tokenizer, and exactly one full
-`model.safetensors` from the encoder allowlist, declares five classes, and uses
-a `custom_...` family plus held-out fold `1..5`. The LoRA adapter variant of this
+`custom-model-bundle.md`: a ZIP container holding a declarative
+`prt-model.json`, a Hugging Face `config.json`, a local tokenizer, and exactly
+one full `model.safetensors` whose architecture is on the encoder allowlist. The
+manifest declares five classes and uses a `custom_...` family plus held-out fold
+`1..5`. The LoRA adapter variant of this
 contract targets the larger decoder bases and is refused for the reason given in
 5.2.
 
@@ -189,26 +190,46 @@ LLM adapters use the pinned base snapshot and may be non-runnable without CUDA.
 
 ## 6. Exact model identity
 
-A runnable model ID is SHA-256 of canonical UTF-8 JSON with sorted keys and no
-insignificant whitespace. Every key, including nulls, is present:
+A model ID is SHA-256 of canonical UTF-8 JSON with sorted keys and no
+insignificant whitespace. Each kind of model hashes its own document, and every
+document carries an `identity_kind`, so two kinds can never collide even when
+the rest of their settings coincide. Every key of the chosen document is
+present, including nulls; a key that does not appear in it is not part of that
+identity and therefore cannot change it.
+
+A validated local core checkpoint:
 
 ```json
 {
+  "identity_kind": "local_validated_artifact",
   "artifact_sha256": "...",
-  "official_manifest_entry_sha256": "...",
   "family": "bert",
   "fold_id": 1,
   "loader_recipe": "bert_state_dict",
-  "loader_recipe_version": "1",
-  "base_model": "bert-base-uncased",
-  "base_revision": "immutable-commit",
-  "tokenizer_source": "bert-base-uncased",
-  "tokenizer_revision": "immutable-commit",
+  "loader_recipe_version": "2",
+  "base_model": "google-bert/bert-base-uncased",
+  "base_revision": "86b5e0934494bd15c9632b12f734a8a67f723594",
+  "tokenizer_source": "google-bert/bert-base-uncased",
+  "tokenizer_revision": "86b5e0934494bd15c9632b12f734a8a67f723594",
   "class_order": [0, 1, 2, 3, 4],
   "max_tokens": 256,
-  "padding_policy": "fixed_max_length",
-  "adapter_config_sha256": null,
-  "runtime_scientific": {"dtype": "float32", "quantization": null}
+  "padding_policy": "fixed_max_length"
+}
+```
+
+An imported custom bundle uses its `artifact_kind` as `identity_kind`
+(`custom_transformer_bundle`, or `custom_peft_adapter_bundle` for the refused
+adapter contract of §5.2), the directory digest as `artifact_sha256`, and adds
+the declared `training_data` object; it carries no tokenizer revision, because
+its tokenizer is part of the hashed directory.
+
+An official paper checkpoint is identified by its manifest entry alone, since
+that entry already pins every file, digest and recipe:
+
+```json
+{
+  "identity_kind": "paper_official",
+  "official_manifest_entry_sha256": "..."
 }
 ```
 
@@ -275,8 +296,8 @@ from state and then resynchronize all local runs; run IDs prevent duplication.
 
 ## 8. Publisher aggregation
 
-Every evaluation uses at least two exact runs from one model family and
-publisher.
+Every aggregation uses at least two runs from one exact checkpoint and one
+normalized publisher; folds of the same family are separate measurements (§8.1).
 
 1. `majority_vote`, version `2`: count hard classes; choose the smallest class
    among ties. This matches `pandas.Series.mode()[0]`.
@@ -363,8 +384,9 @@ with the imported fold registry:
   with `TRAINING_DATA_LEAKAGE`, whatever the checkpoint's family;
 - a derived publisher class excludes every known article that is not in the
   checkpoint's held-out fold;
-- the guard is checked by the service for single articles, explicit lists and
-  publisher candidates, not only by frontend filtering.
+- the guard is checked by the service, both for the single article an
+  evaluation classifies and for every article a derived publisher class counts,
+  not only by frontend filtering.
 
 Stored historical predictions retain their original fold provenance and are
 already held-out outputs for that family/fold. Evaluate exposes such a stored

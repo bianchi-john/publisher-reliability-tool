@@ -36,7 +36,7 @@ the official model link, and actionable import/model instructions.
 ### AT-005 — Single writer and corrupt storage
 
 A second process using the data directory fails `STORAGE_ERROR`. A malformed
-middle row, broken reference, or existing partial/misnamed seven-ledger state
+middle row, broken reference, or existing partial/misnamed six-ledger state
 also fails startup, creates no missing ledger, and serves no HTTP endpoint.
 
 ### AT-006 — Restarted jobs
@@ -50,9 +50,10 @@ failed.
 
 ### AT-007 — Six exact ledgers
 
-A fresh store contains exactly the seven documented CSV ledgers with exact
-UTF-8 headers and reconstructs every persisted API resource without another
-database.
+A fresh store contains exactly the six documented CSV ledgers with exact UTF-8
+headers and reconstructs every persisted API resource without another database.
+A schema-1 store carrying the retired `evaluations.csv` is migrated in place at
+startup; any other unexpected file still fails closed.
 
 ### AT-008 — Corrupt final append fails closed
 
@@ -404,9 +405,8 @@ Given a known article assigned to test fold 2, local BERT/RoBERTa fold 1 are
 hidden with `TRAINING_DATA_LEAKAGE`. A checkpoint of any family is blocked for
 that article on the same evidence, because fold membership is recorded per
 article rather than per family. Direct service/API attempts to infer with those
-checkpoints also fail with that code. Publisher and explicit-list
-workflows exclude or reject the same unsafe article; fold-1 held-out articles
-remain eligible. A local inference over an external URL does not add that URL
+checkpoints also fail with that code. A derived publisher class excludes the
+same unsafe article; fold-1 held-out articles remain eligible. A local inference over an external URL does not add that URL
 to the imported fold registry and therefore cannot manufacture a later leakage
 block. If normalization maps one article identity to more than one imported fold, its
 stored runs remain consultable but every checkpoint is blocked for direct
