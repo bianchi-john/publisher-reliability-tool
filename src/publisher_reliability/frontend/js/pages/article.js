@@ -2,7 +2,7 @@
 
 import {api} from "../api.js";
 import {articleSourceBadges, probabilityCells, table} from "../components.js";
-import {escapeHtml, modelLabel, originLabel, provenanceLabel, shortId, WARNING} from "../format.js";
+import {escapeHtml, modelLabel, originLabel, provenanceLabel, shortId} from "../format.js";
 import {mount} from "../view.js";
 
 function predictionRow(run) {
@@ -34,6 +34,5 @@ export async function articleDetailPage(id) {
       ["Model / fold", "Predicted class", "P(class 0)", "P(class 1)", "P(class 2)", "P(class 3)", "P(class 4)", "Origin", "Run"],
       row.runs.map(predictionRow),
     ),
-    warning: WARNING,
   });
 }

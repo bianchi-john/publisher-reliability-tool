@@ -310,10 +310,12 @@ collapse page height or scrollbar space.
 
 ### AT-041 — Transparent results
 
-Evaluate and article/publisher pages show prediction—not fact—warning, predicted
-class, all five available probabilities, exact model/fold/run, dataset or user
-origin, contributing articles, method/version, and accessible tables containing
-the same values as visual probability bars. Recent local article predictions
+Evaluate and article/publisher pages show the predicted class, all five
+available probabilities, exact model/fold/run, dataset or user origin,
+contributing articles, method/version, the dispersion and risk band behind a
+publisher class, and accessible tables containing the same values as visual
+probability bars. Classes are labelled `Class 0`–`Class 4` throughout and never
+presented as ground truth. Recent local article predictions
 remain visible in Evaluate after refresh.
 
 ### AT-042 — Export privacy

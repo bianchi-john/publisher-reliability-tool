@@ -10,7 +10,7 @@
 import {api} from "../api.js";
 import {CHART_TYPES} from "../charts.js";
 import {errorCard, pager, probabilityCells, table} from "../components.js";
-import {escapeHtml, modelLabel, provenanceLabel, shortId, WARNING} from "../format.js";
+import {escapeHtml, modelLabel, provenanceLabel, shortId} from "../format.js";
 import {content, mount} from "../view.js";
 
 const RUNS_PAGE_SIZE = 100;
@@ -90,7 +90,6 @@ export async function publisherDetailPage(id, params) {
     articleCount: publisher.article_count,
     runCount: publisher.run_count,
     modelCount: publisher.model_count,
-    warning: WARNING,
     storedPredictions: table(
       ["Article", "Model / fold", "Class", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Run"],
       runs.items.map(storedPredictionRow),

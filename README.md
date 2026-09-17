@@ -7,7 +7,7 @@
 
 > [!IMPORTANT]
 > Every result is a model prediction — not a fact, a fact check, or a
-> ground-truth rating. Softmax values are not necessarily calibrated confidence.
+> ground-truth rating.
 
 ## Start
 

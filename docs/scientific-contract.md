@@ -380,15 +380,19 @@ membership from publication date, hostname, text similarity, or a previous
 local inference. Evaluating an external URL with fold 1 does not assign that
 URL to test fold 1 and does not by itself block fold 2.
 
-## 9. Required result warnings
+## 9. Required result provenance
 
-Article/publisher details state that:
+Classes are always labelled `Class 0` through `Class 4` and always described as
+model predictions, never as facts or ground truth (§1). The demo calculates no
+accuracy, because it holds no reference labels to calculate one against.
 
-- predictions are estimates, not fact checks;
-- softmax values are not necessarily calibrated confidence;
-- the demo does not calculate accuracy against protected labels;
-- a publisher result depends on selected articles, exact checkpoint/fold, and
-  aggregation method;
+Rather than repeat a standing disclaimer beside every result, each result names
+what it actually depends on:
+
+- an article result names its exact model, fold, run identifier and origin;
+- a publisher result names the counting method and the exact articles counted,
+  and reports the dispersion of those articles and its risk band, so a class is
+  never shown without the disagreement behind it;
 - optional saved source content remains subject to third-party rights.
 
 ## 10. Reproducibility gate

@@ -7,7 +7,7 @@
 
 import {api} from "../api.js";
 import {articlePredictionResult, errorCard} from "../components.js";
-import {escapeHtml, modelLabel, WARNING} from "../format.js";
+import {escapeHtml, modelLabel} from "../format.js";
 import {progressCard, waitForJob} from "../job-progress.js";
 import {content, mount} from "../view.js";
 
@@ -33,7 +33,7 @@ function blockedNote(availability) {
 }
 
 export async function evaluatePage() {
-  mount("evaluate", {warning: WARNING});
+  mount("evaluate", {});
 
   const form = content.querySelector("#evaluation");
   const urlField = form.elements.url;

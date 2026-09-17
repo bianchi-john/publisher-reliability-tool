@@ -3,9 +3,6 @@
 This guide describes the current browser workflow for models, article
 predictions, and publisher aggregations.
 
-> Predictions are estimates, not fact checks or ground-truth ratings. Softmax
-> values are not necessarily calibrated confidence.
-
 ## 1. Understand the workspace overview
 
 Click **Ready · local** (or **Ready · offline**) in the top bar to open a

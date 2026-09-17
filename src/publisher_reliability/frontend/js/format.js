@@ -3,10 +3,6 @@
  * the enum-like values the API returns.
  */
 
-/** The disclaimer repeated under anything that shows a model output. */
-export const WARNING =
-  "Predictions are estimates, not fact checks. Softmax values are not necessarily calibrated confidence.";
-
 /** Escape a value so it can be interpolated into HTML as text. */
 export const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")

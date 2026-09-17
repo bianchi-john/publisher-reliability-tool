@@ -136,7 +136,6 @@ p { max-width: 760px; }
 .card.full { grid-column: 1 / -1; }
 .metric { margin: 5px 0; font: 400 36px/1.1 "Times New Roman", Times, serif; letter-spacing: -.015em; }
 .muted, .empty { color: var(--muted); }
-.warning { padding: 16px 18px; border-left: 4px solid var(--warning); border-radius: 8px; background: var(--warning-bg); color: var(--warning-ink); }
 .toolbar, form .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 /* A page-head toolbar holds a small, fixed set of action buttons that must stay on
    one row; form rows (inputs that can genuinely run out of space) keep wrapping. */

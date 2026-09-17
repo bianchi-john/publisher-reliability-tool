@@ -1,6 +1,6 @@
 /** Small HTML fragments reused across pages. */
 
-import {escapeHtml, modelLabel, provenanceLabel, shortId, WARNING} from "./format.js";
+import {escapeHtml, modelLabel, provenanceLabel, shortId} from "./format.js";
 import {render} from "./templates.js";
 
 /** Inline error message, announced to screen readers. */
@@ -79,6 +79,5 @@ export function articlePredictionResult(result) {
     probabilityBars: probabilityBars(result),
     articleId: encodeURIComponent(result.article_id),
     runId: shortId(result.prediction_run_id),
-    warning: WARNING,
   });
 }
