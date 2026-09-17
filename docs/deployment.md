@@ -15,18 +15,27 @@ outside scope.
 ## 2. Native start
 
 Reference platform: Ubuntu 24.04 LTS x86-64. Use `uv` 0.8.3 with the committed
-`uv.lock`:
+`uv.lock`. One-time setup:
 
 ```bash
 uv sync --frozen --extra models
+```
+
+Every subsequent start needs only:
+
+```bash
 source .venv/bin/activate
-publisher-reliability dataset verify ./dataset/predictions
 publisher-reliability serve
 ```
 
 The `models` extra is required for local checkpoint scanning and custom
 Transformer validation. A base-only sync remains sufficient for browsing,
 imports and stored aggregation.
+
+`publisher-reliability dataset verify ./dataset/predictions` is an optional,
+read-only check: it validates the bundled release without changing any state.
+`serve` imports that same release itself on every start, keyed by content
+digest, so a repeat start never re-imports or duplicates it.
 
 
 Production frontend assets are built into the package. Successful startup
