@@ -194,6 +194,86 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
             page = await self.client.get(f"/assets/pages/{name}.html")
             self.assertEqual(page.status_code, 200, name)
 
+    async def test_every_pager_is_told_how_many_rows_it_actually_drew(self) -> None:
+        """The pager must never label a page with rows that are not on it.
+
+        The list endpoints report the requested ``limit``, not the number of rows they
+        answered with, so a pager left to infer the range from ``limit`` alone claims
+        "Rows 26-50" on a final page holding two. There is no JavaScript runtime in
+        this project's test environment, so the contract is pinned structurally here:
+        every call site has to hand the pager the real row count.
+        """
+
+        for module in ("articles", "publishers", "publisher"):
+            source = await self.client.get(f"/assets/js/pages/{module}.js")
+            self.assertEqual(source.status_code, 200, module)
+            calls = _pager_arguments(source.text)
+            self.assertTrue(calls, f"{module}.js calls no pager")
+            for call in calls:
+                self.assertIn(".items.length", call, f"{module}.js: pager({call})")
+
+    async def test_every_element_a_page_wires_up_exists_in_its_template(self) -> None:
+        """A page module must not query an element its template does not define.
+
+        `content.querySelector("#x")` returns null when the id is absent, and the very
+        next line calls `addEventListener` on it, so a renamed id does not degrade the
+        page: it throws and the whole route renders as an error card. There is no
+        JavaScript runtime here, so the wiring is checked structurally instead.
+        """
+
+        page_of_module = {
+            "articles": ["articles"],
+            "article": ["article"],
+            "publishers": ["publishers"],
+            "publisher": ["publisher"],
+            "models": ["models"],
+            "jobs": ["jobs"],
+            # The evaluate page also renders the shared result card.
+            "evaluate": ["evaluate", "prediction-result"],
+        }
+        for module, pages in page_of_module.items():
+            source = await self.client.get(f"/assets/js/pages/{module}.js")
+            self.assertEqual(source.status_code, 200, module)
+            markup = ""
+            for page in pages:
+                template = await self.client.get(f"/assets/pages/{page}.html")
+                self.assertEqual(template.status_code, 200, page)
+                markup += template.text
+            queried = set(
+                re.findall(r'content\.querySelector\("#([A-Za-z0-9_-]+)"\)', source.text)
+            )
+            defined = set(re.findall(r'id="([A-Za-z0-9_-]+)"', markup))
+            self.assertEqual(
+                queried - defined, set(), f"{module}.js queries ids missing from {pages}"
+            )
+
+    async def test_the_evaluate_form_fields_the_page_reads_exist(self) -> None:
+        source = await self.client.get("/assets/js/pages/evaluate.js")
+        template = await self.client.get("/assets/pages/evaluate.html")
+        read = set(re.findall(r"\.elements\.([A-Za-z0-9_]+)", source.text))
+        named = set(re.findall(r'name="([A-Za-z0-9_-]+)"', template.text))
+        self.assertTrue(read, "evaluate.js reads no form field")
+        self.assertEqual(read - named, set())
+
+
+def _pager_arguments(source: str) -> list[str]:
+    """Extract the argument text of every ``pager(...)`` call in one module."""
+
+    calls = []
+    for start in range(len(source)):
+        if not source.startswith("pager(", start):
+            continue
+        depth = 0
+        for index in range(start + len("pager"), len(source)):
+            if source[index] == "(":
+                depth += 1
+            elif source[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    calls.append(source[start + len("pager(") : index])
+                    break
+    return calls
+
 
 if __name__ == "__main__":
     unittest.main()

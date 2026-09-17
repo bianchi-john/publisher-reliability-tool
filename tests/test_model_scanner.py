@@ -229,5 +229,207 @@ class ScanCacheTest(unittest.TestCase):
                 self.assertEqual(result["reused_from_cache"], 0)
 
 
+class ReferencedModelRetentionTest(unittest.TestCase):
+    """A scan may never orphan a prediction run by deleting the model it names.
+
+    ``Storage`` refuses to reload a ledger whose runs point at a model that is gone,
+    and the startup mirror sync refuses for the same reason. So a scan that drops a
+    still-referenced row does not merely lose a table entry: it makes the whole
+    workspace impossible to open again, with no way back short of editing CSVs by
+    hand.
+    """
+
+    def _scan(self, storage: Storage, models: Path, digest: str):
+        with (
+            patch(
+                "publisher_reliability.model_scanner._sha256_file",
+                return_value=digest,
+            ),
+            patch(
+                "publisher_reliability.model_scanner._validate_checkpoint",
+                return_value=(201, 109_486_085),
+            ),
+        ):
+            return scan_model_roots(storage, (models,))
+
+    @staticmethod
+    def _local_run(model_id: str) -> dict[str, object]:
+        run = {field: "" for field in HEADERS["prediction_runs"]}
+        run.update(
+            prediction_run_id="run-1",
+            article_id="article-1",
+            canonical_url="https://outlet.example/a",
+            publisher_id="publisher-1",
+            normalized_hostname="outlet.example",
+            model_id=model_id,
+            predicted_class=3,
+            origin="local_inference",
+            action="missing_run_inference",
+            input_source="https://outlet.example/a",
+            content_retention="discard",
+            software_versions_json="{}",
+            recorded_at="2026-07-24T00:00:00Z",
+        )
+        for index in range(5):
+            run[f"prob_class_{index}"] = "0.6" if index == 3 else "0.1"
+        return run
+
+    def test_renaming_a_checkpoint_keeps_the_model_its_predictions_name(self) -> None:
+        # The same bytes under a new fold name are a new identity, so the old model_id
+        # disappears from the scan while the run that used it does not.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            (models / "bert_fold_1.pt").write_bytes(b"checkpoint")
+
+            with Storage(root / "data") as storage:
+                self._scan(storage, models, "a" * 64)
+                original_id = storage.rows["models"][0]["model_id"]
+                storage.append("prediction_runs", self._local_run(original_id))
+
+                (models / "bert_fold_1.pt").rename(models / "bert_fold_3.pt")
+                self._scan(storage, models, "a" * 64)
+
+                by_id = {row["model_id"]: row for row in storage.rows["models"]}
+                self.assertIn(original_id, by_id)
+                self.assertEqual(by_id[original_id]["status"], "artifact_missing")
+                self.assertEqual(by_id[original_id]["artifact_available"], "false")
+                self.assertEqual(by_id[original_id]["runnable"], "false")
+                # The new identity is registered alongside it, not instead of it.
+                self.assertEqual(len(by_id), 2)
+                # The decisive assertion: the workspace can still be opened.
+                storage.reload()
+
+    def test_an_unreferenced_renamed_checkpoint_is_still_dropped(self) -> None:
+        # Nothing points at the old identity, so keeping it would only clutter the
+        # models page with a checkpoint the user deliberately renamed.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            (models / "bert_fold_1.pt").write_bytes(b"checkpoint")
+
+            with Storage(root / "data") as storage:
+                self._scan(storage, models, "a" * 64)
+                original_id = storage.rows["models"][0]["model_id"]
+
+                (models / "bert_fold_1.pt").rename(models / "bert_fold_3.pt")
+                self._scan(storage, models, "a" * 64)
+
+                by_id = {row["model_id"]: row for row in storage.rows["models"]}
+                self.assertNotIn(original_id, by_id)
+                self.assertEqual(len(by_id), 1)
+                self.assertEqual(next(iter(by_id.values()))["fold_id"], "3")
+
+    def test_a_deleted_checkpoint_is_still_reported_as_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            (models / "bert_fold_1.pt").write_bytes(b"checkpoint")
+
+            with Storage(root / "data") as storage:
+                self._scan(storage, models, "a" * 64)
+                original_id = storage.rows["models"][0]["model_id"]
+
+                (models / "bert_fold_1.pt").unlink()
+                self._scan(storage, models, "a" * 64)
+
+                remaining = storage.rows["models"][0]
+                self.assertEqual(remaining["model_id"], original_id)
+                self.assertEqual(remaining["status"], "artifact_missing")
+
+    def test_a_restored_placeholder_gives_way_to_the_returning_artifact(self) -> None:
+        """A checkpoint that comes back must not collide with its own placeholder.
+
+        ``data/`` is disposable by design, and a local checkpoint's model_id is
+        derived from its digest, family and fold, so it is identical before and
+        after. If the artifact is absent when the mirror is restored,
+        ``restore_user_predictions`` recreates that exact id as a historical
+        placeholder. Should the artifact then reappear, a scan registers the same id
+        as a local row, and emitting both writes a duplicate identifier that no later
+        reload accepts -- leaving the workspace impossible to open.
+        """
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            checkpoint = models / "bert_fold_1.pt"
+            checkpoint.write_bytes(b"checkpoint")
+
+            with Storage(root / "data") as storage:
+                self._scan(storage, models, "a" * 64)
+                model_id = storage.rows["models"][0]["model_id"]
+
+                # Stand in for the placeholder restore_user_predictions would write
+                # for a run whose checkpoint is missing: same id, historical kind.
+                placeholder = {field: "" for field in HEADERS["models"]}
+                placeholder.update(
+                    model_id=model_id,
+                    family="bert",
+                    fold_id=1,
+                    display_name="BERT fold 1 (local checkpoint)",
+                    artifact_kind="historical_virtual",
+                    loader_recipe="restored_user_prediction",
+                    loader_recipe_version=1,
+                    class_order_json="[0,1,2,3,4]",
+                    runtime_scientific_json="{}",
+                    status="historical_only",
+                    artifact_available=False,
+                    runnable=False,
+                    registered_at="2026-07-24T00:00:00Z",
+                    last_validated_at="2026-07-24T00:00:00Z",
+                )
+                storage.replace("models", [placeholder])
+
+                # The artifact is present again, so this scan rediscovers the same id.
+                self._scan(storage, models, "a" * 64)
+
+                rows = storage.rows["models"]
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["model_id"], model_id)
+                # The real artifact wins: it can actually run, the placeholder cannot.
+                self.assertEqual(rows[0]["artifact_kind"], "pytorch_state_dict")
+                self.assertEqual(rows[0]["runnable"], "true")
+                storage.reload()
+
+    def test_an_unrelated_historical_identity_is_untouched(self) -> None:
+        # Imported dataset identities are hashed from a different identity document,
+        # so they never collide with a scanned checkpoint and must always survive.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            models = root / "models"
+            models.mkdir()
+            (models / "bert_fold_1.pt").write_bytes(b"checkpoint")
+
+            with Storage(root / "data") as storage:
+                imported = {field: "" for field in HEADERS["models"]}
+                imported.update(
+                    model_id="imported-dataset-identity",
+                    family="roberta",
+                    fold_id=4,
+                    display_name="ROBERTA fold 4 (historical)",
+                    artifact_kind="historical_virtual",
+                    loader_recipe="historical_import",
+                    loader_recipe_version=1,
+                    class_order_json="[0,1,2,3,4]",
+                    runtime_scientific_json="{}",
+                    status="historical_only",
+                    artifact_available=False,
+                    runnable=False,
+                    registered_at="2026-07-24T00:00:00Z",
+                    last_validated_at="2026-07-24T00:00:00Z",
+                )
+                storage.replace("models", [imported])
+
+                self._scan(storage, models, "a" * 64)
+
+                ids = {row["model_id"] for row in storage.rows["models"]}
+                self.assertIn("imported-dataset-identity", ids)
+                self.assertEqual(len(ids), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

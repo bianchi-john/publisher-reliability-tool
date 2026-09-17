@@ -72,7 +72,7 @@ export async function articlesPage(_id, params) {
     list.innerHTML = table(
       ["Article URL", "Source", "Publisher", "Models", "Predictions", "Latest label"],
       data.items.map(articleRow),
-    ) + pager(pageBase, data.page);
+    ) + pager(pageBase, data.page, data.items.length);
   }
 
   const exportButton = content.querySelector("#export");

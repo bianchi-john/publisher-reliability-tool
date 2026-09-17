@@ -287,6 +287,12 @@ def scan_model_roots(
         row for row in storage.rows["models"] if row["artifact_kind"] != "historical_virtual"
     ]
     current_by_id = {str(row["model_id"]): row for row in discovered}
+    # A prediction is only reproducible while the exact model that produced it is
+    # still described in the ledger, and storage refuses to reload a run whose model
+    # has gone. A referenced row is therefore kept and marked missing, never dropped.
+    referenced_model_ids = {
+        row["model_id"] for row in storage.rows["prediction_runs"]
+    }
     for row in previous_local:
         if row["artifact_kind"] in MANAGED_ARTIFACT_KINDS:
             current = dict(row)
@@ -334,7 +340,14 @@ def scan_model_roots(
             continue
         if row["model_id"] in current_by_id:
             current_by_id[row["model_id"]]["registered_at"] = row["registered_at"]
-        elif row["artifact_sha256"] not in seen_digests:
+        elif (
+            row["artifact_sha256"] not in seen_digests
+            or row["model_id"] in referenced_model_ids
+        ):
+            # The digest can still be present while this identity is gone: the same
+            # bytes filed under a different family or fold are a different checkpoint
+            # and get a new model_id. Dropping the old row is fine only while nothing
+            # points at it.
             missing = dict(row)
             missing.update(
                 status="artifact_missing",
@@ -344,7 +357,18 @@ def scan_model_roots(
                 last_validated_at=timestamp,
             )
             current_by_id[row["model_id"]] = missing
-    storage.replace("models", [*historical, *current_by_id.values()])
+
+    # A checkpoint that was absent when the mirror was restored left behind a
+    # placeholder carrying that checkpoint's own model_id (see
+    # restore_user_predictions), because the run it explains points at exactly that
+    # id. When the artifact comes back, this scan registers the same id again as a
+    # real local row, and emitting both would write a duplicate identifier that no
+    # later reload accepts. The real artifact is strictly the better record of the
+    # same identity, so the placeholder gives way to it.
+    surviving_historical = [
+        row for row in historical if row["model_id"] not in current_by_id
+    ]
+    storage.replace("models", [*surviving_historical, *current_by_id.values()])
     cache.save()
     registered = len(discovered) + official_registered
     if registered:

@@ -528,8 +528,16 @@ def import_csv(
     existing_run_ids = {
         row["prediction_run_id"] for row in storage.rows["prediction_runs"]
     }
+    # A historical model exists only to explain the predictions imported alongside it,
+    # so a family/fold whose every row was rejected as conflicting registers nothing.
+    # Otherwise a wholly failed import would still leave a checkpoint identity on the
+    # Models page that accounts for no prediction at all.
+    used_model_ids = {str(row["model_id"]) for row in run_rows}
     merged_models = list(storage.rows["models"]) + [
-        row for row in models.values() if str(row["model_id"]) not in existing_model_ids
+        row
+        for row in models.values()
+        if str(row["model_id"]) not in existing_model_ids
+        and str(row["model_id"]) in used_model_ids
     ]
     merged_runs = list(storage.rows["prediction_runs"]) + [
         row for row in run_rows if str(row["prediction_run_id"]) not in existing_run_ids

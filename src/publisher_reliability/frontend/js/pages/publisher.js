@@ -93,7 +93,7 @@ export async function publisherDetailPage(id, params) {
     storedPredictions: table(
       ["Article", "Model / fold", "Class", "P(0)", "P(1)", "P(2)", "P(3)", "P(4)", "Run"],
       runs.items.map(storedPredictionRow),
-    ) + pager(`publisher/${encodeURIComponent(id)}`, runs.page),
+    ) + pager(`publisher/${encodeURIComponent(id)}`, runs.page, runs.items.length),
   });
 
   const methodField = content.querySelector("#aggregation-method");

@@ -20,8 +20,12 @@ export function table(headers, rows) {
 /**
  * Previous/next links for an offset-paginated list.
  * `base` is the hash route to link back to, with its own query string if any.
+ *
+ * `rowCount` is how many rows this page actually returned. It is needed because the
+ * API reports the requested `limit`, not the size of the page it answered with, so a
+ * partial last page would otherwise be labelled with rows that are not on screen.
  */
-export function pager(base, page) {
+export function pager(base, page, rowCount = page.limit) {
   const separator = base.includes("?") ? "&" : "?";
   const previous = page.offset > 0
     ? `<a class="button secondary" href="#${base}${separator}offset=${Math.max(0, page.offset - page.limit)}">Previous</a>`
@@ -29,7 +33,10 @@ export function pager(base, page) {
   const next = page.next_offset !== null
     ? `<a class="button secondary" href="#${base}${separator}offset=${page.next_offset}">Next</a>`
     : "";
-  return previous || next ? `<div class="pager">${previous}<span class="muted">Rows ${page.offset + 1}–${page.offset + page.limit}</span>${next}</div>` : "";
+  const range = rowCount > 0
+    ? `Rows ${page.offset + 1}–${page.offset + rowCount}`
+    : "No rows";
+  return previous || next ? `<div class="pager">${previous}<span class="muted">${range}</span>${next}</div>` : "";
 }
 
 /**

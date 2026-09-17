@@ -20,5 +20,5 @@ export async function publishersPage(_id, params) {
   replaceLoading(table(
     ["Publisher", "Articles", "Models", "Predictions", "With probabilities"],
     data.items.map(publisherRow),
-  ) + pager("publishers", data.page));
+  ) + pager("publishers", data.page, data.items.length));
 }

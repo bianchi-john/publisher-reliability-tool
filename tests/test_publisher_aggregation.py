@@ -224,5 +224,75 @@ class PublisherAggregationTest(unittest.TestCase):
         )
 
 
+class OrdinalMeanReportingTest(unittest.TestCase):
+    """The ordinal mean must survive the trip from ``aggregate`` to the payload.
+
+    Class 0 is the least reliable band, not an absent value: the five classes are an
+    ordered grade, so a mean of exactly 0.0 is the most emphatic answer this tool can
+    give about a publisher, and it is precisely the answer a truthiness test destroys.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.storage = Storage(self.root / "data")
+
+    def tearDown(self) -> None:
+        self.storage.close()
+        self.temporary.cleanup()
+
+    def _publisher_with(self, *labels: int) -> tuple[ResearchService, str]:
+        source = self.root / "dataset.csv"
+        with source.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=FIELDS)
+            writer.writeheader()
+            for index, label in enumerate(labels):
+                writer.writerow(
+                    prediction_row(
+                        f"https://outlet.example/{index}", 2, {"bert": label}
+                    )
+                )
+        import_csv(self.storage, source)
+        service = ResearchService(self.storage, offline=True)
+        return service, self.storage.rows["prediction_runs"][0]["publisher_id"]
+
+    def test_an_ordinal_mean_of_zero_is_reported_not_dropped(self) -> None:
+        service, publisher = self._publisher_with(0, 0, 0)
+
+        payload = service.publisher_aggregation(publisher, method="ordinal_mean")
+
+        model = payload["models"][0]
+        self.assertEqual(model["result_class"], 0)
+        self.assertEqual(model["ordinal_mean"], 0.0)
+        self.assertIsNotNone(model["ordinal_mean"])
+
+    def test_an_expected_class_of_zero_is_reported_not_dropped(self) -> None:
+        # expected_class puts the centre of mass in the same field, so it loses the
+        # same value for the same reason.
+        service, publisher = self._publisher_with(0, 0)
+
+        payload = service.publisher_aggregation(publisher, method="expected_class")
+
+        model = payload["models"][0]
+        self.assertEqual(model["result_class"], 0)
+        self.assertEqual(model["ordinal_mean"], 0.0)
+
+    def test_a_method_without_an_ordinal_mean_still_reports_none(self) -> None:
+        # Majority vote computes no mean at all; that absence must stay an absence
+        # rather than becoming a misleading 0.0.
+        service, publisher = self._publisher_with(0, 0)
+
+        payload = service.publisher_aggregation(publisher, method="majority_vote")
+
+        self.assertIsNone(payload["models"][0]["ordinal_mean"])
+
+    def test_a_nonzero_ordinal_mean_is_unchanged(self) -> None:
+        service, publisher = self._publisher_with(1, 1, 3)
+
+        payload = service.publisher_aggregation(publisher, method="ordinal_mean")
+
+        self.assertAlmostEqual(payload["models"][0]["ordinal_mean"], 5 / 3)
+
+
 if __name__ == "__main__":
     unittest.main()

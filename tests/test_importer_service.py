@@ -389,5 +389,78 @@ class ImporterServiceTest(unittest.TestCase):
                 )
 
 
+class RejectedImportModelRegistrationTest(unittest.TestCase):
+    """A historical identity exists to explain predictions, so it needs at least one.
+
+    A family/fold whose every row was rejected as conflicting explains nothing. Left
+    registered, it appears on the Models page as a checkpoint identity accounting for
+    no prediction at all, which is indistinguishable from a real dataset identity.
+    """
+
+    FIELDS = [
+        "url",
+        "bert_predicted_label",
+        "bert_fold_id",
+        *[f"bert_prob_class_{index}" for index in range(5)],
+        "roberta_predicted_label",
+        "roberta_fold_id",
+        *[f"roberta_prob_class_{index}" for index in range(5)],
+    ]
+
+    @classmethod
+    def _row(cls, url: str, *, bert: int, roberta: int, fold: int = 2) -> dict[str, str]:
+        row = {"url": url}
+        for family, label in (("bert", bert), ("roberta", roberta)):
+            row[f"{family}_predicted_label"] = str(label)
+            row[f"{family}_fold_id"] = str(fold)
+            for index in range(5):
+                row[f"{family}_prob_class_{index}"] = "1" if index == label else "0"
+        return row
+
+    def _write(self, path: Path, rows: list[dict[str, str]]) -> None:
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=self.FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def test_a_wholly_rejected_import_registers_no_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "conflicting.csv"
+            # The same article and model with two different outputs: unresolvable.
+            self._write(source, [
+                self._row("https://outlet.example/a", bert=1, roberta=1),
+                self._row("https://outlet.example/a", bert=3, roberta=3),
+            ])
+
+            with Storage(root / "data") as storage:
+                result = import_csv(storage, source)
+
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(storage.rows["prediction_runs"], [])
+                self.assertEqual(storage.rows["models"], [])
+                self.assertEqual(len(json.loads(result["warnings_json"])), 2)
+                storage.reload()
+
+    def test_a_partially_rejected_import_registers_only_what_it_explains(self) -> None:
+        # BERT conflicts on the one article; RoBERTa agrees with itself and survives.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "partial.csv"
+            self._write(source, [
+                self._row("https://outlet.example/a", bert=1, roberta=2),
+                self._row("https://outlet.example/a", bert=3, roberta=2),
+            ])
+
+            with Storage(root / "data") as storage:
+                result = import_csv(storage, source)
+
+                self.assertEqual(result["status"], "succeeded_with_rejections")
+                families = {row["family"] for row in storage.rows["models"]}
+                self.assertEqual(families, {"roberta"})
+                self.assertEqual(len(storage.rows["prediction_runs"]), 1)
+                storage.reload()
+
+
 if __name__ == "__main__":
     unittest.main()

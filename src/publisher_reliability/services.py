@@ -443,9 +443,14 @@ class ResearchService:
             calculation = aggregate(runs, method)
         except AppError as exc:
             return self._empty_aggregate(exc.message)
+        # aggregate() reports "" for a method that computes no ordinal mean, and a
+        # float for one that does. Only the empty string means "not applicable":
+        # testing truthiness instead would turn a real mean of 0.0 into a null, which
+        # is exactly what a publisher whose articles all sit in the lowest class has.
+        ordinal_mean = calculation["ordinal_mean"]
         return {
             **calculation,
-            "ordinal_mean": calculation["ordinal_mean"] or None,
+            "ordinal_mean": None if ordinal_mean == "" else ordinal_mean,
             "unavailable_reason": None,
         }
 
