@@ -274,14 +274,15 @@ def create_app(
         model_states: dict[str, int] = {}
         for model in storage.rows["models"]:
             model_states[model["status"]] = model_states.get(model["status"], 0) + 1
-        active = next(
-            (
-                jobs._public(row)
-                for row in storage.rows["jobs"]
-                if row["status"] in {"queued", "running"}
-            ),
-            None,
+        # One FIFO worker runs at most one job, so "current" means the running one
+        # whenever there is one. Ledger order is least-recently-updated first, which
+        # would otherwise surface a job still waiting in the queue ahead of the job
+        # actually executing. Among queued jobs the oldest is the one running next.
+        waiting = sorted(
+            (row for row in storage.rows["jobs"] if row["status"] in {"queued", "running"}),
+            key=lambda row: (row["status"] != "running", row["created_at"], row["job_id"]),
         )
+        active = jobs._public(waiting[0]) if waiting else None
         return {
             "application_version": __version__,
             "schema_version": SCHEMA_VERSION,

@@ -142,7 +142,9 @@ Startup order is:
 5. load and structurally verify the complete store, marking previously running
    jobs `PROCESS_INTERRUPTED`; malformed records fail closed and are not
    repaired automatically;
-6. verify/import the optional bundled release by content digest;
+6. verify/import the optional bundled release by content digest; a release is
+   present only when `manifest.json` is, because the seed directory is also where
+   the private mirror is written and is created by it;
 7. scan configured core model roots and refresh managed-bundle integrity;
 8. restore any run present in the private, git-ignored user-prediction mirror
    but absent from the authoritative state ledger, then idempotently

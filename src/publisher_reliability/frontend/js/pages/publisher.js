@@ -105,6 +105,12 @@ export async function publisherDetailPage(id, params) {
   const excludedIds = new Set();
   let selectedChart = CHART_TYPES[0].id;
   let lastPayload = null;
+  // Toggling several articles quickly, or changing the rule mid-request, leaves
+  // more than one aggregation in flight. Responses can come back out of order, so
+  // each request takes a ticket and only the newest one is allowed to draw:
+  // otherwise the verdicts and charts could settle on a selection the checkboxes
+  // no longer show.
+  let latestRequest = 0;
 
   // The method list comes from the backend so the formulas shown here can never
   // disagree with the ones actually applied.
@@ -161,6 +167,7 @@ export async function publisherDetailPage(id, params) {
 
   /** Recompute the class. The article list is only rebuilt on the first call. */
   async function refresh(withArticles = false) {
+    const ticket = ++latestRequest;
     const excluded = [...excludedIds]
       .map(value => `&exclude=${encodeURIComponent(value)}`).join("");
     output.className = "loading";
@@ -172,12 +179,14 @@ export async function publisherDetailPage(id, params) {
         `/api/v1/publishers/${encodeURIComponent(id)}/aggregation`
         + `?method=${encodeURIComponent(methodField.value)}${excluded}`
       );
+      if (ticket !== latestRequest) return;
       lastPayload = payload;
       output.className = "";
       output.innerHTML = aggregationResults(payload);
       drawCharts();
       if (withArticles) renderExclusionList(payload.articles);
     } catch (error) {
+      if (ticket !== latestRequest) return;
       lastPayload = null;
       output.className = "";
       output.innerHTML = errorCard(error.message);

@@ -104,8 +104,10 @@ not predict whether a future request has a model, saved body, or network.
 ### `GET /api/v1/status`
 
 Returns application/schema version, offline/device flags, bundled import state,
-ledger counts, model-state counts, and current job ID/status. It exposes no full
-paths, content, metrics history, or operational administration.
+ledger counts, model-state counts, and current job ID/status. One FIFO worker runs
+at most one job, so the current job is the running one whenever there is one, and
+otherwise the oldest still queued. It exposes no full paths, content, metrics
+history, or operational administration.
 
 ## 5. Articles and runs
 
@@ -381,7 +383,8 @@ source; an interrupted running job is failed and cleaned at startup.
 
 Supported prediction prefixes are `bert` and `roberta`. Each represented
 label/fold pair requires all five probability columns; missing or incomplete
-vectors fail `IMPORT_INVALID`.
+vectors fail `IMPORT_INVALID`. A CSV.GZ that is truncated mid-stream or whose
+compressed body is damaged fails with the same code, never as an internal error.
 
 ## 11. Aggregation metadata
 

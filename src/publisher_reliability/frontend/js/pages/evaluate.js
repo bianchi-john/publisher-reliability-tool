@@ -41,6 +41,11 @@ export async function evaluatePage() {
   const availability = content.querySelector("#model-availability");
   const submit = form.querySelector("button[type='submit'], button:not([type])");
   let timer;
+  // The debounce spaces lookups out but cannot stop two from overlapping once the
+  // user resumes typing while one is still in flight. Responses may then arrive out
+  // of order, and the slower, older one would describe a URL the field no longer
+  // holds. Each lookup takes a ticket and only the newest is allowed to draw.
+  let latestLookup = 0;
 
   /** Nothing usable to offer: lock the form and explain why. */
   function disableModelChoice(message, asHtml = false) {
@@ -53,6 +58,7 @@ export async function evaluatePage() {
 
   async function refreshAvailable() {
     clearTimeout(timer);
+    const ticket = ++latestLookup;
     if (!urlField.validity.valid || !urlField.value) {
       modelField.innerHTML = `<option value="">Enter a valid URL first</option>`;
       disableModelChoice(IDLE_AVAILABILITY);
@@ -64,6 +70,7 @@ export async function evaluatePage() {
     const query = new URLSearchParams({url: urlField.value});
     try {
       const data = await api(`/api/v1/models/available?${query}`);
+      if (ticket !== latestLookup) return;
       const eligible = data.items.filter(row => row.eligible);
       modelField.innerHTML = eligible.length
         ? eligible.map(modelOption).join("")
@@ -82,6 +89,7 @@ export async function evaluatePage() {
         availability.innerHTML = `<b>${escapeHtml(data.availability.message)}</b>${note ? `<br>${note}` : ""}`;
       }
     } catch (error) {
+      if (ticket !== latestLookup) return;
       disableModelChoice(errorCard(error.message), true);
     }
   }

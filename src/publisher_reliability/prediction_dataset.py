@@ -94,7 +94,18 @@ def _user_values(row: dict[str, str]) -> tuple[int, tuple[float, ...]]:
     The mirror is an ordinary CSV that a user may edit, so its rows are re-checked
     before they can re-enter the ledger: class, fold and probability vector must all be
     valid and the model identity complete.
+
+    The origin column is checked first, because it is the one field that says what a
+    row *is*. Only this file's own kind of row may come back from it; a row claiming to
+    be released dataset material would otherwise be restored as a local evaluation,
+    silently relabelling its provenance.
     """
+
+    if row.get("prediction_origin") != USER_ORIGIN:
+        raise AppError(
+            "IMPORT_INVALID",
+            "User prediction mirror contains a row that is not a user evaluation.",
+        )
 
     try:
         predicted = int(row["predicted_label"])

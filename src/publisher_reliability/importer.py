@@ -9,6 +9,7 @@ import io
 import json
 import math
 import re
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, TextIO
@@ -416,7 +417,18 @@ def import_csv(
                 max_rows=max_rows,
                 legacy_bare_percent=legacy_bare_percent,
             )
-    except (OSError, UnicodeError, csv.Error, gzip.BadGzipFile) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        csv.Error,
+        gzip.BadGzipFile,
+        # A damaged .csv.gz fails deeper than a wrong magic number does, and neither
+        # of these is an OSError: a stream that stops early raises EOFError, and one
+        # whose deflate data is corrupt raises zlib.error. Both mean the upload is
+        # unusable, which is the user's problem to fix, not an internal failure.
+        EOFError,
+        zlib.error,
+    ) as exc:
         raise AppError("IMPORT_INVALID", "Dataset cannot be parsed safely.") from exc
 
     content_digest = known_content_digest or digest_bytes.hex()
@@ -555,7 +567,13 @@ def import_bundled_release(storage: Storage, release_dir: Path) -> dict[str, str
     a no-op, so a restart never duplicates the bundled predictions.
     """
 
-    if not release_dir.exists():
+    # The manifest, not the directory, is what says a release is present. The private
+    # prediction mirror is written into this same directory and creates it when it is
+    # absent, so treating an existing directory as a release would make the tool refuse
+    # to start the moment a user evaluated one article without a bundled release
+    # installed -- and the only way out would be deleting the very history the mirror
+    # exists to protect. A manifest that is present but unreadable still fails loudly.
+    if not (release_dir / "manifest.json").is_file():
         return None
     manifest = verify_manifest(release_dir)
     digest = str(manifest["content_digest_sha256"])

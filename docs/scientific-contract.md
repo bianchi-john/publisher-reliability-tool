@@ -293,6 +293,10 @@ neither changes nor fills an original BERT or RoBERTa output, and it never
 touches the tracked `predictions.csv` release: a user's own evaluation history
 must never enter version control. Startup may restore a mirrored run absent
 from state and then resynchronize all local runs; run IDs prevent duplication.
+A mirrored row is re-validated before it may re-enter the ledger, and its
+`prediction_origin` must be `user_evaluation`: the mirror is an editable file, and a
+row claiming to be released dataset material must never be restored as a local
+evaluation under a provenance it does not have.
 
 ## 8. Publisher aggregation
 

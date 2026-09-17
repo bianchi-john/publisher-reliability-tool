@@ -10,6 +10,7 @@ import shutil
 import stat
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 from .errors import LLM_UNDER_DEVELOPMENT, AppError
@@ -149,8 +150,18 @@ def _safe_extract(
             relative = Path(*relative_parts)
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(info) as input_stream, target.open("xb") as output_stream:
-                shutil.copyfileobj(input_stream, output_stream, length=1024 * 1024)
+            try:
+                with archive.open(info) as input_stream, target.open("xb") as output:
+                    shutil.copyfileobj(input_stream, output, length=1024 * 1024)
+            except (zipfile.BadZipFile, EOFError, zlib.error, OSError) as exc:
+                # The archive's directory parsed, but a member's bytes are damaged:
+                # truncated, or failing their CRC. That is an unusable upload, not an
+                # internal fault, and saying so is what tells the user to send it
+                # again rather than report a bug.
+                raise AppError(
+                    "INVALID_INPUT",
+                    "Custom model bundle is corrupt or incomplete; upload it again.",
+                ) from exc
     return destination
 
 

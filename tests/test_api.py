@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from publisher_reliability.api import create_app
 from publisher_reliability.config import Config
+from publisher_reliability.storage import HEADERS
 
 
 class ApiTest(unittest.IsolatedAsyncioTestCase):
@@ -254,6 +255,74 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         named = set(re.findall(r'name="([A-Za-z0-9_-]+)"', template.text))
         self.assertTrue(read, "evaluate.js reads no form field")
         self.assertEqual(read - named, set())
+
+    async def test_status_reports_the_running_job_not_a_waiting_one(self) -> None:
+        """With one FIFO worker, "current" means the job actually executing.
+
+        Ledger order is least-recently-updated first, so an older queued row sits
+        ahead of the running one it is waiting behind. Reporting that row as the
+        current job would show the workspace as busy with work that has not started.
+        """
+
+        def row(job_id: str, status: str, created: str) -> dict[str, object]:
+            record = {column: "" for column in HEADERS["jobs"]}
+            record.update(
+                job_id=job_id,
+                job_type="model_validation",
+                status=status,
+                phase="",
+                progress="0",
+                request_json="{}",
+                result_json="{}",
+                created_at=created,
+                updated_at=created,
+            )
+            return record
+
+        storage = self.app.state.storage
+        storage.upsert("jobs", "job_id", row("queued-old", "queued", "2026-01-01T00:00:00Z"))
+        storage.upsert("jobs", "job_id", row("running", "running", "2026-01-02T00:00:00Z"))
+        storage.upsert("jobs", "job_id", row("queued-new", "queued", "2026-01-03T00:00:00Z"))
+
+        current = (await self.client.get("/api/v1/status")).json()["current_job"]
+
+        self.assertEqual(current["job_id"], "running")
+        self.assertEqual(current["status"], "running")
+
+        # With nothing running, the oldest queued job is the one about to run.
+        storage.delete("jobs", "job_id", "running")
+        current = (await self.client.get("/api/v1/status")).json()["current_job"]
+        self.assertEqual(current["job_id"], "queued-old")
+
+        storage.replace("jobs", [])
+        self.assertIsNone((await self.client.get("/api/v1/status")).json()["current_job"])
+
+    async def test_a_page_never_draws_a_superseded_response(self) -> None:
+        """Overlapping requests on one page must not let an older answer win.
+
+        The router aborts in-flight work when the user navigates, but nothing cancels
+        a second request the same page starts: typing again during a model lookup, or
+        unticking several articles in a row, leaves two responses racing. Whichever
+        arrives last would otherwise be drawn, which can describe a URL the field no
+        longer holds or a selection the checkboxes no longer show.
+        """
+
+        for module in ("evaluate", "publisher"):
+            source = (await self.client.get(f"/assets/js/pages/{module}.js")).text
+            self.assertIn(
+                "ticket",
+                source,
+                f"{module}.js does not guard against a superseded response",
+            )
+            # The guard has to sit between awaiting the response and drawing it.
+            guard = re.compile(
+                r"await api\([^;]*?\);\s*if \(ticket !== latest\w+\) return;", re.S
+            )
+            self.assertRegex(
+                source,
+                guard,
+                f"{module}.js draws before checking whether it was superseded",
+            )
 
 
 def _pager_arguments(source: str) -> list[str]:

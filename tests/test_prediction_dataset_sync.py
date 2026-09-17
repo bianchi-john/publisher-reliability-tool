@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from publisher_reliability.errors import AppError
 from publisher_reliability.identity import article_id, normalized_hostname, publisher_id
 from publisher_reliability.prediction_dataset import (
     BASE_PUBLIC_COLUMNS,
@@ -331,6 +332,80 @@ class PrivateMirrorStaysOutOfVersionControlTest(unittest.TestCase):
             1,
             "the released dataset must remain part of the repository",
         )
+
+
+class MirrorOriginTest(unittest.TestCase):
+    """Only this file's own kind of row may come back out of it.
+
+    The mirror is an ordinary CSV a user can edit, and `prediction_origin` is the one
+    column that says what a row is. Restoring without checking it would turn a row
+    claiming to be released dataset material into a local evaluation, silently
+    relabelling its provenance in the authoritative ledger.
+    """
+
+    URL = "https://outlet.example/a"
+
+    def _mirror_row(self, **overrides: str) -> dict[str, str]:
+        row = {column: "" for column in PUBLIC_COLUMNS}
+        row.update(
+            article_id=article_id(self.URL),
+            url=self.URL,
+            domain=normalized_hostname(self.URL),
+            prediction_origin="user_evaluation",
+            prediction_run_id="run-1",
+            model_id="model-1",
+            prediction_family="bert",
+            prediction_fold_id="2",
+            prediction_model_name="BERT fold 2 (local checkpoint)",
+            prediction_model_provenance="local_checkpoint",
+            predicted_label="3",
+            prediction_action="missing_run_inference",
+            input_source=self.URL,
+            content_retention="discard",
+            job_id="job-1",
+            inference_started_at="2026-07-24T00:00:00Z",
+            inference_completed_at="2026-07-24T00:00:01Z",
+            duration_ms="10",
+            device="cpu",
+            software_versions_json="{}",
+            recorded_at="2026-07-24T00:00:01Z",
+        )
+        for index in range(5):
+            row[f"prob_class_{index}"] = "0.6" if index == 3 else "0.1"
+        row.update(overrides)
+        return row
+
+    def _restore(self, row: dict[str, str]):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release = root / "seed"
+            release.mkdir()
+            with (release / USER_PREDICTIONS_FILENAME).open(
+                "w", encoding="utf-8", newline=""
+            ) as stream:
+                writer = csv.DictWriter(
+                    stream, fieldnames=PUBLIC_COLUMNS, lineterminator="\n"
+                )
+                writer.writeheader()
+                writer.writerow(row)
+            with Storage(root / "data") as storage:
+                restored = restore_user_predictions(storage, release)
+                return restored, len(storage.rows["prediction_runs"])
+
+    def test_a_user_evaluation_row_is_restored(self) -> None:
+        restored, runs = self._restore(self._mirror_row())
+        self.assertEqual(restored, 1)
+        self.assertEqual(runs, 1)
+
+    def test_a_row_claiming_to_be_released_data_is_refused(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self._restore(self._mirror_row(prediction_origin="dataset_original"))
+        self.assertEqual(raised.exception.code, "IMPORT_INVALID")
+
+    def test_a_row_with_no_origin_at_all_is_refused(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self._restore(self._mirror_row(prediction_origin=""))
+        self.assertEqual(raised.exception.code, "IMPORT_INVALID")
 
 
 if __name__ == "__main__":
