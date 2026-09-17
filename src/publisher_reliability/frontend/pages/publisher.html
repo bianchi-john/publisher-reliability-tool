@@ -15,16 +15,21 @@
 
 <section class="card full">
   <h2>Publisher class</h2>
-  <div class="row">
-    <label>How article verdicts are counted<select id="aggregation-method">
-      <option value="majority_vote">Majority vote</option>
-      <option value="ordinal_mean">Ordinal mean</option>
-      <option value="mean_probabilities">Mean probabilities</option>
-    </select>
-      <small id="method-formula">Most frequent hard class; ties resolve to the smallest class.</small></label>
+  <div class="aggregation-controls">
+    <label>How article verdicts are counted
+      <select id="aggregation-method"></select>
+    </label>
   </div>
+  <p id="method-formula" class="control-help"></p>
   <div id="aggregation-results" class="loading">Reading the article predictions…</div>
   <p class="warning">{{warning}}</p>
+</section>
+
+<section class="section-block">
+  <h2>Charts</h2>
+  <p class="muted">Pick what to plot. Every chart is drawn from the same counted articles as the verdicts above, so changing a setting redraws them.</p>
+  <div id="chart-controls" class="segmented" role="group" aria-label="Chart to display"></div>
+  <div id="chart-area" class="chart-area loading">Drawing…</div>
 </section>
 
 <section class="section-block">

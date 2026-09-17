@@ -151,6 +151,48 @@ class PublisherAggregationTest(unittest.TestCase):
             self.assertIsNone(row["result_class"])
             self.assertIn("at least two", str(row["unavailable_reason"]).lower())
 
+    def test_every_verdict_reports_the_spread_behind_it(self) -> None:
+        payload = self.service.publisher_aggregation(self.publisher_id)
+
+        roberta = next(row for row in payload["models"] if row["family"] == "roberta")
+        # Classes 1, 1, 3 against a verdict of 1: two of three articles match exactly.
+        self.assertEqual(roberta["result_class"], 1)
+        self.assertAlmostEqual(roberta["agreement"], 2 / 3)
+        self.assertAlmostEqual(roberta["tolerant_agreement"], 2 / 3)
+        self.assertGreater(roberta["variance"], 0)
+        self.assertIn(roberta["dispersion_band"], {"stable", "elevated", "high"})
+        self.assertTrue(roberta["dispersion_note"])
+        # A class on its own would read as a fact; the band is what stops it doing so.
+        bert = next(row for row in payload["models"] if row["family"] == "bert")
+        self.assertEqual(bert["variance"], 0)
+        self.assertEqual(bert["dispersion_band"], "stable")
+
+    def test_folds_of_one_family_stay_separate_measurements(self) -> None:
+        # Two more articles for this publisher, held out in a different fold. The study
+        # split publishers between folds, so a publisher appearing in two of them is an
+        # anomaly worth seeing: the checkpoints are reported apart rather than pooled
+        # into one number that no model produced.
+        extra = self.root / "second-fold.csv"
+        with extra.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=FIELDS)
+            writer.writeheader()
+            writer.writerow(prediction_row("https://outlet.example/d", 4, {"bert": 1, "roberta": 1}))
+            writer.writerow(prediction_row("https://outlet.example/e", 4, {"bert": 1, "roberta": 1}))
+        import_csv(self.storage, extra)
+        service = ResearchService(self.storage, offline=True)
+
+        payload = service.publisher_aggregation(self.publisher_id)
+
+        self.assertEqual(len(payload["models"]), 4)
+        self.assertEqual(
+            sorted((row["family"], row["fold_id"]) for row in payload["models"]),
+            [("bert", 2), ("bert", 4), ("roberta", 2), ("roberta", 4)],
+        )
+        # Each checkpoint counts only its own articles: three in fold 2, two in fold 4.
+        self.assertEqual(
+            sorted(row["used_count"] for row in payload["models"]), [2, 2, 3, 3]
+        )
+
     def test_unknown_method_and_unknown_publisher_are_refused(self) -> None:
         with self.assertRaises(AppError) as method:
             self.service.publisher_aggregation(self.publisher_id, method="mean_of_vibes")

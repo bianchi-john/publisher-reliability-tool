@@ -24,7 +24,11 @@
   title, body, authors, raw HTML, or snippets. Only the dedicated content GET
   returns explicitly saved title/body.
 - OpenAPI is `/api/openapi.json`; local Swagger UI is `/api/docs` with bundled
-  assets.
+  assets. Every request body and response carries a worked example drawn from
+  a real run of the shipped release (`src/publisher_reliability/openapi_examples.py`),
+  including named alternatives where the same endpoint can succeed or fail in
+  distinct, instructive ways — for instance `GET /api/v1/jobs/{job_id}` shows a
+  succeeded reuse, a leakage-guard failure, and a still-running poll side by side.
 
 ## 2. Errors and HTTP mapping
 
@@ -203,17 +207,24 @@ Returns the derived summary, counts by model/class, and the 20 newest articles.
 ### `GET /api/v1/publishers/{publisher_id}/aggregation`
 
 Derives the publisher class from stored article runs and writes nothing. Query
-parameters are `method` (`majority_vote` default, `ordinal_mean`,
-`mean_probabilities`) and a repeatable `exclude=<article_id>`.
+parameters are:
+
+- `method`: `majority_vote` (default), `ordinal_mean`, `median_class`,
+  `mean_probabilities`, `expected_class`, or `confidence_weighted_vote`.
+- `exclude=<article_id>`: repeatable, to leave articles out of the count.
 
 Each model is aggregated only over its own leakage-safe articles and never mixed
-with another model's predictions; one run per article per model is counted, the
-newest by effective time. The response returns the method, the excluded IDs, the
-exact article set considered with canonical URLs, and one entry per model with
-available/used/excluded counts, result class, ordinal mean, mean probabilities
-and class counts. A model with fewer than two counted articles reports no class
-and states why. An unknown method is `INVALID_INPUT`; an unknown publisher is
-`NOT_FOUND`.
+with another model's predictions, not even another fold of the same family; one
+run per article per model is counted, the newest by effective time. The response
+returns the method, the excluded IDs, the exact article set considered with
+canonical URLs, and one entry per model with available/used/excluded counts,
+result class, ordinal mean, mean probabilities, class counts, the weights the
+method actually counted (only `confidence_weighted_vote` weights anything), the
+per-article classes and confidences, and the dispersion statistics (mean class,
+variance, variance allowing adjacent classes, exact and within-one-class
+agreement, and the risk band with its explanation). A model with fewer than two
+counted articles reports no class and states why. An unknown method is
+`INVALID_INPUT`; an unknown publisher is `NOT_FOUND`.
 
 ## 7. Models
 
@@ -372,8 +383,11 @@ vectors fail `IMPORT_INVALID`.
 
 ### `GET /api/v1/aggregation-methods`
 
-Returns the three method identifiers, versions, formula text, minimum count,
-probability requirement, tie rule, and scientific warning. Concrete
+Returns every method identifier with its label, version, description, formula
+text, minimum count, probability requirement, tie rule, and scientific warning.
+It also returns the dispersion bands with their explanations, so an interface can label a variance without hard-coding
+thresholds that were derived from measurements. Each band carries the exclusive
+`upper_bound` it ends at; the open-ended top band omits that field. Concrete
 method availability is included in aggregation metadata and checked again by
 the evaluation service. Concrete input/model/fold availability is provided by
 `GET /api/v1/models/available`.

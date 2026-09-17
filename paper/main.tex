@@ -193,21 +193,20 @@ $N$ may evaluate a known article in test fold $N$; a known article in any other
 fold is rejected with the stable error
 \texttt{TRAINING\_DATA\_LEAKAGE}, and publisher aggregation excludes every known
 article outside its held-out fold. The $13$ articles normalising into more than one fold are excluded
-entirely, and the guard covers single articles and publisher
-readings alike. PRT is equally careful about what this does \emph{not} prove:
-absence from the registry is no evidence that an external article was outside
-every training corpus.
+entirely. PRT does not claim the converse: absence from the registry
+is no evidence that an external article was outside every training corpus.
 
 \subsubsection{Retrieval and aggregation.}
 Classifying a new URL uses an SSRF-hardened client that validates every
 redirect and rejects non-public addresses; the HTML is parsed once by a single
-English-configured extractor, and the text must reach 200 characters and 30
-tokens and be detected as English before tokenisation, while raw HTML and
-authors are discarded. A publisher class is never stored: it is derived per
-model over that model's leakage-safe articles under three versioned rules --
-\texttt{majority\_vote} (used in the study), \texttt{ordinal\_mean}
-(class $=\lfloor\mu+0.5\rfloor$) and \texttt{mean\_probabilities} -- and
-recomputed whenever the rule or the counted articles change.
+English-configured extractor; the text must reach 200 characters, 30 tokens and
+English detection before tokenisation, and raw HTML and authors are discarded. A publisher class is never stored: under six
+versioned rules (the study used \texttt{majority\_vote}) it is derived per model
+over that model's leakage-safe articles and recomputed whenever the rule or the
+articles counted change. Runs are never pooled across checkpoints, so a
+publisher straddling two folds stays two measurements. Every class carries its
+articles' variance, banded by the error we measured ($4\%$ below $0.25$,
+$64$--$82\%$ above $1$).
 
 % =========================================================================
 \section{Demonstration}
@@ -219,14 +218,12 @@ Ubuntu 26.04, no GPU) and needs no network for browsing or aggregation.
 and fold, run identifier and origin. The visitor then pastes a public English
 article URL: before submission PRT reports whether it is known, whether
 inference is required, whether a matching checkpoint exists, and whether it is
-blocked for leakage (Fig.~\ref{fig:evaluate}), so the selector is derived
-rather than fixed. \emph{Reuse} returns the stored run without touching
+blocked for leakage (Fig.~\ref{fig:evaluate}). \emph{Reuse} returns the stored run without touching
 the network; \emph{recompute} classifies the page into a new immutable run in
-5--7\,s end to end (warm model time 0.9\,s for BERT, 2.9\,s for
-RoBERTa-large). Opening a \emph{publisher} shows one class per model, read from
-that model's leakage-safe runs; switching the rule or unticking articles
-recomputes it live, exposing the verdict's sensitivity to both choices. We close
-on the CSV ledgers, beside the browser, showing the new run.
+5--7\,s end to end. Opening a \emph{publisher} shows one class per model with its
+variance band and charts; switching the rule, or unticking articles,
+recomputes it live, exposing the verdict's sensitivity to each choice. We close
+on the CSV ledgers showing the new run.
 
 \begin{figure}[t]
 \centering
@@ -256,8 +253,7 @@ prediction run identifier and whether the run was stored or newly computed.}
 A screencast of the walkthrough in Section~\ref{sec:demo} is at
 \url{https://TODO-video-url}; the source code is under Apache-2.0 at
 \url{https://github.com/bianchi-john/publisher-reliability-tool} with the
-dataset release and its scientific and storage contracts. PRT starts with one
-native command or one Compose service on \texttt{127.0.0.1:8000};
+dataset release and its scientific and storage contracts;
 checkpoints and supplementary material~\cite{bianchi2026supplementary} are on
 OSF\footnote{\url{https://osf.io/r9atz/overview?view_only=e4bda170a3e74ca3ae245475d4486d74}}.
 Project-owned outputs use a limited

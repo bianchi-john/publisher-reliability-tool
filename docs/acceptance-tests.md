@@ -211,25 +211,42 @@ leaves earlier article-level runs/content valid but creates no evaluation.
 
 A publisher class is read from stored runs and never written: the request creates
 no row in any ledger. Each model is counted separately over its own leakage-safe
-articles and never mixed with another model's predictions. Changing the counting
-rule, or excluding articles, changes the reported class without changing stored
-data; fewer than two counted articles reports no class for that model. Evaluating
+articles and never mixed with another model's predictions, not even another fold
+of the same family: a publisher whose articles straddle a fold boundary is
+reported as the separate measurements it actually is. Changing the counting rule,
+or excluding articles, changes the reported class without changing stored data;
+fewer than two counted articles reports no class for that model. Evaluating
 several articles as one operation is not offered by the API or the interface.
 
-### AT-031 — Majority vote
+Every reported class carries the spread behind it: mean class, variance, the
+variance that charges nothing for an adjacent class, exact and within-one-class
+agreement, and the risk band with its explanation. There is no tolerant counting
+mode, because an adjacent-class allowance needs a true label to be tolerant of
+and no reference label is shipped; the allowance exists only in those dispersion
+figures, which compare articles with the verdict they produced.
+
+### AT-031 — Vote counting
 
 Classes `[0,1,1,3]` yield class 1; tie `[1,3]` yields the smaller class 1.
+Confidence-weighted voting lets two hesitant articles lose to one certain
+article in the opposite direction, and is the only method whose counted weights
+differ from the raw class counts.
 
-### AT-032 — Ordinal mean
+### AT-032 — Ordinal methods
 
 Classes `[0,1,4]` store `1.666666...`, display `1.667`, and yield class 2 using
-`floor(mean + 0.5)`.
+`floor(mean + 0.5)`. The median resists an outlier the mean cannot: `[1,1,1,1,4]`
+yields class 2 by mean and class 1 by median.
 
-### AT-033 — Mean probabilities
+### AT-033 — Probability methods
 
 Complete vectors are averaged component-wise and smallest maximum index wins.
-The importer rejects a missing vector; corrupted legacy state still returns
-`PROBABILITIES_REQUIRED` without fabricating data.
+The expected class reads the centre of mass instead of the peak, so vectors
+peaking at class 0 with real mass at class 2 yield class 1. The averaged vector
+is reported whatever the method, because it describes the data rather than the
+counting rule. The importer rejects a missing vector; corrupted legacy state
+still returns `PROBABILITIES_REQUIRED` without fabricating data, and only for a
+method that genuinely needs the probabilities.
 
 ### AT-034 — Exact compatibility and historical models
 

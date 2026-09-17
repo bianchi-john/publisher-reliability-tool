@@ -2,22 +2,25 @@
  * #publisher/<id> — a publisher's class, read from its article predictions.
  *
  * Nothing here is stored: the user picks how the article verdicts are counted and
- * which articles take part, and the backend recomputes the class on every change.
+ * which articles take part, and the backend recomputes everything on each change. The
+ * charts are redrawn from the same payload that produced the numbers, so a figure can
+ * never drift away from the table beside it.
  */
 
 import {api} from "../api.js";
+import {CHART_TYPES} from "../charts.js";
 import {errorCard, pager, probabilityCells, table} from "../components.js";
 import {escapeHtml, modelLabel, provenanceLabel, shortId, WARNING} from "../format.js";
 import {content, mount} from "../view.js";
 
 const RUNS_PAGE_SIZE = 100;
 
-/** Shown under the method selector, so the chosen rule is never a mystery. */
-const METHOD_FORMULAS = {
-  majority_vote: "Most frequent hard class; ties resolve to the smallest class.",
-  ordinal_mean: "Mean of the class indices, rounded half upward.",
-  mean_probabilities: "Component-wise mean of the five probabilities; needs complete vectors.",
-};
+/** Percentage with no false precision; an absent value stays absent. */
+const percent = (value) =>
+  value === null || value === undefined ? "—" : `${(Number(value) * 100).toFixed(0)}%`;
+
+const decimal = (value, places = 3) =>
+  value === null || value === undefined ? "—" : Number(value).toFixed(places);
 
 function storedPredictionRow(run) {
   return `<tr><td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a></td>
@@ -26,36 +29,60 @@ function storedPredictionRow(run) {
         <td>${shortId(run.prediction_run_id)}</td></tr>`;
 }
 
-/** One row per model: each keeps its own verdict, they are never merged. */
+/**
+ * The dispersion warning that sits beside a verdict.
+ *
+ * A class on its own reads as a fact. The band is what stops it from doing so, which
+ * is why it is rendered next to the class rather than in a footnote.
+ */
+function dispersionPill(group) {
+  if (!group.dispersion_band) return "";
+  return `<span class="dispersion-pill ${escapeHtml(group.dispersion_band)}" title="${escapeHtml(group.dispersion_note || "")}">
+    ${escapeHtml(group.dispersion_band)} · variance ${decimal(group.variance)}</span>`;
+}
+
+/** One card per measurement: the verdict, how much the articles agreed, and why. */
+function verdictCard(group) {
+  if (group.result_class === null) {
+    return `<article class="verdict-card unavailable">
+      <header><b>${escapeHtml(group.display_name)}</b>
+        <span class="muted">${escapeHtml(provenanceLabel(group.provenance))}</span></header>
+      <p class="muted">${escapeHtml(group.unavailable_reason || "No class available.")}</p>
+      <p class="muted">${group.used_count} of ${group.available_count} articles counted.</p>
+    </article>`;
+  }
+  const excluded = group.excluded_count
+    ? ` · ${group.excluded_count} left out`
+    : "";
+  return `<article class="verdict-card">
+    <header><b>${escapeHtml(group.display_name)}</b>
+      <span class="muted">${escapeHtml(provenanceLabel(group.provenance))}</span></header>
+    <div class="verdict-class"><span class="class-chip large">Class ${group.result_class}</span>${dispersionPill(group)}</div>
+    <dl class="verdict-stats">
+      <div><dt>Articles counted</dt><dd>${group.used_count} of ${group.available_count}${escapeHtml(excluded)}</dd></div>
+      <div><dt>Articles in this class</dt><dd>${percent(group.agreement)}</dd></div>
+      <div><dt>Within one class</dt><dd>${percent(group.tolerant_agreement)}</dd></div>
+      <div><dt>Mean class</dt><dd class="mono">${decimal(group.mean_class, 2)}</dd></div>
+      <div><dt>Variance</dt><dd class="mono">${decimal(group.variance)}</dd></div>
+      <div><dt>Variance allowing adjacent</dt><dd class="mono">${decimal(group.tolerant_variance)}</dd></div>
+    </dl>
+    <p class="verdict-note muted">${escapeHtml(group.dispersion_note || "")}</p>
+  </article>`;
+}
+
 function aggregationResults(payload) {
   if (!payload.models.length) {
     return `<div class="empty notice">No leakage-safe prediction is stored for this publisher, so no class can be read for it.</div>`;
   }
-  return table(
-    ["Model / fold", "Articles used", "Publisher class", "Ordinal mean", "Class counts"],
-    payload.models.map(row => {
-      const excluded = row.excluded_count
-        ? `<br><span class="muted">${row.excluded_count} excluded</span>`
-        : "";
-      const verdict = row.result_class === null
-        ? `<span class="muted">${escapeHtml(row.unavailable_reason || "Not available")}</span>`
-        : `<span class="class-chip">Class ${row.result_class}</span>`;
-      const counts = Object.entries(row.class_counts)
-        .map(([cls, n]) => `${cls}:${n}`).join("  ");
-      return `<tr><td><b>${escapeHtml(modelLabel(row))}</b><br><span class="muted">${escapeHtml(provenanceLabel(row.provenance))}</span></td>
-        <td>${row.used_count} of ${row.available_count}${excluded}</td>
-        <td>${verdict}</td>
-        <td class="mono">${row.ordinal_mean === null ? "—" : Number(row.ordinal_mean).toFixed(3)}</td>
-        <td class="mono">${escapeHtml(counts)}</td></tr>`;
-    }),
-  );
+  return `<div class="verdict-grid">${payload.models.map(verdictCard).join("")}</div>`;
 }
 
 export async function publisherDetailPage(id, params) {
   const offset = Number(params.get("offset") || 0);
-  const [publisher, runs] = await Promise.all([
+  const [publisher, runs, methods] = await Promise.all([
     api(`/api/v1/publishers/${encodeURIComponent(id)}`),
     api(`/api/v1/prediction-runs?publisher_id=${encodeURIComponent(id)}&limit=${RUNS_PAGE_SIZE}&offset=${offset}`),
+    api(`/api/v1/aggregation-methods`),
   ]);
 
   mount("publisher", {
@@ -73,8 +100,49 @@ export async function publisherDetailPage(id, params) {
   const methodField = content.querySelector("#aggregation-method");
   const formula = content.querySelector("#method-formula");
   const output = content.querySelector("#aggregation-results");
+  const chartControls = content.querySelector("#chart-controls");
+  const chartArea = content.querySelector("#chart-area");
   const exclusionList = content.querySelector("#exclusion-list");
   const excludedIds = new Set();
+  let selectedChart = CHART_TYPES[0].id;
+  let lastPayload = null;
+
+  // The method list comes from the backend so the formulas shown here can never
+  // disagree with the ones actually applied.
+  methodField.innerHTML = methods.items
+    .map(entry => `<option value="${escapeHtml(entry.method)}">${escapeHtml(entry.label || entry.method)}</option>`)
+    .join("");
+
+  /** Explain the chosen rule, so the number above it is never a mystery. */
+  function describeMethod() {
+    const entry = methods.items.find(item => item.method === methodField.value);
+    if (!entry) return;
+    formula.textContent = `${entry.description} ${entry.formula} ${entry.tie_rule}`;
+  }
+
+  chartControls.innerHTML = CHART_TYPES
+    .map(chart => `<button type="button" class="segment" data-chart="${escapeHtml(chart.id)}" aria-pressed="${chart.id === selectedChart}">${escapeHtml(chart.label)}</button>`)
+    .join("");
+
+  /** Redraw the selected chart, once per measurement or once for the whole payload. */
+  function drawCharts() {
+    if (!lastPayload) return;
+    const chart = CHART_TYPES.find(item => item.id === selectedChart);
+    chartControls.querySelectorAll(".segment").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.chart === selectedChart));
+    });
+    chartArea.className = "chart-area";
+    if (!lastPayload.models.length) {
+      chartArea.innerHTML = `<p class="chart-empty muted">Nothing to plot without a counted prediction.</p>`;
+      return;
+    }
+    const context = {bands: methods.dispersion_bands || []};
+    chartArea.innerHTML = chart.scope === "payload"
+      ? chart.draw(lastPayload, context)
+      : lastPayload.models
+          .map(group => `<div class="chart-slot"><h3>${escapeHtml(group.display_name)}</h3>${chart.draw(group, context)}</div>`)
+          .join("");
+  }
 
   /** One checkbox per article; unchecking it recounts every model without it. */
   function renderExclusionList(articles) {
@@ -98,22 +166,39 @@ export async function publisherDetailPage(id, params) {
       .map(value => `&exclude=${encodeURIComponent(value)}`).join("");
     output.className = "loading";
     output.textContent = "Reading the article predictions…";
+    chartArea.className = "chart-area loading";
+    chartArea.textContent = "Drawing…";
     try {
       const payload = await api(
-        `/api/v1/publishers/${encodeURIComponent(id)}/aggregation?method=${encodeURIComponent(methodField.value)}${excluded}`
+        `/api/v1/publishers/${encodeURIComponent(id)}/aggregation`
+        + `?method=${encodeURIComponent(methodField.value)}${excluded}`
       );
+      lastPayload = payload;
       output.className = "";
       output.innerHTML = aggregationResults(payload);
+      drawCharts();
       if (withArticles) renderExclusionList(payload.articles);
     } catch (error) {
+      lastPayload = null;
       output.className = "";
       output.innerHTML = errorCard(error.message);
+      chartArea.className = "chart-area";
+      chartArea.innerHTML = "";
     }
   }
 
+  chartControls.addEventListener("click", (event) => {
+    const button = event.target.closest(".segment");
+    if (!button) return;
+    selectedChart = button.dataset.chart;
+    drawCharts();
+  });
+
   methodField.addEventListener("change", () => {
-    formula.textContent = METHOD_FORMULAS[methodField.value];
+    describeMethod();
     refresh();
   });
+
+  describeMethod();
   await refresh(true);
 }

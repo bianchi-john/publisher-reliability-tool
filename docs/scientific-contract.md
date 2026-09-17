@@ -275,21 +275,70 @@ from state and then resynchronize all local runs; run IDs prevent duplication.
 
 ## 8. Publisher aggregation
 
-Every evaluation uses 2–50 exact runs from one model and publisher.
+Every evaluation uses at least two exact runs from one model family and
+publisher.
 
-1. `majority_vote`, version `1`: count hard classes; choose the smallest class
+1. `majority_vote`, version `2`: count hard classes; choose the smallest class
    among ties. This matches `pandas.Series.mode()[0]`.
-2. `ordinal_mean`, version `1`: arithmetic mean of hard classes; store full
+2. `ordinal_mean`, version `2`: arithmetic mean of hard classes; store full
    finite value, display three decimals, and choose `floor(mean + 0.5)`.
-3. `mean_probabilities`, version `1`: require all five probabilities for every
+3. `median_class`, version `1`: lower median of the hard classes, so a few
+   extreme articles cannot move the verdict the way a mean can.
+4. `mean_probabilities`, version `2`: require all five probabilities for every
    run, average each component, and choose the smallest maximum index.
+5. `expected_class`, version `1`: centre of mass of the averaged probability
+   vector, `sum(k * mean P(k))`, rounded by `floor(value + 0.5)`. This is the
+   method closest to treating reliability as the 0–100 grade beneath the bands.
+6. `confidence_weighted_vote`, version `1`: a majority vote in which each
+   article contributes its own maximum probability instead of one whole vote.
 
 No method silently substitutes another. Fewer than two compatible runs is
 `INSUFFICIENT_ARTICLES`; missing probability input is
 `PROBABILITIES_REQUIRED`. Input order does not change formulas but is stored for
 provenance.
 
-## 8.1 Cross-validation leakage guard
+### 8.1 One measurement is one checkpoint
+
+Runs are never pooled across models, not even across folds of one family. The
+study split publishers between folds, so each checkpoint saw a different part of
+the corpus; merging their verdicts would report a number no model produced, and
+would hide any publisher whose articles unexpectedly straddle a fold boundary.
+Those cases are anomalies worth surfacing, not smoothing over. One run per
+article per model is counted, the newest by effective time.
+
+### 8.2 No tolerant counting mode
+
+The study reports a tolerant accuracy, which counts a prediction correct when it
+lands in a band adjacent to the true one. That metric requires a true label.
+Aggregation has none: it compares articles with the verdict they themselves
+produced. Spreading each vote onto its neighbours would therefore not measure
+tolerance to error but merely smooth the vote histogram, using a weight nobody
+measured, and it would duplicate what `ordinal_mean`, `median_class` and
+`expected_class` already do openly. An adjacent-class allowance is applied only
+where it needs no ground truth: to the dispersion statistics below.
+
+### 8.3 Dispersion
+
+Every result reports, over the counted articles: the mean class, the population
+variance of the class indices, the share of articles matching the verdict
+exactly and within one class, and a variance that charges nothing for landing in
+an adjacent class. These are statements about how far the articles sit from each
+other and from the verdict, so they need no true label. The two that allow an
+adjacent class are measured relative to the verdict and therefore move when the
+counting rule does. The variance is banded by publisher-level error rates
+measured on the study corpus at ten articles per outlet:
+
+| Variance | Majority error | Tolerant error | Band |
+| --- | --- | --- | --- |
+| below 0.25 | about 4% | about 1% | stable |
+| 0.25 to 1.00 | 43–55% | 12–18% | elevated |
+| 1.00 and above | 64–82% | 22–43% | high |
+
+The cliff at 0.25 is the reason the bands exist: immediately above it the
+publisher-level error rate multiplies roughly tenfold. A verdict is never shown
+without its band.
+
+### 8.4 Cross-validation leakage guard
 
 For the imported five-fold corpus, `<family>_fold_id=N` means that the stored
 prediction was produced for held-out test fold `N`. The corresponding local

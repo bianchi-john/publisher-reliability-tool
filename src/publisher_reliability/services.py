@@ -398,6 +398,57 @@ class ResearchService:
             "warning": WARNING,
         }
 
+    UNAVAILABLE = (
+        "At least two leakage-safe articles are required for an aggregate."
+    )
+
+    @staticmethod
+    def _empty_aggregate(reason: str) -> dict[str, object]:
+        """The shape every group reports when it cannot produce a class.
+
+        The keys are the same ones a successful aggregate carries, so the interface
+        never has to branch on presence: it branches on ``result_class`` being null.
+        """
+
+        return {
+            "result_class": None,
+            "ordinal_mean": None,
+            "probabilities": None,
+            "mean_probabilities": None,
+            "weighted_counts": None,
+            "class_counts": {str(index): 0 for index in range(5)},
+            "mean_class": None,
+            "variance": None,
+            "tolerant_variance": None,
+            "agreement": None,
+            "tolerant_agreement": None,
+            "dispersion_band": None,
+            "dispersion_note": None,
+            "unavailable_reason": reason,
+        }
+
+    def _aggregate_or_reason(
+        self, runs: list[dict[str, str]], method: str
+    ) -> dict[str, object]:
+        """Aggregate a group, turning a refusal into a displayable reason.
+
+        A model that cannot be aggregated is not an error for the whole page: the
+        other models still have something to say, so the refusal is reported in place
+        of that one verdict rather than raised.
+        """
+
+        if len(runs) < 2:
+            return self._empty_aggregate(self.UNAVAILABLE)
+        try:
+            calculation = aggregate(runs, method)
+        except AppError as exc:
+            return self._empty_aggregate(exc.message)
+        return {
+            **calculation,
+            "ordinal_mean": calculation["ordinal_mean"] or None,
+            "unavailable_reason": None,
+        }
+
     def publisher_aggregation(
         self,
         identifier: str,
@@ -405,17 +456,21 @@ class ResearchService:
         method: str = "majority_vote",
         excluded_article_ids: Iterable[str] = (),
     ) -> dict[str, object]:
-        """Derive one publisher-level class per model, without storing anything.
+        """Derive publisher-level classes from the stored article predictions.
 
         A publisher's reliability class is not a separate record a user creates; it is
         a reading of the article predictions already held, and it changes with the
         counting rule and with which articles are considered. So it is recomputed on
         every request from the current runs instead of being frozen into a ledger row.
 
-        Each model is aggregated only over its own leakage-safe articles and never
-        mixed with another model's predictions: two checkpoints trained on different
-        folds are two separate measurements of the same publisher, and averaging them
-        together would report a number that no model actually produced.
+        One measurement is one exact checkpoint. Predictions are never pooled across
+        models, not even across folds of one family: the study split publishers
+        between folds, so each checkpoint saw a different part of the corpus, and
+        merging their verdicts would report a number no model produced while hiding
+        any publisher whose articles unexpectedly straddle a fold boundary. Those
+        cases are worth seeing, not smoothing over.
+
+        Nothing is written: this is a read of the ledger, not a record in it.
         """
 
         if method not in {row["method"] for row in METHODS}:
@@ -434,7 +489,7 @@ class ResearchService:
         excluded = {str(value) for value in excluded_article_ids}
         fold_registry = self._imported_fold_registry()
         models = self.models_by_id
-        by_model: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
+        by_group: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
         # The exact article set the caller may exclude from, URLs included, so the
         # interface never has to guess it from a paginated run listing.
         considered: dict[str, str] = {}
@@ -448,19 +503,17 @@ class ResearchService:
                 continue
             # One run per article per model: a page re-evaluated many times must not
             # count more than a page evaluated once.
-            current = by_model[run["model_id"]].get(run["article_id"])
+            current = by_group[run["model_id"]].get(run["article_id"])
             if current is None or newest_runs([current, run])[0] is run:
-                by_model[run["model_id"]][run["article_id"]] = run
+                by_group[run["model_id"]][run["article_id"]] = run
             considered[run["article_id"]] = run["canonical_url"]
 
         results: list[dict[str, object]] = []
-        for model_identifier, runs_by_article in by_model.items():
+        for model_identifier, runs_by_article in by_group.items():
             model = models[model_identifier]
-            eligible = [
-                run
-                for article, run in runs_by_article.items()
-                if article not in excluded
-            ]
+            eligible = newest_runs(
+                [run for article, run in runs_by_article.items() if article not in excluded]
+            )
             entry: dict[str, object] = {
                 "model_id": model_identifier,
                 "family": model["family"],
@@ -471,36 +524,21 @@ class ResearchService:
                 "used_count": len(eligible),
                 "excluded_count": len(runs_by_article) - len(eligible),
             }
-            if len(eligible) < 2:
-                entry.update(
-                    result_class=None,
-                    ordinal_mean=None,
-                    probabilities=None,
-                    class_counts={str(index): 0 for index in range(5)},
-                    unavailable_reason=(
-                        "At least two leakage-safe articles are required for an "
-                        "aggregate."
-                    ),
-                )
-            else:
-                try:
-                    calculation = aggregate(newest_runs(eligible), method)
-                except AppError as exc:
-                    entry.update(
-                        result_class=None,
-                        ordinal_mean=None,
-                        probabilities=None,
-                        class_counts={str(index): 0 for index in range(5)},
-                        unavailable_reason=exc.message,
-                    )
-                else:
-                    entry.update(
-                        result_class=calculation["result_class"],
-                        ordinal_mean=calculation["ordinal_mean"] or None,
-                        probabilities=calculation["probabilities"],
-                        class_counts=calculation["class_counts"],
-                        unavailable_reason=None,
-                    )
+            entry.update(self._aggregate_or_reason(eligible, method))
+            # Per-article detail for the charts: the strip of individual verdicts is
+            # the only honest way to show why a variance is what it is.
+            entry["articles"] = sorted(
+                (
+                    {
+                        "article_id": article,
+                        "predicted_class": int(run["predicted_class"]),
+                        "confidence": self._run_confidence(run),
+                        "excluded": article in excluded,
+                    }
+                    for article, run in runs_by_article.items()
+                ),
+                key=lambda item: str(item["article_id"]),
+            )
             entry["article_ids"] = sorted(runs_by_article)
             results.append(entry)
 
@@ -521,6 +559,15 @@ class ResearchService:
             "models": results,
             "warning": WARNING,
         }
+
+    @staticmethod
+    def _run_confidence(run: dict[str, str]) -> float | None:
+        """How sure the model was, or nothing when the vector was not stored."""
+
+        values = [run[f"prob_class_{index}"] for index in range(5)]
+        if any(value == "" for value in values):
+            return None
+        return max(float(value) for value in values)
 
     def models(self, *, family: str | None = None, status: str | None = None):
         rows = [

@@ -52,7 +52,8 @@ The MVP shall:
 - evaluate one article, 2–50 explicit same-publisher articles, or one publisher
   with a requested count of 2–50;
 - reuse exact stored runs or explicitly create a new immutable run;
-- aggregate exact compatible runs with the three scientific methods;
+- aggregate exact compatible runs with the six scientific methods, always
+  reporting the dispersion of the articles behind each result;
 - derive Evaluate choices from locally present models: safe matching stored
   family/fold coverage or runnable local IDs for new single-article inference;
 - prevent a checkpoint from evaluating known imported articles outside its
@@ -215,6 +216,16 @@ reading over the articles already classified, derived on request by the publishe
 aggregation endpoint and never stored. The application never crawls a publisher
 to discover articles it has not been given.
 
+That reading is offered several ways, because there is no single right one. The
+reader chooses how the article verdicts are counted, and which articles take
+part. Every verdict is shown with the spread of the articles behind it and a risk
+band derived from measured error rates, so a class is never presented as a fact
+on its own, and selectable charts show the class distribution, the individual
+articles, the probability profile, the variance against those bands, and how the
+models compare. The spread is explicitly a statement about agreement, not about
+accuracy: no reference label is shipped, so the application never offers a
+reading that would require one.
+
 Before submission, Evaluate reports whether the URL is known, requires new
 inference, lacks a matching local checkpoint, or is blocked for training-data
 leakage. Checkpoints withheld by the leakage guard are named, so a hidden option
@@ -351,7 +362,7 @@ without a CDN.
 | FR-007 | `reuse` shall select the latest exact-model immutable run without creating another run. |
 | FR-008 | `recompute` and missing-run inference shall create new immutable runs with exact provenance and idempotently mirror each run to the prediction dataset as `user_evaluation`. |
 | FR-009 | A publisher class shall be derived on request from stored article runs, never persisted, and shall report the model and exact articles counted. |
-| FR-010 | The three aggregation methods shall implement the scientific formulas and availability rules exactly. |
+| FR-010 | Every aggregation method shall implement the scientific formulas and availability rules exactly, and every result shall report the dispersion of the articles behind it. |
 | FR-011 | Bundled and user-imported predictions shall contain all five finite class probabilities; values shall never be fabricated. |
 | FR-012 | Exact model identity shall include every output-relevant setting and exclude filesystem location. |
 | FR-013 | Only built-in safe loaders shall read artifacts; artifact code shall never execute. |

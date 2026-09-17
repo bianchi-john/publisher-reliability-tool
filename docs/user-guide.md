@@ -215,20 +215,46 @@ Open **Publishers**, or click a publisher name anywhere an article is listed.
 The page shows one class per model, each counted only over that model's
 leakage-safe articles. Two models may disagree, and that disagreement is shown
 rather than averaged away: mixing predictions from different checkpoints would
-report a number no model produced.
+report a number no model produced. Folds of one family are not pooled either.
+The corpus was split so that a publisher's articles belong to a single fold, so
+a publisher appearing under two folds of the same family is an anomaly you
+should be able to see rather than one the page quietly smooths over.
 
 Two controls change the reading:
 
-- **How article verdicts are counted** selects majority vote, ordinal mean, or
-  mean probabilities. The formula for the current choice is shown beneath it.
+- **How article verdicts are counted** selects the aggregation method. Each one
+  answers a slightly different question — majority vote takes the most common
+  class, the ordinal mean and the median use the fact that the classes are
+  ordered, mean probabilities and expected class work from the full probability
+  vectors, and confidence-weighted vote lets a hesitant article count for less.
+  A description of the current choice is shown beneath it.
 - **Articles counted** lists every article of that publisher with a
-  leakage-safe prediction. Clear a checkbox to leave one out; each model is
+  leakage-safe prediction. Clear a checkbox to leave it out; each model is
   recounted over what remains.
 
-Both act on the display only. Nothing is written, so a different reading is
-always one click away, and the stored predictions never change. A model needs at
-least two counted articles to report a class; below that it reports none rather
-than presenting a single article as an aggregate.
+Each verdict carries the spread of the articles behind it: how many of them
+match the class exactly, how many are within one class of it, the variance of
+the classes, and a band — **stable**, **elevated** or **high** — from error
+rates measured on the study corpus. A high band means the model has no stable
+opinion about this publisher, and the verdict should be read as indicative only.
+
+Note what these numbers do and do not say. They measure how far the articles sit
+from each other and from the verdict they produced. They are not accuracy: this
+tool ships no reference labels, so nothing here can tell you whether a class is
+*right*. That is also why there is no option to count adjacent classes as near
+misses when voting — an allowance for near misses needs a true label to be near
+to. The allowance appears only in the dispersion figures, where "within one
+class" and "variance allowing adjacent" describe agreement, not correctness.
+
+**Charts** plots the same counted articles. Pick between the class
+distribution, one dot per article against how sure the model was, the variance
+against the risk bands, the averaged probability profile, and a side-by-side
+comparison of the models.
+
+All of this acts on the display only. Nothing is written, so a different reading
+is always one click away, and the stored predictions never change. A reading
+needs at least two counted articles to report a class; below that it reports
+none rather than presenting a single article as an aggregate.
 
 ## 6. Appearance and navigation
 

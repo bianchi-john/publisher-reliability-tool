@@ -17,12 +17,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import SCHEMA_VERSION, __version__
-from .aggregation import METHODS
+from .aggregation import DISPERSION_BANDS, METHODS
 from .config import Config
 from .errors import LLM_UNDER_DEVELOPMENT, AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
 from .model_scanner import scan_model_roots
+from . import openapi_examples as examples
 from .prediction_dataset import (
     restore_user_predictions,
     sync_user_predictions,
@@ -54,10 +55,20 @@ class EvaluationRequest(StrictModel):
 
 
 class DeleteContentRequest(StrictModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": examples.DELETE_CONTENT_BODY_EXAMPLE},
+    )
+
     confirm_canonical_url: str
 
 
 class ClearUserDataRequest(StrictModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": examples.CLEAR_USER_DATA_BODY_EXAMPLE},
+    )
+
     confirmation: str
 
 
@@ -241,15 +252,19 @@ def create_app(
             getattr(request.state, "request_id", None),
         )
 
-    @app.get("/health/live")
+    @app.get("/health/live", summary="Liveness probe")
     async def live():
         return {"status": "alive"}
 
-    @app.get("/health/ready")
+    @app.get("/health/ready", summary="Readiness probe")
     async def ready():
         return {"status": "ready"}
 
-    @app.get("/api/v1/status")
+    @app.get(
+        "/api/v1/status",
+        summary="Workspace overview: versions, ledger counts, current job",
+        responses=examples.STATUS_RESPONSES,
+    )
     async def status():
         counts = {
             key: len(value)
@@ -300,7 +315,12 @@ def create_app(
             "current_job": active,
         }
 
-    @app.get("/api/v1/articles/export", response_class=PlainTextResponse)
+    @app.get(
+        "/api/v1/articles/export",
+        response_class=PlainTextResponse,
+        summary="Download predictions as CSV, one row per model per article",
+        responses=examples.EXPORT_RESPONSES,
+    )
     async def export_articles(
         q: str | None = None,
         publisher: str | None = None,
@@ -326,13 +346,21 @@ def create_app(
             },
         )
 
-    @app.delete("/api/v1/user-data")
+    @app.delete(
+        "/api/v1/user-data",
+        summary="Permanently delete every local evaluation, its content and its mirror",
+        responses=examples.CLEAR_USER_DATA_RESPONSES,
+    )
     async def clear_user_data(body: ClearUserDataRequest):
         # A publisher's stored predictions are never touched here: this deletes only
         # what a user created locally, not the shared research dataset.
         return service.clear_user_data(confirmation=body.confirmation)
 
-    @app.get("/api/v1/articles")
+    @app.get(
+        "/api/v1/articles",
+        summary="List articles derived from stored prediction runs",
+        responses=examples.ARTICLES_RESPONSES,
+    )
     async def articles(
         limit: int = 25,
         offset: int = 0,
@@ -358,22 +386,38 @@ def create_app(
             offset,
         )
 
-    @app.get("/api/v1/articles/{article_identifier}/content")
+    @app.get(
+        "/api/v1/articles/{article_identifier}/content",
+        summary="Read explicitly saved title/body for one article",
+        responses=examples.CONTENT_RESPONSES,
+    )
     async def article_content(article_identifier: str):
         return JSONResponse(
             service.content(article_identifier),
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.delete("/api/v1/articles/{article_identifier}/content")
+    @app.delete(
+        "/api/v1/articles/{article_identifier}/content",
+        summary="Delete saved content for one article",
+        responses=examples.DELETE_CONTENT_RESPONSES,
+    )
     async def delete_article_content(article_identifier: str, body: DeleteContentRequest):
         return service.delete_content(article_identifier, body.confirm_canonical_url)
 
-    @app.get("/api/v1/articles/{article_identifier}")
+    @app.get(
+        "/api/v1/articles/{article_identifier}",
+        summary="One article with every model's prediction for it",
+        responses=examples.ARTICLE_DETAIL_RESPONSES,
+    )
     async def article(article_identifier: str):
         return service.article(article_identifier)
 
-    @app.get("/api/v1/prediction-runs")
+    @app.get(
+        "/api/v1/prediction-runs",
+        summary="List immutable prediction runs",
+        responses=examples.PREDICTION_RUNS_RESPONSES,
+    )
     async def prediction_runs(
         limit: int = 25,
         offset: int = 0,
@@ -395,11 +439,19 @@ def create_app(
             offset,
         )
 
-    @app.get("/api/v1/prediction-runs/{run_identifier}")
+    @app.get(
+        "/api/v1/prediction-runs/{run_identifier}",
+        summary="One immutable run, with its article and model details",
+        responses=examples.PREDICTION_RUN_RESPONSES,
+    )
     async def prediction_run(run_identifier: str):
         return service.prediction_run(run_identifier)
 
-    @app.get("/api/v1/publishers")
+    @app.get(
+        "/api/v1/publishers",
+        summary="List publishers derived from stored prediction runs",
+        responses=examples.PUBLISHERS_RESPONSES,
+    )
     async def publishers(
         limit: int = 25,
         offset: int = 0,
@@ -410,17 +462,39 @@ def create_app(
             service.publisher_summaries(q=q, model_id=model_id), limit, offset
         )
 
-    @app.get("/api/v1/publishers/{publisher_identifier}")
+    @app.get(
+        "/api/v1/publishers/{publisher_identifier}",
+        summary="One publisher's article/run counts and class breakdown",
+        responses=examples.PUBLISHER_RESPONSES,
+    )
     async def publisher(publisher_identifier: str):
         return service.publisher(publisher_identifier)
 
-    @app.get("/api/v1/publishers/{publisher_identifier}/aggregation")
+    @app.get(
+        "/api/v1/publishers/{publisher_identifier}/aggregation",
+        summary="Derive a publisher's class from its article predictions (read-only)",
+        responses=examples.AGGREGATION_RESPONSES,
+    )
     async def publisher_aggregation(
         publisher_identifier: str,
-        method: Literal[
-            "majority_vote", "ordinal_mean", "mean_probabilities"
+        method: Annotated[
+            Literal[
+                "majority_vote",
+                "ordinal_mean",
+                "median_class",
+                "mean_probabilities",
+                "expected_class",
+                "confidence_weighted_vote",
+            ],
+            Query(examples=["majority_vote", "expected_class"]),
         ] = "majority_vote",
-        exclude: Annotated[list[str] | None, Query()] = None,
+        exclude: Annotated[
+            list[str] | None,
+            Query(
+                description="Repeat to leave more than one article out of the count.",
+                examples=[["d0f624d2-1b5c-52bb-af10-9c03c2c15be8"]],
+            ),
+        ] = None,
     ):
         # Read-only: the publisher class is derived from stored article predictions on
         # every request and never persisted, so changing the rule or the excluded
@@ -431,21 +505,41 @@ def create_app(
             excluded_article_ids=exclude or (),
         )
 
-    @app.get("/api/v1/models")
+    @app.get(
+        "/api/v1/models",
+        summary="List local checkpoints and historical dataset identities",
+        responses=examples.MODELS_RESPONSES,
+    )
     async def models(family: str | None = None, status: str | None = None):
         return {"items": service.models(family=family, status=status)}
 
-    @app.get("/api/v1/models/available")
-    async def available_models(url: str):
+    @app.get(
+        "/api/v1/models/available",
+        summary="Which local checkpoints may classify this article, and why not the rest",
+        responses=examples.AVAILABLE_MODELS_RESPONSES,
+    )
+    async def available_models(
+        url: Annotated[str, Query(examples=[examples.ARTICLE_URL])],
+    ):
         # One article URL is the only question this answers: a publisher class is read
         # from the articles already classified, never evaluated.
         return service.available_models(url=url)
 
-    @app.post("/api/v1/models/scan", status_code=202)
+    @app.post(
+        "/api/v1/models/scan",
+        status_code=202,
+        summary="Scan configured model directories for checkpoints",
+        responses=examples.MODEL_SCAN_RESPONSES,
+    )
     async def model_scan(_body: EmptyRequest):
         return {"job_id": jobs.submit("model_validation", {})}
 
-    @app.post("/api/v1/models/upload", status_code=202)
+    @app.post(
+        "/api/v1/models/upload",
+        status_code=202,
+        summary="Import a custom five-class Transformer bundle (.zip)",
+        responses=examples.MODEL_UPLOAD_RESPONSES,
+    )
     async def model_upload(file: UploadFile = File(...)):
         filename = Path(file.filename or "").name
         if not filename.lower().endswith(".zip"):
@@ -489,7 +583,12 @@ def create_app(
             raise
         return {"job_id": job_id}
 
-    @app.post("/api/v1/models/official-upload", status_code=202)
+    @app.post(
+        "/api/v1/models/official-upload",
+        status_code=202,
+        summary="Import an official Llama/Mistral checkpoint (not available yet)",
+        responses=examples.OFFICIAL_UPLOAD_RESPONSES,
+    )
     async def official_model_upload(files: list[UploadFile] = File(...)):
         # Refused before a single byte is read, so a multi-gigabyte upload is not
         # spooled to disk only to be rejected afterwards.
@@ -497,11 +596,24 @@ def create_app(
             await uploaded.close()
         raise AppError("FEATURE_UNAVAILABLE", LLM_UNDER_DEVELOPMENT)
 
-    @app.post("/api/v1/evaluation-jobs", status_code=202)
-    async def evaluation_job(body: EvaluationRequest):
+    @app.post(
+        "/api/v1/evaluation-jobs",
+        status_code=202,
+        summary="Classify one article, or reuse its stored prediction",
+        responses=examples.EVALUATION_JOB_RESPONSES,
+    )
+    async def evaluation_job(
+        body: Annotated[
+            EvaluationRequest, Body(openapi_examples=examples.EVALUATION_BODY_EXAMPLES)
+        ],
+    ):
         return {"job_id": jobs.submit("evaluation", body.model_dump(mode="json"))}
 
-    @app.get("/api/v1/jobs")
+    @app.get(
+        "/api/v1/jobs",
+        summary="List background jobs, newest first",
+        responses=examples.JOBS_RESPONSES,
+    )
     async def list_jobs(
         limit: int = 25,
         offset: int = 0,
@@ -510,19 +622,35 @@ def create_app(
     ):
         return paginate(jobs.list(status=status, job_type=job_type), limit, offset)
 
-    @app.get("/api/v1/jobs/{job_identifier}")
+    @app.get(
+        "/api/v1/jobs/{job_identifier}",
+        summary="Poll one job's phase, progress and result or error",
+        responses=examples.GET_JOB_RESPONSES,
+    )
     async def get_job(job_identifier: str):
         return jobs.get(job_identifier)
 
-    @app.delete("/api/v1/jobs")
+    @app.delete(
+        "/api/v1/jobs",
+        summary="Delete every job row (no confirmation; refuses if one is active)",
+        responses=examples.CLEAR_JOBS_RESPONSES,
+    )
     async def clear_jobs():
         return {"deleted": jobs.clear()}
 
-    @app.get("/api/v1/imports")
+    @app.get(
+        "/api/v1/imports",
+        summary="List completed and failed dataset imports",
+        responses=examples.IMPORTS_RESPONSES,
+    )
     async def imports(limit: int = 25, offset: int = 0):
         return paginate(service.imports(), limit, offset)
 
-    @app.get("/api/v1/imports/{import_identifier}")
+    @app.get(
+        "/api/v1/imports/{import_identifier}",
+        summary="One import's source, counts and warnings",
+        responses=examples.IMPORT_RESPONSES,
+    )
     async def get_import(import_identifier: str):
         result = next(
             (row for row in service.imports() if row["import_id"] == import_identifier),
@@ -532,7 +660,12 @@ def create_app(
             raise AppError("NOT_FOUND", "Import was not found.")
         return result
 
-    @app.post("/api/v1/imports/upload", status_code=202)
+    @app.post(
+        "/api/v1/imports/upload",
+        status_code=202,
+        summary="Import a user CSV/CSV.GZ of BERT/RoBERTa predictions",
+        responses=examples.IMPORT_UPLOAD_RESPONSES,
+    )
     async def upload_import(file: UploadFile = File(...)):
         filename = Path(file.filename or "").name
         if not (
@@ -567,9 +700,28 @@ def create_app(
             raise
         return {"job_id": job_id}
 
-    @app.get("/api/v1/aggregation-methods")
+    @app.get(
+        "/api/v1/aggregation-methods",
+        summary="Formulas, minimum count and warning for each aggregation method",
+        responses=examples.AGGREGATION_METHODS_RESPONSES,
+    )
     async def aggregation_methods():
-        return {"items": METHODS}
+        # The dispersion bands travel with the methods so the interface can label a
+        # variance without hard-coding thresholds that were derived from measurements.
+        # The last band is open-ended and simply omits ``upper_bound``: a null would be
+        # stripped from the generated Swagger example, leaving the documentation
+        # showing a different shape from the live response.
+        return {
+            "items": METHODS,
+            "dispersion_bands": [
+                {
+                    "band": band,
+                    "description": description,
+                    **({} if upper is None else {"upper_bound": upper}),
+                }
+                for upper, band, description in DISPERSION_BANDS
+            ],
+        }
 
     frontend = Path(__file__).with_name("frontend")
     app.mount("/assets", StaticFiles(directory=frontend), name="assets")
