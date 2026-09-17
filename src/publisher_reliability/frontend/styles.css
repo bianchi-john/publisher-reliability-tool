@@ -21,15 +21,50 @@
   --table-head: #e9f0f6;
   --row-line: #dbe6ee;
   --chip: #dde9f1;
---warning: #c06574;      /* rosso/rosa per il bordo */
---warning-bg: #fce9ed;   /* rosa chiaro per lo sfondo */
---warning-ink: #801d34;  /* rosso scordo per il testo */
+  /* Amber, used for the one control that reports the state of the whole workspace.
+     It is deliberately brighter and more saturated than the muted --elevated-soft
+     and --queued-bg below, which carry their own meanings further down the page, so
+     the two are not mistaken for each other at a glance. */
+  --highlight: #f7d060;
+  --highlight-soft: #fdefc2;
+  --highlight-line: #b8860b;
+  --highlight-ink: #5c4304;
+  --warning: #c06574;      /* border */
+  --warning-bg: #fce9ed;   /* background fill */
+  --warning-ink: #801d34;  /* text */
   --failed-bg: #f7dfda;
   --queued-bg: #ede4cd;
   --queued-ink: #78550f;
   --track: #d4e0e9;
   --track-fill: #7fa3bf;
-  --shadow: 0 14px 40px rgba(22, 45, 83, .09);
+  /* ---- Shadows -----------------------------------------------------------
+     A shadow here is a claim about layering, not decoration: it answers "what is
+     on top of what", so anything that can cover other things has to look like it
+     does. Two families, because there are two different kinds of "above".
+
+     FRAME. Chrome fastened to the edge of the window: the top bar and the
+     sidebar rail. Content scrolls underneath them, so they need a seam that says
+     where the frame stops, aimed at the edge they are raised away from. They are
+     deliberately short and tight: a wide blur here would smear a dark band across
+     the first rows of a table and cost legibility for no gain. They do not grow,
+     because the frame is one level and stays there. The footer takes none at all,
+     since it is static and nothing ever passes beneath it.
+
+     ELEVATION. Surfaces detached from the page, ordered strictly by how far above
+     it they sit, so the order can be read without comparing anything:
+       resting  - a panel lying on the page (a card, a result)
+       floating - a transient overlay tied to what opened it (the status popover,
+                  the skip link) and dismissed by clicking away
+       modal    - blocks the page until answered, so it must be unmistakable
+     Each step is two layers: a tight contact shadow for the edge and a wide
+     ambient one for the float. One layer alone reads as a smudge at this size.
+     `resting` is left exactly as it was, since it is the one the evaluation
+     panel wears. */
+  --frame-shadow-down: 0 3px 18px rgba(22, 45, 83, .10);
+  --frame-shadow-right: 3px 0 18px rgba(22, 45, 83, .10);
+  --elevation-resting: 0 14px 40px rgba(22, 45, 83, .09);
+  --elevation-floating: 0 4px 10px rgba(22, 45, 83, .09), 0 18px 48px rgba(22, 45, 83, .17);
+  --elevation-modal: 0 8px 18px rgba(22, 45, 83, .13), 0 30px 72px rgba(22, 45, 83, .28);
   /* Dispersion bands. Deliberately not a red/amber/green traffic light: the three
      hues also differ in lightness, so the band is still readable without colour. */
   --stable: #2c6a4f;
@@ -45,7 +80,15 @@
   --series-3: #6a3a7a;
 }
 
-html { scrollbar-gutter: stable; }
+/* No `scrollbar-gutter: stable` here on purpose: that property reserves a strip on
+   the right for a scrollbar that may not be there, permanently, whether or not one
+   ever shows, and no element can be sized to cross into that strip -- `100vw`
+   included -- so a bar's own background always stopped short of it. Most routes
+   here are long tables that already scroll, so a route switch that toggles the
+   scrollbar can still shift the page by a scrollbar's width; that occasional shift
+   is the trade this app makes to have every bar reach the true window edge the
+   rest of the time. */
+html { background: var(--paper); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
@@ -55,9 +98,48 @@ body {
   color: var(--ink);
   font: 15px/1.5 "Times New Roman", Times, serif;
 }
-a { color: inherit; }
-.skip-link { position: fixed; left: 12px; top: -60px; z-index: 20; background: var(--surface); padding: 10px; }
+/* ---------------------------------------------------------------------------
+   What is clickable
+
+   One rule holds everywhere: anything you can activate either carries button
+   chrome (a border and a fill) or is underlined text. Nothing relies on colour
+   alone, because colour alone does not survive a greyscale print, a colour-vision
+   difference, or a quick glance at an unfamiliar page.
+
+   So when adding a control, pick one of the two. If it looks like a button, give
+   it `.button` (or use a real <button>) and leave it un-underlined. If it is a
+   word or phrase in running text, underline it and add nothing else.
+
+   The few links below that opt out of the underline all carry chrome instead, and
+   each says so where it does it.
+   --------------------------------------------------------------------------- */
+/* Kept as a bare `a` on purpose. Every opt-out below is a class or a descendant
+   selector, so all of them outrank this one line and can turn the underline off
+   without needing !important or a more specific rewrite. Raising this to `a[href]`
+   would silently underline the buttons and the brand instead. */
+a {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+/* Anything that opens or toggles something is a pointer target too, even when it is
+   not a link: a summary, or a label that wraps its own checkbox. */
+summary, label.exclusion-item { cursor: pointer; }
+/* Off-screen until a keyboard user tabs to it, and then it is a panel floating over
+   whatever it covers, at the same z-index as the status popover. It had no shadow at
+   all, so on arrival it read as a scrap of text pasted onto the page rather than as
+   something layered above it. */
+.skip-link {
+  position: fixed; left: 12px; top: -60px; z-index: 20;
+  padding: 10px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); box-shadow: var(--elevation-floating);
+}
 .skip-link:focus { top: 12px; }
+/* Raised above the page the same way the sidebar is: it already sits above
+   everything else while scrolling (z-index 10 against the rail's 1), and now looks
+   it too, with a shadow falling onto the content beneath. */
 .topbar {
   position: sticky;
   top: 0;
@@ -70,8 +152,13 @@ a { color: inherit; }
   border-bottom: 1px solid var(--line);
   background: var(--topbar);
   backdrop-filter: blur(12px);
+  box-shadow: var(--frame-shadow-down);
 }
+/* The logo is a link home. A permanently underlined wordmark would look broken, and
+   the PR tile beside it already reads as a masthead, so it follows the navigation's
+   pattern: the underline appears on hover and focus rather than at rest. */
 .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand:hover strong, .brand:focus-visible strong { text-decoration: underline; text-underline-offset: 3px; }
 .brand-mark {
   display: grid; place-items: center; width: 40px; height: 40px;
   border-radius: 12px; color: var(--on-accent); background: var(--accent);
@@ -80,28 +167,80 @@ a { color: inherit; }
 .brand strong { font-family: "Times New Roman", Times, serif; font-weight: 400; }
 .brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .topbar-actions { position: relative; display: flex; align-items: center; gap: 10px; }
+/* The workspace status control. It was a flat tinted pill, which read as a label
+   rather than as something to press. Three things now say "button": a real border,
+   a raised surface that presses down on activation, and a caret announcing that it
+   opens the overview panel. The amber is what makes it the one special control in
+   the bar, distinct from the blue used for ordinary navigation. */
 .system-state {
-  min-height: auto; padding: 7px 11px; border: none; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: auto; padding: 7px 13px;
+  border: 1px solid var(--highlight-line); border-radius: 999px;
+  background: var(--highlight-soft); color: var(--highlight-ink);
+  font: inherit; font-size: 13px; font-weight: 650; cursor: pointer;
+  /* A 1px bevel, not an elevation: it belongs to neither shadow family, because it
+     describes the control's own edge rather than a layer above the page. That is
+     why pressing removes it while the layering ladder never changes. */
+  box-shadow: 0 1px 0 var(--highlight-line);
 }
-.system-state:hover, .system-state[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
+/* A triangle made of borders rather than a "▾" character. The frontend bundles no
+   fonts and relies on the system serif, whose coverage of the geometric-shapes block
+   is not guaranteed, so a glyph could fall back to a mismatched face or to tofu.
+   Borders always render. It lives in CSS so the JS that rewrites the label text
+   cannot remove it, and it is decorative: aria-expanded already states the state. */
+.system-state::after {
+  content: "";
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform .15s ease;
+}
+.system-state:hover { background: var(--highlight); }
+.system-state[aria-expanded="true"] {
+  background: var(--highlight); box-shadow: none; transform: translateY(1px);
+}
+.system-state[aria-expanded="true"]::after { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .system-state::after { transition: none; }
+}
 .system-popover {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 20;
   width: min(320px, 90vw); padding: 16px; border: 1px solid var(--line);
-  border-radius: 14px; background: var(--surface); box-shadow: var(--shadow);
+  border-radius: 14px; background: var(--surface); box-shadow: var(--elevation-floating);
 }
 .popover-section { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--row-line); }
 .popover-section:last-of-type { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
 .popover-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 4px 0; font-size: 13px; }
 .popover-row span { color: var(--muted); }
-.popover-link { display: block; margin-top: 10px; color: var(--accent); font-weight: 650; text-decoration: none; }
+/* Plain text in a panel, with no chrome of its own, so it takes the underline. */
+.popover-link { display: block; margin-top: 10px; color: var(--accent); font-weight: 650; }
 @media (max-width: 480px) {
   .system-popover { position: fixed; top: 76px; right: 16px; left: 16px; width: auto; }
 }
 .shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 112px); }
-nav { padding: 28px 18px; border-right: 1px solid var(--line); }
+/* The sidebar is raised off the page rather than being a slice of it. Two things do
+   that: the lighter --surface, which puts it with the top bar and the footer as part
+   of the frame around the content, and the shadow it casts onto the paper.
+
+   `z-index: 1` is what lets that shadow fall over `main`. The stacking stays correct
+   above it too: the top bar is a sibling of `.shell` at z-index 10, so it still
+   covers the rail when the page scrolls under it, and the status popover sits inside
+   the top bar's own stacking context, so it opens over the rail as before. */
+nav {
+  position: relative;
+  z-index: 1;
+  padding: 28px 18px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--frame-shadow-right);
+}
+/* The sidebar entries carry their own chrome: a hover fill and a held active
+   state. Underlining all five at rest would be noise, so the underline appears on
+   hover and focus, where the question "can I click this?" is actually being asked. */
 nav a { display: block; padding: 10px 13px; margin-bottom: 3px; border-radius: 9px; text-decoration: none; color: var(--nav-ink); }
 nav a:hover, nav a.active { color: var(--accent); background: var(--accent-soft); }
+nav a:hover, nav a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
 main { width: 100%; max-width: 1450px; min-height: calc(100vh - 112px); padding: 42px 5vw 70px; }
 h1 { margin: 0; font: 400 clamp(32px, 4vw, 48px)/1.05 "Times New Roman", Times, serif; letter-spacing: -.025em; }
 h2, h3 { font-family: "Times New Roman", Times, serif; font-weight: 400; }
@@ -131,7 +270,7 @@ p { max-width: 760px; }
   align-self: start;
 }
 .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
-.card { grid-column: span 4; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.card { grid-column: span 4; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--elevation-resting); }
 .card.wide { grid-column: span 8; }
 .card.full { grid-column: 1 / -1; }
 .metric { margin: 5px 0; font: 400 36px/1.1 "Times New Roman", Times, serif; letter-spacing: -.015em; }
@@ -173,13 +312,14 @@ tr:last-child td { border-bottom: 0; }
 .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
 .pill.failed { background: var(--failed-bg); color: var(--red); }
 .pill.running, .pill.queued { background: var(--queued-bg); color: var(--queued-ink); }
-.class-chip { display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; border-radius: 8px; background: var(--chip); font-weight: 750; }
+.class-chip { display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; border-radius: 8px; padding: 8px 11px;background: var(--chip); font-weight: 750; }
 .source-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
 .source-tabs a {
   padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--surface); color: var(--muted); text-decoration: none; font-weight: 650;
 }
 .source-tabs a.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.source-tabs a:hover, .source-tabs a:focus-visible { border-color: var(--accent); color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .source-legend { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 18px; color: var(--muted); font-size: 13px; }
 .source-dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; }
 .source-badges { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -196,7 +336,7 @@ tr:last-child td { border-bottom: 0; }
 .user-source-panel { background: var(--user-soft); }
 .evaluation-result-card {
   margin-top: 24px; padding: clamp(20px, 4vw, 34px); border: 2px solid var(--accent);
-  border-radius: 16px; background: var(--surface); box-shadow: var(--shadow);
+  border-radius: 16px; background: var(--surface); box-shadow: var(--elevation-resting);
 }
 .result-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .result-heading h2 { margin: 0; font: 400 30px/1.1 "Times New Roman", Times, serif; }
@@ -244,7 +384,11 @@ tr:last-child td { border-bottom: 0; }
 .progress-track { height: 10px; overflow: hidden; border-radius: 999px; background: var(--track); }
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s ease; }
 .section-block { margin-top: 30px; }
+/* Without this the heading is indistinguishable from the static <h2>s beside it,
+   and the disclosure triangle alone is easy to miss at this type size. */
 .section-block > summary { cursor: pointer; margin-bottom: 16px; font: 400 20px/1.25 "Times New Roman", Times, serif; }
+.section-block > summary span, .section-block > summary { text-underline-offset: 4px; }
+.section-block > summary:hover, .section-block > summary:focus-visible { color: var(--accent); text-decoration: underline; }
 .detail-link { color: var(--accent); font-weight: 650; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .probability { white-space: nowrap; text-align: right; }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
@@ -254,6 +398,9 @@ tr:last-child td { border-bottom: 0; }
 .detail-metrics { margin-bottom: 30px; }
 .error { color: var(--red); }
 .loading { color: var(--muted); animation: pulse 1.2s ease-in-out infinite alternate; }
+/* The one piece of frame with no shadow, deliberately: it is static and sits at the
+   end of the document, so nothing ever scrolls beneath it. A seam here would claim
+   a layer that does not exist. Its top border is the whole separation it needs. */
 footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface); font-size: 12px; }
 @keyframes pulse { to { opacity: .45; } }
 /* A page-drawn confirmation box, not a native window.confirm()/prompt(): those native
@@ -264,7 +411,7 @@ footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); co
   position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
   padding: 16px; background: rgba(15, 26, 36, .5);
 }
-.dialog-box { width: min(440px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.dialog-box { width: min(440px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--elevation-modal); }
 .dialog-box h2 { margin: 0 0 10px; }
 .dialog-box p { margin: 0; color: var(--muted); font-size: 14px; }
 .dialog-box label { margin-top: 16px; }
@@ -353,7 +500,9 @@ footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); co
 @media (max-width: 820px) {
   .topbar { padding: 0 16px; }
   .shell { display: block; }
-  nav { display: flex; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+  /* The rail is now a strip across the top, so it is raised away from the content
+     below it rather than beside it, and the shadow turns to match. */
+  nav { display: flex; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); box-shadow: var(--frame-shadow-down); }
   nav a { flex: 0 0 auto; margin: 0; }
   main { padding: 28px 18px 60px; }
   .card, .card.wide { grid-column: 1 / -1; }
