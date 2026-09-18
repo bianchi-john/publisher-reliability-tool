@@ -62,9 +62,9 @@ returns `STORAGE_ERROR`, changes no authoritative row, and serves no endpoint.
 
 ### AT-009 — Atomic mutable-ledger replacement
 
-Model, job, saved-content, and content-delete updates expose either the old or
-new valid complete file when killed before/after atomic rename; a leftover temp
-file is not treated as committed state.
+Model, job and saved-content updates expose either the old or new valid complete
+file when killed before/after atomic rename; a leftover temp file is not treated
+as committed state.
 
 ### AT-010 — Interrupted import is idempotent
 
@@ -194,11 +194,11 @@ probabilities; restarting adds no duplicate, and the tracked
 ### AT-028 — Saved local content lifecycle
 
 Without `save_local`, extracted title/body/authors/HTML persist nowhere. With
-explicit consent, only title/body appear in `local_content.csv` and dedicated
-GET. Confirmed DELETE removes active content, preserves prediction runs, and
-warns that backups are unchanged. DELETE returns `INVALID_INPUT` while any
-evaluation job is running. Content-only retrieval for a reused run performs no
-inference and stores nothing if canonical identity changes.
+explicit consent, only title/body appear in `local_content.csv` and the dedicated
+GET; on a published instance that consent is refused and the retention recorded
+is always `discard`. Saved content cannot be removed through the application at
+all (AT-055). Content-only retrieval for a reused run performs no inference and
+stores nothing if canonical identity changes.
 
 ### AT-029 — Explicit article list
 
@@ -358,9 +358,9 @@ matches class and reference probabilities within absolute `1e-6`, relative
 A custom allowlisted five-label encoder bundle installs below
 `managed-models/<model_id>`, is marked `user_custom`, registers exact
 digest/input/fold provenance and deletes the upload. It then produces a
-five-probability local run. Importing one of the study's larger decoder
-checkpoints, by upload or by LoRA-adapter bundle, is refused with
-`FEATURE_UNAVAILABLE` and registers nothing.
+five-probability local run. A bundle declaring any other schema, `model_kind` or
+`architecture` is refused with `INVALID_INPUT` and registers nothing; no import
+route for decoder checkpoints exists.
 
 ### AT-047 — Unsafe or incompatible custom bundle
 
@@ -432,20 +432,20 @@ BERT/RoBERTa runs. No stored publisher aggregate has to be removed, because none
 is ever written. User imports, their models and runs, saved content, jobs and local
 checkpoint registrations are unchanged.
 
-### AT-055 — Local evaluation purge
+### AT-055 — Nothing deletes
 
-A confirmed bulk purge deletes every `local_inference` run, all saved content,
-and the private prediction mirror in one operation, while every
-`bundled_import`/`user_import` run, its model identities, and the tracked
-release remain unchanged. It returns `INVALID_INPUT` while any evaluation job
-is running or the typed confirmation does not match, and its response counts
-exactly what was removed. After a restart, none of the purged rows returns,
-because the mirror that would have restored them was removed before the
-ledger, not after.
+The generated OpenAPI document contains no `DELETE` method on any path, on a
+local instance and on a published one alike. No request removes a prediction
+run, saved content or a job row; the interface offers no control that would,
+and the application code contains no routine that does. The only way to discard
+stored data is to remove the data directory on the host.
 
-### AT-056 — Unconfirmed job-history clear
+### AT-056 — Published-instance boundary
 
-Clearing job history takes no confirmation and no request body, unlike the
-purges above: one action deletes every job row and reports how many were
-removed. It returns `INVALID_INPUT` and removes nothing while any job is
-`queued` or `running`.
+With a public host configured, a request whose `Host` is neither the loopback
+address nor that one name returns `421 INVALID_HOST`. The upload and rescan
+routes are absent from the OpenAPI document and answer `404`. An evaluation
+requesting `save_local` is recorded as `discard`. Queued jobs beyond the bound
+return `429 TOO_MANY_REQUESTS`. `GET /api/v1/status` reports
+`public_instance: true`, and the interface serves no control that the
+deployment cannot honour. Without a public host, none of these apply.

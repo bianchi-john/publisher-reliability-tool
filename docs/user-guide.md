@@ -58,14 +58,18 @@ On first online inference the application may cache only the small tokenizer
 and configuration resources from the pinned immutable Hugging Face revision.
 It never downloads base-model weights.
 
-### Larger decoder models are not available yet
+### Only five-class encoder models are supported
 
-The study also fine-tuned Llama 3 8B and Mistral 24B. Importing and running them
-is **under development and not available in this release**: each fold needs a
-CUDA GPU and several gigabytes of weights, which this single-machine CPU demo
-cannot assume. Any attempt to import one returns `FEATURE_UNAVAILABLE` with an
-explanation, and nothing is installed. BERT and RoBERTa run here on CPU and
-report comparable accuracy in the study.
+This tool runs one model shape: a five-class encoder classifier built to the same
+recipe as BERT and RoBERTa. It is meant to work on an ordinary laptop, so the
+study's Llama 3 8B and Mistral 24B are left out: each fold needs a CUDA GPU and
+tens of gigabytes of weights.
+
+You lose very little by that. In the study RoBERTa is the most accurate
+publisher-level model of all four, the 24B decoder gained nothing from a context
+window four times longer, and every family made the same kinds of error. The
+larger models did not win, so the tool runs the ones that did, on hardware you
+already have. A bundle of any other shape is refused at import as invalid.
 
 ### Custom Transformers model
 
@@ -195,13 +199,14 @@ Run origin in the application ledger (`local_inference`) and row origin in the
 combined prediction dataset (`user_evaluation`) describe the same user-created
 inference at two storage boundaries.
 
-**Clear user data** permanently deletes local evaluation history: every article
-classified locally, any title/body saved alongside one, and the private file
-that would otherwise restore them after a restart. It asks for the exact
-confirmation phrase before doing anything, and reports how many predictions and
-saved articles were removed. The bundled release and any imported CSV/CSV.GZ
-are never affected — this only ever touches what this browser's own use of the
-tool created.
+Nothing in the tool deletes anything. There is no button, and no API route, that
+removes a prediction, saved content or a job record — not on the hosted site and
+not on your own machine. The capability was taken out of the code rather than
+hidden behind a setting, so that reaching past the interface finds nothing that
+destroys stored work. To discard what the tool holds, remove its data directory
+(`./data` by default) and, if you want the local evaluations gone too, the
+private mirror at `dataset/predictions/user-predictions.csv`. That is an act of
+administration on the host, not a feature of the application.
 
 ## 5. Read a publisher's class
 
@@ -266,7 +271,5 @@ not flicker between tabs.
 ## 7. Jobs
 
 **Jobs** lists every model scan, dataset import and evaluation the worker has
-run. **Clear jobs** deletes that history immediately, with no confirmation
-step: it is disposable operational record-keeping, not something built by
-using the tool, unlike **Clear user data** in §4. It refuses while anything is
-queued or running rather than deleting around a job in progress.
+run, newest first. The list only grows: as with everything else the tool stores,
+there is no operation that clears it.

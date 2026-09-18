@@ -19,9 +19,12 @@ fault tolerance.
 - Native reference: Ubuntu 24.04 LTS, x86-64, Python 3.12.
 - Container reference: one Docker Compose service on x86-64 Linux.
 - Browser: current or previous Firefox/Chromium release.
-- Address: `http://127.0.0.1:8000`; non-loopback binding is unsupported.
-- One process, one worker thread for long jobs, one data-directory writer, and
-  one local user.
+- Address: `http://127.0.0.1:8000`; the process always binds loopback. It may be
+  published behind a reverse proxy by naming the public host, which withholds the
+  administrative operations (`deployment.md` ยง4.1).
+- One process, one worker thread for long jobs, one data-directory writer. A
+  local instance serves one user; a published one serves read-only browsing,
+  aggregation and single-article classification to anyone who reaches it.
 - Demonstrated scale: the bundled dataset and compatible user imports up to
   300,000 source rows and 512 MiB compressed/upload bytes. Larger inputs are
   unsupported rather than promised to stream at arbitrary scale.
@@ -44,9 +47,6 @@ The MVP shall:
 - derive article and publisher views from persisted prediction runs;
 - scan configured model roots for supported checkpoints;
 - provide BERT and RoBERTa as the core CPU demo;
-- refuse, with an explicit `FEATURE_UNAVAILABLE` explanation, any attempt to
-  import the study's larger decoder checkpoints (Llama 3 8B, Mistral 24B),
-  whose support is still under development;
 - import constrained five-class custom encoder classifiers using local
   declarative metadata, tokenizer and `safetensors`;
 - evaluate exactly one article per request; no multi-article or publisher-wide
@@ -189,11 +189,11 @@ re-reads every byte on demand. The Models page reports each identity's status โ€
 checkpoint, the application caches only its tokenizer/configuration resources
 from a pinned immutable official revision.
 
-BERT/RoBERTa CPU behavior is part of the core gate. The study's larger decoder
-checkpoints are not importable in this release: each fold needs a CUDA GPU and
-several gigabytes of weights, so the demo ships the two encoder families, whose
-reported accuracy is comparable, and keeps the identity and loader contracts
-open for a later decoder family. A custom upload is one self-contained `.zip`
+BERT/RoBERTa CPU behavior is part of the core gate. The supported model surface
+is exactly one shape, the five-class encoder classifier: the study's larger
+decoder checkpoints need a CUDA GPU and tens of gigabytes per fold, which neither
+this demo nor the server hosting it can provide, so no import path for them
+exists rather than one that could never be exercised. A custom upload is one self-contained `.zip`
 using the exact encoder format in `custom-model-bundle.md`. Validation runs as a `model_validation` job, installs
 a successful bundle under `managed-models`, preserves official-versus-custom
 provenance, and never imports executable artifact code.
@@ -287,13 +287,16 @@ publication. A repeated parse-complete content digest/schema returns its
 existing successful, partial, or deterministic failed import.
 The selected source file is never modified.
 
-### 7.5 Saved content and purge
+### 7.5 Saved content
 
 Saved title/body live only in `local_content.csv` and are returned only by the
-dedicated content endpoint. A synchronous confirmed delete is accepted only
-when no evaluation job is running, then rewrites that small ledger through a
-temporary file and atomic rename. It affects active state only. User-created
-backups and external copies must be deleted manually.
+dedicated content endpoint. A published instance refuses the consent altogether
+and records `discard` for every evaluation, so third-party article text never
+accumulates on a server open to visitors.
+
+The application deletes nothing (FR-025). Saved content, like every other row it
+holds, is discarded by removing the data directory on the host rather than
+through the application.
 
 ### 7.6 Clearing local user data
 
@@ -382,9 +385,9 @@ without a CDN.
 | FR-021 | Evaluate shall offer only locally present safe models: stored family/fold coverage for reuse and runnable local IDs for new single-article inference; every empty result shall be explained. |
 | FR-022 | A local checkpoint shall be blocked from evaluating any known imported article outside its held-out test fold, and such an article shall be excluded from every derived publisher class. |
 | FR-023 | The bundled dataset shall contain only BERT/RoBERTa outputs with complete five-class probability vectors and shall replace obsolete bundled releases without touching user imports. |
-| FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases and tensor/head mismatches; importing the study's larger decoder checkpoints shall be refused with `FEATURE_UNAVAILABLE` while that support is under development. |
-| FR-025 | A confirmed bulk purge shall permanently delete every local prediction, its saved content, and its private mirror, in an order that cannot resurrect a deleted run on restart, without touching bundled or user-imported dataset rows. |
-| FR-026 | Clearing job history shall need no confirmation and shall delete every job row, but shall refuse outright while any job is queued or running. |
+| FR-024 | Custom import shall accept only the documented five-class encoder contract and mark it `user_custom`, rejecting executable code, pickle, unsafe paths, invalid folds, bases, tensor/head mismatches, and any bundle declaring another schema or architecture. |
+| FR-025 | The application shall expose no operation that deletes a stored prediction, saved content or job history, on any deployment and by any HTTP method; discarding what it holds shall require removing the data directory on the host. |
+| FR-026 | A published instance shall accept only the one configured public host, shall not register the upload or rescan operations, shall force content retention to `discard`, and shall bound the number of queued jobs. |
 
 ## 10. Non-functional requirements
 

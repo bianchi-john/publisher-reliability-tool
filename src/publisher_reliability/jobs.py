@@ -13,7 +13,6 @@ from .errors import AppError
 from .custom_models import import_custom_transformer_bundle
 from .importer import import_csv
 from .model_scanner import scan_model_roots
-from .official_models import import_official_model
 from .services import ResearchService
 from .storage import Storage, json_field, utc_now
 
@@ -45,12 +44,18 @@ class JobManager:
         model_roots: tuple[Path, ...] = (),
         dataset_upload_max_bytes: int = 536_870_912,
         model_upload_max_bytes: int = 8_589_934_592,
+        max_queued_jobs: int = 0,
     ):
         self.storage = storage
         self.service = service
         self.model_roots = model_roots
         self.dataset_upload_max_bytes = dataset_upload_max_bytes
         self.model_upload_max_bytes = model_upload_max_bytes
+        # Zero means no bound, which is right for one local user. A published
+        # instance sets one: a single worker classifies an article in seconds, so an
+        # unbounded queue would let a handful of visitors promise everyone else a
+        # wait measured in minutes, and would grow the jobs ledger without limit.
+        self.max_queued_jobs = max_queued_jobs
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -72,6 +77,16 @@ class JobManager:
             raise AppError("INVALID_INPUT", "Unknown job type.")
         if self._stop.is_set():
             raise AppError("PROCESS_INTERRUPTED", "The worker is shutting down.")
+        if self.max_queued_jobs:
+            waiting = sum(
+                1 for row in self.storage.rows["jobs"] if row["status"] == "queued"
+            )
+            if waiting >= self.max_queued_jobs:
+                raise AppError(
+                    "TOO_MANY_REQUESTS",
+                    "The worker already has the maximum number of queued jobs. "
+                    "Please try again shortly.",
+                )
         now = utc_now()
         identifier = str(uuid.uuid4())
         self.storage.upsert(
@@ -100,29 +115,6 @@ class JobManager:
         self._stop.set()
         self._queue.put(None)
         self._thread.join(timeout=5)
-
-    def clear(self) -> int:
-        """Delete every job row, refusing while one is still queued or running.
-
-        A running job's own completion write reads the current row and rewrites the
-        ledger through it (see `_update`); wiping the ledger out from under that would
-        make it reappear as an orphaned single row instead of being cleared. A queued
-        job would fare worse: `_execute` looks its row up by ID when the worker gets to
-        it, finds nothing, and silently returns without ever running it, leaving
-        whoever is polling that job to receive a confusing `NOT_FOUND` instead of a
-        result. Refusing here trades a rare, easy-to-retry error for never hitting
-        either.
-        """
-
-        if any(
-            row["status"] in {"queued", "running"} for row in self.storage.rows["jobs"]
-        ):
-            raise AppError(
-                "INVALID_INPUT", "Jobs cannot be cleared while one is queued or running."
-            )
-        removed = len(self.storage.rows["jobs"])
-        self.storage.replace("jobs", [])
-        return removed
 
     def list(self, *, status: str | None = None, job_type: str | None = None):
         rows = [
@@ -248,16 +240,13 @@ class JobManager:
         return result
 
     def _run_model_validation(self, request: dict[str, object]) -> dict[str, object]:
-        """Import an official or custom bundle, or rescan the configured model roots.
+        """Import a custom bundle, or rescan the configured model roots.
 
-        The three shapes are told apart by what the API acquired beforehand: several
-        official files, one custom ZIP, or nothing at all for a plain rescan.
+        The two shapes are told apart by what the API acquired beforehand: one custom
+        ZIP, or nothing at all for a plain rescan.
         """
 
-        tokens = request.get("source_upload_ids")
         token = request.get("source_upload_id")
-        if isinstance(tokens, list):
-            return self._import_official_upload(tokens, request.get("source_names"))
         if isinstance(token, str):
             source = self._acquired_upload(
                 token, "The acquired custom model source is missing."
@@ -270,40 +259,6 @@ class JobManager:
             source.unlink(missing_ok=True)
             return result
         return scan_model_roots(self.storage, self.model_roots)
-
-    def _import_official_upload(
-        self, tokens: list[object], names: object
-    ) -> dict[str, object]:
-        """Reassemble one original paper model from the files the API acquired.
-
-        Every token and name is validated before any file is opened, because a Llama
-        checkpoint arrives as two segments that only mean something together.
-        """
-
-        if not tokens or any(
-            not isinstance(value, str) or Path(value).name != value for value in tokens
-        ):
-            raise AppError("INVALID_INPUT", "Invalid official upload tokens.")
-        sources = [self.storage.data_dir / "uploads" / str(value) for value in tokens]
-        if any(not source.is_file() for source in sources):
-            raise AppError(
-                "PROCESS_INTERRUPTED", "An acquired official model file is missing."
-            )
-        if (
-            not isinstance(names, list)
-            or len(names) != len(sources)
-            or any(not isinstance(value, str) for value in names)
-        ):
-            raise AppError("INVALID_INPUT", "Official source names are invalid.")
-        result = import_official_model(
-            self.storage,
-            sources,
-            source_names=names,
-            max_uncompressed_bytes=self.model_upload_max_bytes,
-        )
-        for source in sources:
-            source.unlink(missing_ok=True)
-        return result
 
     def _update(self, row: dict[str, str], **values: object) -> None:
         updated = dict(row)

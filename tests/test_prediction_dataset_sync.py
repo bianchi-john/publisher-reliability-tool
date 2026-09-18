@@ -11,7 +11,6 @@ from publisher_reliability.prediction_dataset import (
     PUBLIC_COLUMNS,
     USER_PREDICTIONS_FILENAME,
     _dataset_row,
-    clear_user_predictions,
     restore_user_predictions,
     sync_user_predictions,
 )
@@ -21,14 +20,14 @@ from scripts.verify_public_dataset import verify_release
 
 
 class PredictionDatasetSyncTest(unittest.TestCase):
-    def test_mirror_preserves_official_model_name_and_manifest_identity(self) -> None:
+    def test_mirror_preserves_model_name_and_manifest_identity(self) -> None:
         model = {column: "" for column in HEADERS["models"]}
         model.update(
-            model_id="paper-model",
-            family="mistral",
+            model_id="custom-model",
+            family="custom_encoder_one",
             fold_id="4",
-            display_name="Mistral 24B — paper original — fold 4",
-            artifact_kind="paper_mistral_adapter_bundle",
+            display_name="Custom encoder — fold 4",
+            artifact_kind="custom_transformer_bundle",
             official_manifest_entry_sha256="a" * 64,
         )
         run = {column: "" for column in HEADERS["prediction_runs"]}
@@ -250,50 +249,6 @@ def _local_run_and_model(url: str, run_id: str) -> tuple[dict[str, str], dict[st
         recorded_at="2026-07-24T00:00:01Z",
     )
     return run, model
-
-
-class ClearUserPredictionsTest(unittest.TestCase):
-    """`clear_user_predictions` is the half of a bulk delete that must run first.
-
-    Leaving the mirror behind after removing the ledger rows would let
-    `restore_user_predictions` bring them right back on the next start; these tests
-    pin that the file is actually gone, not merely emptied of rows the caller happens
-    to care about.
-    """
-
-    def test_removes_an_existing_mirror_and_reports_its_row_count(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            release = Path(temporary) / "predictions"
-            run, model = _local_run_and_model("https://example.com/a", "run-1")
-            sync_user_predictions(release, [run], {"local-model": model})
-            mirror_path = release / USER_PREDICTIONS_FILENAME
-            self.assertTrue(mirror_path.is_file())
-
-            self.assertEqual(clear_user_predictions(release), 1)
-
-            self.assertFalse(mirror_path.exists())
-
-    def test_a_cleared_mirror_restores_nothing(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            release = root / "predictions"
-            run, model = _local_run_and_model("https://example.com/a", "run-1")
-            sync_user_predictions(release, [run], {"local-model": model})
-
-            clear_user_predictions(release)
-
-            with Storage(root / "data") as storage:
-                self.assertEqual(restore_user_predictions(storage, release), 0)
-                self.assertEqual(storage.rows["prediction_runs"], [])
-
-    def test_is_a_no_op_when_no_mirror_was_ever_created(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            release = Path(temporary) / "predictions"
-            self.assertEqual(clear_user_predictions(release), 0)
-            self.assertFalse(release.exists())
-
-    def test_is_a_no_op_without_a_configured_release_directory(self) -> None:
-        self.assertEqual(clear_user_predictions(None), 0)
 
 
 class PrivateMirrorStaysOutOfVersionControlTest(unittest.TestCase):

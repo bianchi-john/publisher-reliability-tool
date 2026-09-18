@@ -43,20 +43,6 @@ export async function jobsPage() {
     await loadJobs();
   });
 
-  // Clear jobs asks for no confirmation: unlike the local-evaluation purge, this is
-  // disposable operational history, not something a user spent effort producing, and
-  // the backend itself still refuses outright rather than corrupting anything if a
-  // job is queued or running.
-  content.querySelector("#clear-jobs").addEventListener("click", async () => {
-    hideNotice();
-    try {
-      const result = await api("/api/v1/jobs", {method: "DELETE"});
-      showNotice(`<b>${result.deleted}</b> job record(s) were cleared.`);
-      await loadJobs();
-    } catch (error) {
-      showError(error.message);
-    }
-  });
 
   await loadJobs();
 }

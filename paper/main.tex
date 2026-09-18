@@ -115,8 +115,8 @@ on~\cite{verhoeven2025yesterday}.
 We present the \textbf{Publisher Reliability Tool} (PRT), the reference
 implementation accompanying our study on aggregating language model predictions
 for news source reliability~\cite{bianchi2026articles}. It contributes an
-offline-capable workspace over a prediction-only release of 34,564 article runs
-with full probability vectors; a \emph{leakage-safe evaluation model} whose
+offline-capable workspace over that prediction-only release; a
+\emph{leakage-safe evaluation model} whose
 offered checkpoints come from the intersection of installed artifacts, stored
 coverage and held-out fold membership; and a content-addressed model identity
 over six human-readable CSV ledgers.
@@ -178,20 +178,21 @@ them append-only and immutable; malformed data fails closed before any HTTP
 port is served. Articles and publishers are not stored -- they are views
 derived at query time from prediction runs. Every local inference is mirrored
 to a private, git-ignored sibling of the release CSV, so an evaluation history
-outlives a deleted data directory without ever entering version control; the
-shipped release is never rewritten by the running application, and one confirmed
-action purges every local run, saved body and the mirror itself.
+outlives a removed data directory without ever entering version control. The
+shipped release is never rewritten by the running application, and PRT deletes
+nothing: no route, on any deployment, removes a stored row.
 
 \subsubsection{Models and reproducible identity.}
 The demonstrated path is CPU-only. BERT~\cite{devlin2019bert}
 (\texttt{bert-base-uncased}) and RoBERTa~\cite{liu2020roberta}
 (\texttt{roberta-large}) are fully fine-tuned five-label classifiers truncated
 to 256 tokens, loaded with strict key and shape checking and gated by a frozen
-CPU reference fixture. The study also fine-tuned Llama~3~8B~\cite{llama2024herd}
-and Mistral~24B~\cite{jiang2024mixtral}; we did not ship them, since each fold
-needs CUDA and several gigabytes while the encoders reach comparable accuracy.
-The design anticipates one: identity is content-addressed over output-relevant
-settings, not an architecture name, and the leakage guard keys folds by article.
+CPU reference fixture. PRT is built to run on an ordinary laptop, so it ships
+these two encoders rather than the study's Llama~3~8B~\cite{llama2024herd} and
+Mistral~24B~\cite{jiang2024mixtral}, which need a CUDA GPU and tens of gigabytes
+per fold. Almost nothing is given up: there RoBERTa is the most accurate
+publisher-level model of the four ($0.69$), the 24B decoder gains nothing from a
+four times longer context, and all four share the same error patterns.
 Users may register their own five-class Transformers as a constrained ZIP
 bundle; no path executes artifact-supplied code, and \texttt{auto\_map},
 \texttt{trust\_remote\_code}, pickle weights and unsafe archive paths are all
@@ -266,12 +267,12 @@ prediction run identifier and whether the run was stored or newly computed.}
 \section{Availability}
 \label{sec:availability}
 
-% TODO: record the screencast and replace the placeholder URL below. ECIR
-% TODO: requires a working online demo URL *or* a video of the main features;
-% TODO: PRT is loopback-only by design, so the video is the route to take.
-% TODO: add an archived release DOI (e.g. Zenodo) if one is minted.
-A screencast of the walkthrough in Section~\ref{sec:demo} is at
-\url{https://TODO-video-url}; the source code is under Apache-2.0 at
+% TODO: replace the placeholder URL below with the hosted instance, and add an
+% TODO: archived release DOI (e.g. Zenodo) if one is minted.
+A public instance is at \url{https://TODO-public-url}: it classifies a submitted
+article, withholds the upload and rescan routes, keeps no article text and
+deletes nothing, so anyone may try it without disturbing another visitor. The
+source code is under Apache-2.0 at
 \url{https://github.com/bianchi-john/publisher-reliability-tool} with the
 dataset release and its scientific and storage contracts;
 checkpoints and supplementary material~\cite{bianchi2026supplementary} are on

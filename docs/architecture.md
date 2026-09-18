@@ -260,11 +260,12 @@ fixed PRT manifest vocabulary: an allowlisted complete encoder classifier.
 `auto_map`, `trust_remote_code`, Python/native files, and pickle weights are
 rejected. Unknown artifacts are reported and ignored.
 
-A quantized decoder family (Llama 3 8B, Mistral 24B) is the intended next
-extension: the loader registry, managed-bundle layout and model-identity rules
-already accommodate one, but importing such a checkpoint is refused with
-`FEATURE_UNAVAILABLE` until that path is finished, because each fold requires a
-CUDA GPU and several gigabytes that the CPU demo cannot assume.
+There is one loader and one bundle contract. Decoder families are out of scope:
+they require a CUDA GPU and tens of gigabytes per fold, which neither the CPU
+demo nor its host can provide, so the code carries no dormant path for them.
+Model identity remains content-addressed over output-relevant settings rather
+than over an architecture name, and the leakage guard records fold membership
+per article, so neither would have to be redesigned if that ever changed.
 
 ## 10. Local HTTP boundary
 
@@ -297,7 +298,7 @@ logs retain three 5-MiB files; this is a convenience, not an audit system.
 | Network unavailable/offline | Preserve browsing/reuse; fail the dependent job |
 | Missing artifact | Preserve historical model identity and runs |
 | Private prediction mirror is unwritable | Preserve the committed state run, fail the dependent inference operation, and report storage failure |
-| Confirmed delete of one article's saved content | Rewrite the active local-content file; backups remain the user's responsibility |
+| (no deletion path exists) | The application never removes a stored row; discarding data is done by removing the data directory on the host |
 | Confirmed clear of all local user data | Remove the private mirror first, then the `local_inference` runs and saved content; imported rows and the tracked release are untouched |
 
 Manual stopped-server copying of the data directory is the backup and restore

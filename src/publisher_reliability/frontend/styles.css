@@ -91,6 +91,10 @@
 html { background: var(--paper); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+/* A published instance withholds the single-user administrative routes, so the
+   controls that call them are removed rather than left to fail on a dead button.
+   The attribute is set once at startup from /api/v1/status. */
+body[data-public-instance="true"] .local-only { display: none !important; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -403,24 +407,6 @@ tr:last-child td { border-bottom: 0; }
    a layer that does not exist. Its top border is the whole separation it needs. */
 footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface); font-size: 12px; }
 @keyframes pulse { to { opacity: .45; } }
-/* A page-drawn confirmation box, not a native window.confirm()/prompt(): those native
-   dialogs are suppressed in some embedded browser contexts (for example VS Code's
-   built-in preview), where a script calling them just silently gets no answer. This
-   is plain DOM, so it renders the same everywhere the rest of the page does. */
-.dialog-overlay {
-  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
-  padding: 16px; background: rgba(15, 26, 36, .5);
-}
-.dialog-box { width: min(440px, 100%); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--elevation-modal); }
-.dialog-box h2 { margin: 0 0 10px; }
-.dialog-box p { margin: 0; color: var(--muted); font-size: 14px; }
-.dialog-box label { margin-top: 16px; }
-/* Reserves its line before any text arrives, so the box does not visibly grow the
-   instant the first character is typed. */
-.dialog-hint { min-height: 18px; margin: 14px 0 0; font-size: 13px; font-weight: 650; }
-.dialog-hint.mismatch { color: var(--warning-ink); }
-.dialog-hint.match { color: var(--accent); }
-
 /* --- Publisher aggregation ------------------------------------------------- */
 
 .aggregation-controls { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; }

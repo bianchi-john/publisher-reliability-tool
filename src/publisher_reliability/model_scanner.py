@@ -11,11 +11,7 @@ from .errors import AppError
 from .identity import sha256_json
 from .inference import CORE_MODELS
 from .model_scan_cache import CACHE_FILENAME, ScanCache
-from .official_models import (
-    MANAGED_ARTIFACT_KINDS,
-    llm_runtime_status,
-    verify_managed_model,
-)
+from .custom_models import MANAGED_ARTIFACT_KINDS, verify_managed_model
 from .storage import Storage, json_field, utc_now
 
 
@@ -211,8 +207,9 @@ def scan_model_roots(
     discovered: list[dict[str, object]] = []
     rejected: list[dict[str, str]] = []
     seen_digests: set[str] = set()
-    # Kept at zero: importing the paper's large decoder checkpoints is not a
-    # shipped feature yet, so a scan never registers one.
+    # Kept at zero: there is no official-checkpoint import path, so a scan never
+    # registers one. The field stays in the result so the shape of a scan report
+    # does not change between releases.
     official_registered = 0
 
     for root_index, configured_root in enumerate(roots, start=1):
@@ -298,19 +295,12 @@ def scan_model_roots(
             current = dict(row)
             valid, problem = verify_managed_model(storage, row)
             if valid:
-                if row["artifact_kind"] in {
-                    "paper_llama_state_dict_bundle",
-                    "paper_mistral_adapter_bundle",
-                    "custom_peft_adapter_bundle",
-                }:
-                    status, runnable, detail = llm_runtime_status()
-                else:
-                    status, runnable, detail = (
-                        "compatible",
-                        True,
-                        "Custom Transformer bundle integrity is valid. "
-                        "Local inference is available.",
-                    )
+                status, runnable, detail = (
+                    "compatible",
+                    True,
+                    "Custom Transformer bundle integrity is valid. "
+                    "Local inference is available.",
+                )
                 current.update(
                     status=status,
                     artifact_available=True,

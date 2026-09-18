@@ -42,3 +42,4 @@ dataset/*
 dataset/predictions/user-predictions.csv
 data/
 other/
+dataset/originalDataset/newDataframeWithOldCleanedPoliticsVersion.csv

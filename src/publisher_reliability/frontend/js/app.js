@@ -6,6 +6,7 @@
  * templates, says which page answers which route, and starts the interface.
  */
 
+import {api} from "./api.js";
 import {errorCard} from "./components.js";
 import {registerPage, startRouter} from "./router.js";
 import {loadTemplates} from "./templates.js";
@@ -28,8 +29,20 @@ registerPage("publisher", publisherDetailPage);
 registerPage("models", modelsPage);
 registerPage("jobs", jobsPage);
 
+/** Record what this deployment serves, so local-only controls can be hidden. */
+async function markInstanceKind() {
+  try {
+    const status = await api("/api/v1/status");
+    document.body.dataset.publicInstance = String(Boolean(status.public_instance));
+  } catch (error) {
+    // A failed status read must not block the interface; the controls simply stay
+    // visible and their own requests report any problem.
+  }
+}
+
 async function start() {
   initTopbar();
+  await markInstanceKind();
   try {
     // Templates are cached up front so pages can render without awaiting them.
     await loadTemplates();

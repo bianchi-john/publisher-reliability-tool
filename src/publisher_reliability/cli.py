@@ -31,6 +31,14 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--offline", action="store_true", default=None)
     serve.add_argument("--device", choices=("auto", "cpu", "cuda"))
     serve.add_argument("--log-level", choices=("debug", "info", "warning", "error"))
+    serve.add_argument(
+        "--public-host",
+        help=(
+            "Hostname this instance answers on when published behind a reverse "
+            "proxy. Setting it also withholds the single-user administrative "
+            "operations, which a public visitor must not be able to run."
+        ),
+    )
 
     dataset = commands.add_parser("dataset", help="Verify or import predictions")
     dataset_commands = dataset.add_subparsers(dest="dataset_command", required=True)
@@ -65,6 +73,7 @@ def _config_with_args(args: argparse.Namespace) -> Config:
         ("seed_dataset", "seed_dataset"),
         ("device", "device"),
         ("log_level", "log_level"),
+        ("public_host", "public_host"),
     ):
         value = getattr(args, argument, None)
         if value is not None:

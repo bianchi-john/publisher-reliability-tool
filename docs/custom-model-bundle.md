@@ -49,18 +49,13 @@ Allowed model types are `albert`, `bert`, `camembert`, `deberta`,
 `deberta-v2`, `distilbert`, `electra`, `modernbert`, `mpnet`, `rembert`,
 `roberta`, and `xlm-roberta`.
 
-## Adapter bundles for larger decoder models
+## Only this bundle shape is accepted
 
-A second schema exists for LoRA sequence-classification adapters over the
-study's larger decoder bases (Llama 3 8B, Mistral 24B). **It is under
-development and refused in this release**: an upload declaring
-`"schema_version": 2` returns `FEATURE_UNAVAILABLE` and installs nothing.
-
-Each such fold needs a CUDA GPU and several gigabytes of base weights, which the
-single-machine CPU demo cannot assume. The manifest vocabulary, validation rules
-and loader recipe are kept in the codebase so the family can be enabled without
-changing the storage contract or the model-identity rules. BERT and RoBERTa,
-which do run here on CPU, report comparable accuracy in the study.
+There is one schema. A bundle declaring any other `schema_version`, or carrying a
+`model_kind` or `architecture` field, is refused as invalid input: decoder
+adapters are out of scope for this tool, not a deferred feature, because they
+need a CUDA GPU and tens of gigabytes of base weights that neither the CPU demo
+nor its host can provide.
 
 ## Shared rules and validation
 

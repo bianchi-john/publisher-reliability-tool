@@ -15,8 +15,14 @@ from publisher_reliability.storage import Storage
 
 
 class CustomModelImportTest(unittest.TestCase):
-    def test_rejects_decoder_only_llm_architectures(self) -> None:
-        for model_type in ("llama", "mistral", "mixtral"):
+    def test_allowlist_is_closed_against_non_encoder_architectures(self) -> None:
+        """Only the listed encoder architectures load; the allowlist is not advisory.
+
+        Decoder and sequence-to-sequence families are refused because they are absent
+        from it, so the guarantee holds for any architecture nobody thought to name.
+        """
+
+        for model_type in ("gpt2", "falcon", "t5"):
             with self.subTest(model_type=model_type):
                 with self.assertRaises(AppError) as raised:
                     _require_supported_model_type(model_type)
@@ -91,28 +97,30 @@ class CustomModelImportTest(unittest.TestCase):
                 self.assertTrue((installed / "model.safetensors").is_file())
                 self.assertTrue((installed / "prt-model.json").is_file())
 
-    def test_refuses_peft_adapter_while_llm_support_is_unfinished(self) -> None:
-        """A schema-2 LoRA bundle is the Llama/Mistral path, which is not shipped yet.
+    def test_refuses_any_bundle_that_is_not_a_five_class_encoder(self) -> None:
+        """Only the five-class encoder bundle exists; anything else is invalid input.
 
-        The contract and loader remain in the codebase as the extension point, so the
-        refusal must come from the manifest check rather than from a missing feature
-        crashing somewhere deeper.
+        An adapter bundle was once a second supported schema. That path is gone, so a
+        bundle declaring it must be refused by the manifest check as malformed, not
+        deferred as an unfinished feature, and nothing may be installed.
         """
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "custom-mistral.zip"
+            source = root / "withdrawn-schema.zip"
+            # The schema is checked first, so nothing else in the manifest matters:
+            # a bundle written for the withdrawn contract never reaches the rest.
             manifest = {
                 "schema_version": 2,
                 "model_kind": "peft_sequence_classifier",
-                "architecture": "mistral",
-                "display_name": "Custom Mistral experiment",
-                "family": "custom_mistral_experiment",
+                "architecture": "gpt2",
+                "display_name": "Adapter bundle for a withdrawn schema",
+                "family": "custom_adapter_experiment",
                 "fold_id": 3,
                 "class_order": [0, 1, 2, 3, 4],
                 "max_tokens": 1024,
                 "padding_policy": "dynamic_longest",
-                "base_model": "mistralai/Mistral-Small-24B-Base-2501",
+                "base_model": "example-org/example-base",
                 "base_revision": "a" * 40,
                 "training_data": {"kind": "five_fold", "held_out_fold": 3},
             }
@@ -130,8 +138,10 @@ class CustomModelImportTest(unittest.TestCase):
                         source,
                         max_uncompressed_bytes=1024 * 1024,
                     )
-                self.assertEqual(refused.exception.code, "FEATURE_UNAVAILABLE")
-                self.assertIn("under development", refused.exception.message)
+                # The adapter contract is gone: only schema 1 encoder bundles exist,
+                # so this is an invalid bundle rather than a deferred feature.
+                self.assertEqual(refused.exception.code, "INVALID_INPUT")
+                self.assertIn("schema_version 1", refused.exception.message)
                 self.assertEqual(storage.rows["models"], [])
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,11 @@ class Config:
     dataset_upload_max_bytes: int = 536_870_912
     model_upload_max_bytes: int = 8_589_934_592
     container_internal: bool = False
+    # Set to the hostname this instance answers on when it is published behind a
+    # reverse proxy. Its presence is what puts the instance in public mode: the
+    # single-user administrative operations are then not served at all, because a
+    # public visitor must not be able to wipe another visitor's work.
+    public_host: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -68,6 +74,7 @@ class Config:
             container_internal=_boolean(
                 os.environ.get("PRT_CONTAINER_INTERNAL", "false")
             ),
+            public_host=os.environ.get("PRT_PUBLIC_HOST", "").strip(),
         )
         config.validate()
         return config
@@ -83,3 +90,16 @@ class Config:
             raise AppError("INVALID_INPUT", "Invalid dataset upload byte limit.")
         if not 0 < self.model_upload_max_bytes <= 8_589_934_592:
             raise AppError("INVALID_INPUT", "Invalid model upload byte limit.")
+        if self.public_host and not re.fullmatch(
+            r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?", self.public_host
+        ):
+            raise AppError(
+                "INVALID_INPUT",
+                "Public host must be a hostname, optionally with a port.",
+            )
+
+    @property
+    def is_public(self) -> bool:
+        """Whether this instance is published rather than used by one local person."""
+
+        return bool(self.public_host)

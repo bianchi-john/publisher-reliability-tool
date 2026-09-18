@@ -46,20 +46,17 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/v1/evaluation-jobs", openapi.json()["paths"])
         self.assertIn("/api/v1/models/available", openapi.json()["paths"])
         self.assertIn("/api/v1/models/upload", openapi.json()["paths"])
-        self.assertIn("/api/v1/models/official-upload", openapi.json()["paths"])
-        self.assertNotIn(
-            "/api/v1/models/official-catalog", openapi.json()["paths"]
-        )
-
-        # The paper's large decoder checkpoints are not importable in this release.
-        catalog = await self.client.get("/api/v1/models/official-catalog")
-        self.assertEqual(catalog.status_code, 404)
-        refused = await self.client.post(
+        # One model shape, one import route. The decoder-checkpoint endpoints were
+        # removed rather than left answering "not available yet".
+        for withdrawn in (
             "/api/v1/models/official-upload",
-            files={"files": ("llama_fold_1.pt.z01", b"irrelevant")},
-        )
-        self.assertEqual(refused.status_code, 501)
-        self.assertEqual(refused.json()["error"]["code"], "FEATURE_UNAVAILABLE")
+            "/api/v1/models/official-catalog",
+        ):
+            self.assertNotIn(withdrawn, openapi.json()["paths"])
+            self.assertEqual(
+                (await self.client.post(withdrawn, files={"files": ("x.pt", b"x")})).status_code,
+                404,
+            )
 
         missing = await self.client.get(
             "/api/v1/articles/00000000-0000-0000-0000-000000000000"
@@ -97,37 +94,28 @@ class ApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "INVALID_INPUT")
 
-    async def test_clear_user_data_is_exposed_and_confirmation_checked(self) -> None:
+    async def test_the_api_deletes_nothing(self) -> None:
+        """No route removes stored data, by any method, on any deployment.
+
+        Deletion was withdrawn outright rather than hidden, so that a visitor who
+        reaches past the interface -- or past this deployment's route table -- still
+        finds nothing that destroys another visitor's work. The only way to discard
+        what the tool holds is to remove its data directory from the host.
+        """
+
         paths = (await self.client.get("/api/openapi.json")).json()["paths"]
-        self.assertEqual(set(paths["/api/v1/user-data"]), {"delete"})
+        deleting = {
+            path: sorted(methods)
+            for path, methods in paths.items()
+            if "delete" in methods
+        }
+        self.assertEqual(deleting, {})
+        self.assertEqual(set(paths["/api/v1/jobs"]), {"get"})
 
-        wrong = await self.client.request(
-            "DELETE", "/api/v1/user-data", json={"confirmation": "please"}
-        )
-        self.assertEqual(wrong.status_code, 422)
-        self.assertEqual(wrong.json()["error"]["code"], "INVALID_INPUT")
-
-        # Nothing to delete in a fresh workspace, but the confirmed call still
-        # succeeds and reports zero of each, rather than treating "nothing local
-        # yet" as an error.
-        confirmed = await self.client.request(
-            "DELETE", "/api/v1/user-data", json={"confirmation": "DELETE"}
-        )
-        self.assertEqual(confirmed.status_code, 200)
-        self.assertEqual(
-            confirmed.json(),
-            {"deleted_predictions": 0, "deleted_saved_content": 0},
-        )
-
-    async def test_clear_jobs_needs_no_confirmation_body(self) -> None:
-        paths = (await self.client.get("/api/openapi.json")).json()["paths"]
-        self.assertEqual(set(paths["/api/v1/jobs"]), {"get", "delete"})
-
-        # Unlike /api/v1/user-data, this one asks for nothing beyond the method: no
-        # request body, no confirmation phrase.
-        response = await self.client.delete("/api/v1/jobs")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"deleted": 0})
+        for path in ("/api/v1/user-data", "/api/v1/jobs"):
+            with self.subTest(path=path):
+                refused = await self.client.request("DELETE", path, json={})
+                self.assertEqual(refused.status_code, 405 if path in paths else 404)
 
     async def test_only_single_articles_can_be_evaluated(self) -> None:
         """A publisher class is read, never requested as an evaluation."""

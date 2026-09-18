@@ -286,15 +286,14 @@ class ImporterServiceTest(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.code, "TRAINING_DATA_LEAKAGE")
 
-                # The paper's Llama and Mistral checkpoints were trained on the same
-                # publisher-disjoint folds, but the released dataset carries no
-                # predictions of their own. The guard must still recognise a training
-                # article for them, which it can only do if fold membership is a
-                # property of the article rather than of the model family.
+                # A family with no predictions of its own in the released dataset is
+                # still covered: the guard must recognise a training article for it,
+                # which it can only do if fold membership is a property of the article
+                # rather than of the model family.
                 dataset_article = storage.rows["prediction_runs"][0]["article_id"]
                 for family, artifact_kind in (
-                    ("llama", "paper_llama_state_dict_bundle"),
-                    ("mistral", "paper_mistral_adapter_bundle"),
+                    ("custom_encoder_one", "custom_transformer_bundle"),
+                    ("custom_encoder_two", "custom_transformer_bundle"),
                 ):
                     self.assertFalse(
                         any(

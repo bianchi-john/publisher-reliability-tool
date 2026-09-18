@@ -6,24 +6,10 @@
   </div>
   <div class="toolbar">
     <button id="export">Export predictions CSV</button>
-    <button class="danger" id="clear-user-data">Clear user data</button>
   </div>
 </header>
 
 <div id="page-notice" class="notice" hidden aria-live="polite"></div>
-
-<div id="clear-confirm" class="dialog-overlay" hidden>
-  <div class="dialog-box" role="alertdialog" aria-modal="true" aria-labelledby="clear-confirm-title" aria-describedby="clear-confirm-body">
-    <h2 id="clear-confirm-title">Clear user data?</h2>
-    <p id="clear-confirm-body">This permanently deletes every article you evaluated locally, any content you saved alongside one, and the private file that would otherwise restore them after a restart. The shared dataset is not affected. This cannot be undone.</p>
-    <label>Type DELETE to confirm<input type="text" id="clear-confirm-input" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="clear-confirm-hint"></label>
-    <p id="clear-confirm-hint" class="dialog-hint" aria-live="polite"></p>
-    <div class="dialog-actions">
-      <button type="button" class="secondary" id="clear-confirm-cancel">Cancel</button>
-      <button type="button" class="danger" id="clear-confirm-submit" disabled>Delete permanently</button>
-    </div>
-  </div>
-</div>
 
 <div class="source-tabs" aria-label="Filter articles by source">
   <a class="{{allTab}}" href="#articles">All articles</a>

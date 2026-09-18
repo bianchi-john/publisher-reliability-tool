@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import SCHEMA_VERSION, __version__
 from .aggregation import DISPERSION_BANDS, METHODS
 from .config import Config
-from .errors import LLM_UNDER_DEVELOPMENT, AppError, HTTP_STATUS
+from .errors import AppError, HTTP_STATUS
 from .importer import import_bundled_release
 from .jobs import JobManager
 from .model_scanner import scan_model_roots
@@ -52,24 +52,6 @@ class EvaluationRequest(StrictModel):
     model_id: str
     prediction_action: Literal["reuse", "recompute"] = "reuse"
     content_retention: Literal["discard", "save_local"] = "discard"
-
-
-class DeleteContentRequest(StrictModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={"example": examples.DELETE_CONTENT_BODY_EXAMPLE},
-    )
-
-    confirm_canonical_url: str
-
-
-class ClearUserDataRequest(StrictModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={"example": examples.CLEAR_USER_DATA_BODY_EXAMPLE},
-    )
-
-    confirmation: str
 
 
 class EmptyRequest(StrictModel):
@@ -150,6 +132,7 @@ def _open_workspace(
             ),
             dataset_upload_max_bytes=settings.dataset_upload_max_bytes,
             model_upload_max_bytes=settings.model_upload_max_bytes,
+            max_queued_jobs=20 if settings.is_public else 0,
         )
     except Exception:
         storage.close()
@@ -200,14 +183,29 @@ def create_app(
     app.state.restored_user_predictions = workspace.restored_user_predictions
     app.state.mirrored_user_predictions = workspace.mirrored_user_predictions
 
+    def local_only(register):
+        """Register an administrative route only on a single-user instance.
+
+        A published instance withholds these operations entirely rather than serving
+        them and refusing: the generated OpenAPI then describes exactly what that
+        deployment can do, and no visitor can clear another visitor's work, upload an
+        archive to the server, or start a rescan.
+        """
+
+        return register if not settings.is_public else (lambda handler: handler)
+
     @app.middleware("http")
     async def local_host_boundary(request: Request, call_next):
-        # The socket already listens on loopback only; matching the Host header as well
-        # defeats DNS rebinding, where a public name resolves to 127.0.0.1 and a remote
-        # page then drives this API through the user's own browser.
+        # Matching the Host header defeats DNS rebinding, where a public name resolves
+        # to 127.0.0.1 and a remote page then drives this API through the user's own
+        # browser. A published instance sits behind a proxy that forwards its own
+        # hostname, so that name is accepted too -- but only the one name configured,
+        # never an arbitrary Host.
         host = request.headers.get("host", "")
-        expected = f"127.0.0.1:{settings.port}"
-        if host != expected:
+        accepted = {f"127.0.0.1:{settings.port}"}
+        if settings.public_host:
+            accepted.add(settings.public_host)
+        if host not in accepted:
             return error_response(
                 AppError("INVALID_HOST", "Request Host does not match the local origin.")
             )
@@ -288,6 +286,9 @@ def create_app(
             "schema_version": SCHEMA_VERSION,
             "offline": settings.offline,
             "device": settings.device,
+            # The interface reads this to hide controls whose routes a published
+            # instance does not serve, so a visitor is never offered a dead button.
+            "public_instance": settings.is_public,
             "bundled_import": workspace.bundled_import,
             "ledger_counts": counts,
             "derived_counts": {
@@ -347,16 +348,6 @@ def create_app(
             },
         )
 
-    @app.delete(
-        "/api/v1/user-data",
-        summary="Permanently delete every local evaluation, its content and its mirror",
-        responses=examples.CLEAR_USER_DATA_RESPONSES,
-    )
-    async def clear_user_data(body: ClearUserDataRequest):
-        # A publisher's stored predictions are never touched here: this deletes only
-        # what a user created locally, not the shared research dataset.
-        return service.clear_user_data(confirmation=body.confirmation)
-
     @app.get(
         "/api/v1/articles",
         summary="List articles derived from stored prediction runs",
@@ -397,14 +388,6 @@ def create_app(
             service.content(article_identifier),
             headers={"Cache-Control": "no-store"},
         )
-
-    @app.delete(
-        "/api/v1/articles/{article_identifier}/content",
-        summary="Delete saved content for one article",
-        responses=examples.DELETE_CONTENT_RESPONSES,
-    )
-    async def delete_article_content(article_identifier: str, body: DeleteContentRequest):
-        return service.delete_content(article_identifier, body.confirm_canonical_url)
 
     @app.get(
         "/api/v1/articles/{article_identifier}",
@@ -526,21 +509,21 @@ def create_app(
         # from the articles already classified, never evaluated.
         return service.available_models(url=url)
 
-    @app.post(
+    @local_only(app.post(
         "/api/v1/models/scan",
         status_code=202,
         summary="Scan configured model directories for checkpoints",
         responses=examples.MODEL_SCAN_RESPONSES,
-    )
+    ))
     async def model_scan(_body: EmptyRequest):
         return {"job_id": jobs.submit("model_validation", {})}
 
-    @app.post(
+    @local_only(app.post(
         "/api/v1/models/upload",
         status_code=202,
         summary="Import a custom five-class Transformer bundle (.zip)",
         responses=examples.MODEL_UPLOAD_RESPONSES,
-    )
+    ))
     async def model_upload(file: UploadFile = File(...)):
         filename = Path(file.filename or "").name
         if not filename.lower().endswith(".zip"):
@@ -585,19 +568,6 @@ def create_app(
         return {"job_id": job_id}
 
     @app.post(
-        "/api/v1/models/official-upload",
-        status_code=202,
-        summary="Import an official Llama/Mistral checkpoint (not available yet)",
-        responses=examples.OFFICIAL_UPLOAD_RESPONSES,
-    )
-    async def official_model_upload(files: list[UploadFile] = File(...)):
-        # Refused before a single byte is read, so a multi-gigabyte upload is not
-        # spooled to disk only to be rejected afterwards.
-        for uploaded in files:
-            await uploaded.close()
-        raise AppError("FEATURE_UNAVAILABLE", LLM_UNDER_DEVELOPMENT)
-
-    @app.post(
         "/api/v1/evaluation-jobs",
         status_code=202,
         summary="Classify one article, or reuse its stored prediction",
@@ -608,7 +578,14 @@ def create_app(
             EvaluationRequest, Body(openapi_examples=examples.EVALUATION_BODY_EXAMPLES)
         ],
     ):
-        return {"job_id": jobs.submit("evaluation", body.model_dump(mode="json"))}
+        request = body.model_dump(mode="json")
+        if settings.is_public:
+            # Nothing on a published instance can be deleted, so nothing on it may
+            # accumulate either: a visitor cannot ask the server to keep the text of
+            # a third party's article. The classification itself is unaffected, since
+            # retention only decides whether the body is kept after it is used.
+            request["content_retention"] = "discard"
+        return {"job_id": jobs.submit("evaluation", request)}
 
     @app.get(
         "/api/v1/jobs",
@@ -630,14 +607,6 @@ def create_app(
     )
     async def get_job(job_identifier: str):
         return jobs.get(job_identifier)
-
-    @app.delete(
-        "/api/v1/jobs",
-        summary="Delete every job row (no confirmation; refuses if one is active)",
-        responses=examples.CLEAR_JOBS_RESPONSES,
-    )
-    async def clear_jobs():
-        return {"deleted": jobs.clear()}
 
     @app.get(
         "/api/v1/imports",
@@ -661,12 +630,12 @@ def create_app(
             raise AppError("NOT_FOUND", "Import was not found.")
         return result
 
-    @app.post(
+    @local_only(app.post(
         "/api/v1/imports/upload",
         status_code=202,
         summary="Import a user CSV/CSV.GZ of BERT/RoBERTa predictions",
         responses=examples.IMPORT_UPLOAD_RESPONSES,
-    )
+    ))
     async def upload_import(file: UploadFile = File(...)):
         filename = Path(file.filename or "").name
         if not (

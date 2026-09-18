@@ -112,7 +112,7 @@ Minimum commit units are deliberately explicit:
   validation;
 - new prediction: one append-only prediction-run row followed by an idempotent
   private user-prediction mirror update keyed by `prediction_run_id`;
-- content save/delete: one complete `local_content.csv` replacement;
+- content save: one complete `local_content.csv` replacement;
 - model registration/status: one complete `models.csv` replacement, which
   registers a historical identity only for a family/fold that actually
   published runs in that import;
@@ -168,13 +168,12 @@ model_id,family,fold_id,display_name,artifact_kind,artifact_locator,artifact_sha
 ```
 
 - `family`: `bert` or `roberta` for paper/local models; custom model bundles
-  use a validated `custom_...` slug. The column also accepts a further paper
-  family without a schema change, which is what a later decoder family would
-  use.
+  use a validated `custom_...` slug. The column accepts a further family without
+  a schema change.
 - `status`: `compatible`, `historical_only`, `artifact_missing`,
   `dependency_missing`, `resource_unavailable`, or `invalid`.
 - `artifact_kind`: `pytorch_state_dict`, `custom_transformer_bundle`, or
-  `historical_virtual`. Rows written by earlier releases may still carry a
+  `historical_virtual`. Rows written by earlier releases may carry a withdrawn
   managed decoder-bundle kind; they remain readable and are reported as
   non-runnable.
 - `fold_id` is integer `1..5`; every identity has class order `[0,1,2,3,4]`.

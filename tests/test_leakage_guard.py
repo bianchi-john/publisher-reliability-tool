@@ -114,14 +114,14 @@ class LeakageGuardTest(unittest.TestCase):
         )
 
     def test_guard_applies_to_families_absent_from_the_released_dataset(self) -> None:
-        """The released dataset carries no Llama or Mistral predictions.
+        """A family with no stored predictions is still covered by the guard.
 
         Fold membership is recorded per article rather than per family precisely so
-        that those checkpoints are still covered; keying it by family would leave them
-        with no recorded folds and silently wave every article through.
+        that such a checkpoint is covered; keying it by family would leave it with no
+        recorded folds and silently wave every article through.
         """
 
-        for family in ("llama", "mistral"):
+        for family in ("custom_encoder_one", "custom_encoder_two"):
             blocked = local_checkpoint(self.storage, family, 1)
             with self.assertRaises(AppError) as raised:
                 self.service.assert_not_training_article(blocked, self.article_id)

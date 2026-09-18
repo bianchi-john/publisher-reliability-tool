@@ -4,10 +4,10 @@
     <h1>Models</h1>
     <p class="intro">Add BERT or RoBERTa checkpoints, or import a compatible user-created five-class Transformer. Their provenance remains distinct in every prediction.</p>
   </div>
-  <button id="scan">Rescan model directories</button>
+  <button class="local-only" id="scan">Rescan model directories</button>
 </header>
 
-<section class="card full">
+<section class="card full local-only">
   <h2>Import a custom five-class Transformer</h2>
   <ol>
     <li>Export the complete classifier with safe serialization (<span class="mono">safetensors</span>) together with its tokenizer.</li>
@@ -37,7 +37,7 @@
     </div>
   </form>
 
-  <p class="notice">Support for the paper's larger decoder checkpoints (Llama 3 8B, Mistral 24B) is still under development and not available in this release. They need a CUDA GPU and several gigabytes per fold; BERT and RoBERTa run on CPU and report comparable accuracy.</p>
+  <p class="notice">This tool runs one model shape: a five-class encoder classifier built to the same recipe as the study's BERT and RoBERTa checkpoints. A bundle of any other shape is refused at import.</p>
 </section>
 
 <div id="scan-state" class="notice" aria-live="polite">Loading model inventory…</div>

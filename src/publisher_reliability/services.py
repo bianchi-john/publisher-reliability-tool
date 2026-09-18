@@ -16,7 +16,7 @@ from .aggregation import METHODS, WARNING, aggregate
 from .errors import AppError
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
-from .prediction_dataset import clear_user_predictions, sync_user_predictions
+from .prediction_dataset import sync_user_predictions
 from .storage import Storage, json_field, utc_now
 
 
@@ -136,14 +136,13 @@ class ResearchService:
         family in the study was split the same way: one publisher-disjoint
         ``StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`` over the same
         publisher list. An article held out in fold 3 is therefore held out in fold 3
-        for BERT, RoBERTa, Llama and Mistral alike, and was in the training set of the
-        other four folds of every family.
+        for every family trained on it, and was in the training set of the other four
+        folds.
 
-        This matters because the released dataset only carries BERT and RoBERTa
-        predictions. Keying the registry by family would leave the paper's Llama and
-        Mistral checkpoints with no recorded folds at all, so the leakage guard would
-        silently pass every article for exactly the models whose training set is
-        hardest to reconstruct.
+        Keying the registry by article rather than by family is therefore both simpler
+        and safer: the guard depends only on where an article sat in the split, so it
+        cannot be defeated by a checkpoint whose own family happens to have no stored
+        predictions to derive a fold from.
         """
 
         registry: dict[str, set[int]] = defaultdict(set)
@@ -875,9 +874,8 @@ class ResearchService:
     ) -> None:
         """Reject known training exposure or ambiguous imported fold membership.
 
-        Applies to every family, including the paper's Llama and Mistral checkpoints,
-        whose own predictions are absent from the released dataset but which were
-        trained on the same publisher-disjoint folds.
+        Applies to every family, because fold membership is a property of the article
+        under the study's single publisher-disjoint split, not of the model asking.
         """
 
         family = model["family"]
@@ -941,81 +939,6 @@ class ResearchService:
         if row is None:
             raise AppError("NOT_FOUND", "Saved article content was not found.")
         return row
-
-    def delete_content(self, identifier: str, confirmation: str) -> dict[str, object]:
-        if any(
-            row["job_type"] == "evaluation" and row["status"] == "running"
-            for row in self.storage.rows["jobs"]
-        ):
-            raise AppError(
-                "INVALID_INPUT", "Content cannot be deleted during an evaluation."
-            )
-        row = self.content(identifier)
-        if row["canonical_url"] != confirmation:
-            raise AppError("INVALID_INPUT", "Canonical URL confirmation does not match.")
-        self.storage.delete("local_content", "article_id", identifier)
-        return {
-            "deleted": True,
-            "backup_notice": "User backups and external copies are unchanged.",
-        }
-
-    CLEAR_USER_DATA_CONFIRMATION = "DELETE"
-
-    def clear_user_data(self, *, confirmation: str) -> dict[str, object]:
-        """Permanently delete every locally created evaluation, and nothing else.
-
-        This removes exactly what the user produced on this machine: their own
-        article evaluations (``prediction_runs`` rows of origin ``local_inference``),
-        any title/body they chose to save alongside a run (``local_content`` is only
-        ever populated by that same user action, whether the run it accompanies is a
-        reused dataset prediction or a local one), and the private mirror that would
-        otherwise restore them. Every ``bundled_import``/``user_import`` row, and the
-        released dataset itself, is untouched: it is shared research data, not
-        personal history.
-
-        The private mirror is cleared before the ledger rows, deliberately. See
-        ``clear_user_predictions`` for why that order, and not the reverse, is the one
-        that cannot silently undo itself on the next restart.
-        """
-
-        if confirmation != self.CLEAR_USER_DATA_CONFIRMATION:
-            raise AppError(
-                "INVALID_INPUT",
-                f'Type "{self.CLEAR_USER_DATA_CONFIRMATION}" to confirm.',
-            )
-        if any(
-            row["job_type"] == "evaluation" and row["status"] == "running"
-            for row in self.storage.rows["jobs"]
-        ):
-            raise AppError(
-                "INVALID_INPUT", "User data cannot be cleared while an evaluation is running."
-            )
-
-        deleted_predictions = sum(
-            1
-            for row in self.storage.rows["prediction_runs"]
-            if row["origin"] == "local_inference"
-        )
-        deleted_saved_content = len(self.storage.rows["local_content"])
-
-        if deleted_predictions:
-            clear_user_predictions(self.prediction_dataset_dir)
-        if deleted_saved_content:
-            self.storage.replace("local_content", [])
-        if deleted_predictions:
-            self.storage.replace(
-                "prediction_runs",
-                [
-                    row
-                    for row in self.storage.rows["prediction_runs"]
-                    if row["origin"] != "local_inference"
-                ],
-            )
-
-        return {
-            "deleted_predictions": deleted_predictions,
-            "deleted_saved_content": deleted_saved_content,
-        }
 
     def export_predictions(
         self,

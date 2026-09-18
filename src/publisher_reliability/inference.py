@@ -20,7 +20,7 @@ import httpx
 from . import __version__
 from .errors import AppError
 from .identity import normalize_url
-from .official_models import MANAGED_ARTIFACT_KINDS, verify_managed_model
+from .custom_models import MANAGED_ARTIFACT_KINDS, verify_managed_model
 from .storage import Storage
 
 
@@ -294,9 +294,8 @@ class InferenceEngine:
     def _release_loaded_model(self) -> None:
         """Drop the resident model before loading another one.
 
-        Only one checkpoint stays in memory at a time: two encoders, let alone a
-        quantized 24B adapter, do not fit beside each other on the workstation this
-        demo targets.
+        Only one checkpoint stays in memory at a time: two encoders do not fit beside
+        each other on the workstation this demo targets.
         """
 
         import torch
@@ -329,112 +328,6 @@ class InferenceEngine:
             use_safetensors=True,
         )
         return loaded_model, tokenizer, False
-
-    def _load_quantized_adapter(
-        self, model_row: dict[str, str], path: Path
-    ) -> tuple[object, object, bool]:
-        """Load a Llama or Mistral LoRA adapter over its pinned 4-bit base model.
-
-        The base weights are never redistributed with this tool: they are fetched from
-        the exact pinned revision and cached locally, and the adapter is applied on
-        top. Accelerate places the quantized base across devices itself, which is why
-        the caller is told not to move the model afterwards.
-        """
-
-        import torch
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-        if not torch.cuda.is_available():
-            raise AppError(
-                "MODEL_NOT_RUNNABLE",
-                "Llama and Mistral QLoRA inference requires a CUDA GPU.",
-            )
-        try:
-            from peft import LoraConfig, PeftModel, get_peft_model
-            from transformers import BitsAndBytesConfig
-        except ImportError as exc:
-            raise AppError(
-                "MODEL_NOT_RUNNABLE",
-                "Install the project 'llm-models' extra for Llama/Mistral inference.",
-            ) from exc
-        dependency_cache = self.storage.data_dir / "model-dependencies"
-        dependency_cache.mkdir(exist_ok=True)
-        quantization = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-        tokenizer_source: str | Path = (
-            path
-            if model_row["artifact_kind"] in {
-                "paper_mistral_adapter_bundle",
-                "custom_peft_adapter_bundle",
-            }
-            else model_row["tokenizer_source"]
-        )
-        tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_source,
-            revision=(
-                None
-                if isinstance(tokenizer_source, Path)
-                else model_row["tokenizer_revision"]
-            ),
-            cache_dir=dependency_cache,
-            local_files_only=(
-                True if isinstance(tokenizer_source, Path) else self.offline
-            ),
-            trust_remote_code=False,
-        )
-        if tokenizer.pad_token_id is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        loaded_model = AutoModelForSequenceClassification.from_pretrained(
-            model_row["base_model"],
-            revision=model_row["base_revision"],
-            cache_dir=dependency_cache,
-            local_files_only=self.offline,
-            trust_remote_code=False,
-            num_labels=5,
-            quantization_config=quantization,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-        )
-        loaded_model.config.pad_token_id = tokenizer.pad_token_id
-        if model_row["artifact_kind"] == "paper_llama_state_dict_bundle":
-            loaded_model = get_peft_model(
-                loaded_model,
-                LoraConfig(
-                    r=8,
-                    lora_alpha=16,
-                    target_modules=[
-                        "q_proj",
-                        "k_proj",
-                        "v_proj",
-                        "o_proj",
-                        "gate_proj",
-                        "down_proj",
-                        "up_proj",
-                    ],
-                    lora_dropout=0.05,
-                    bias="none",
-                    task_type="SEQ_CLS",
-                ),
-            )
-            state = torch.load(
-                path / "model.pt",
-                map_location="cpu",
-                weights_only=True,
-                mmap=True,
-            )
-            loaded_model.load_state_dict(state, strict=True)
-        else:
-            loaded_model = PeftModel.from_pretrained(
-                loaded_model,
-                path,
-                is_trainable=False,
-            )
-        uses_device_map = True
-        return loaded_model, tokenizer, True
 
     def _load_core_checkpoint(
         self,
@@ -543,14 +436,6 @@ class InferenceEngine:
         try:
             if model_row["artifact_kind"] == "custom_transformer_bundle":
                 loaded_model, tokenizer, uses_device_map = self._load_custom_bundle(path)
-            elif model_row["artifact_kind"] in {
-                "paper_llama_state_dict_bundle",
-                "paper_mistral_adapter_bundle",
-                "custom_peft_adapter_bundle",
-            }:
-                loaded_model, tokenizer, uses_device_map = self._load_quantized_adapter(
-                    model_row, path
-                )
             elif model_row["family"] in CORE_MODELS:
                 loaded_model, tokenizer, uses_device_map = self._load_core_checkpoint(
                     model_row, path, progress

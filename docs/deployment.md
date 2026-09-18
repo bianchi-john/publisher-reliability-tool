@@ -113,9 +113,67 @@ Precedence is CLI, environment, default. No configuration file is loaded.
 | `PRT_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
 | `PRT_DATASET_UPLOAD_MAX_BYTES` | `536870912` | Positive, maximum 512 MiB in supported demo |
 | `PRT_MODEL_UPLOAD_MAX_BYTES` | `8589934592` | Positive, maximum 8 GiB |
+| `PRT_PUBLIC_HOST` | empty | Hostname, optionally with a port, that this instance answers on when published; empty means a single-user local instance |
 
-Host, public origin, CORS, API keys, job lanes, queue limits, backup retention,
-and UID/GID remapping are intentionally not configurable.
+CORS, API keys, job lanes, backup retention and UID/GID remapping are
+intentionally not configurable.
+
+## 4.1 Publishing the instance
+
+The application was written for one person on a loopback address. Two of its
+assumptions stop holding once it is reachable by anyone: that whoever reaches it
+may run administrative operations, and that the `Host` header can only be the
+loopback address. Setting `PRT_PUBLIC_HOST` (or `--public-host`) states the name
+the instance answers on and switches both.
+
+A published instance:
+
+- accepts that one extra `Host` value, and nothing else. The check still refuses
+  every other name, because it exists to defeat DNS rebinding rather than to be
+  switched off;
+- **does not serve** `POST /api/v1/models/scan`, `POST /api/v1/models/upload` or
+  `POST /api/v1/imports/upload`. They are not registered at all, so they answer
+  `404` and the generated OpenAPI describes exactly what that deployment can do;
+- **forces `content_retention` to `discard`**, so a visitor cannot ask the server
+  to keep the text of a third party's article;
+- reports `public_instance: true` from `GET /api/v1/status`, which the interface
+  reads to hide the controls calling those routes;
+- caps the queue at 20 waiting jobs and answers `429 TOO_MANY_REQUESTS` beyond
+  that, because one worker classifying an article in seconds would otherwise
+  promise an unbounded wait.
+
+Classifying an article stays available: that is the demonstration.
+
+Run it behind a reverse proxy that terminates TLS and forwards to the loopback
+port. The proxy must pass the public name through as `Host`:
+
+```nginx
+server {
+    server_name prt.example.org;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 120s;   # a RoBERTa-large classification takes seconds
+    }
+}
+```
+
+Start it with the matching name:
+
+```bash
+publisher-reliability serve --public-host prt.example.org
+```
+
+Resource use is modest and was measured rather than estimated: about 100 MB with
+the ledgers loaded, 0.96 GB while BERT is resident and 1.85 GB while
+RoBERTa-large is, since only one checkpoint stays in memory at a time. Allow
+roughly 2 GB of RAM for the process and about 16 GB of disk for the virtual
+environment, the ten checkpoints and the data directory.
+
+Run exactly one process. The data directory takes an exclusive lock, so a second
+worker fails with `STORAGE_ERROR` rather than corrupting the ledgers.
 
 ## 5. Offline operation
 
@@ -149,11 +207,6 @@ untouched, through `<data-dir>/model-scan-cache.json`, and take seconds instead.
 The cache is disposable — deleting it only makes the next start slow again — and
 `publisher-reliability models scan --full` forces complete re-verification, which
 is the right thing to run when storage integrity is in question.
-
-The study's larger decoder checkpoints (Llama 3 8B, Mistral 24B) cannot be
-imported in this release: that support is under development, and each fold needs
-a CUDA GPU plus several gigabytes of weights. An import attempt returns
-`FEATURE_UNAVAILABLE`.
 
 Custom Transformers are a complete allowlisted encoder classifier. The
 application does not execute artifact code. Use **Models → Import a custom

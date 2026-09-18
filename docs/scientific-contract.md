@@ -149,22 +149,37 @@ Both use `torch.load(..., map_location="cpu", weights_only=True)`, strict tensor
 keys/shapes, `eval()`, and softmax over five logits. Core compatibility requires
 a frozen CPU float32 reference fixture.
 
-### 5.2 Larger decoder models: extension point, not a shipped feature
+### 5.2 One supported model shape
 
-The study also fine-tuned Llama 3 8B and Mistral 24B on the same
-publisher-disjoint folds. This release neither imports nor runs them: each fold
-requires a CUDA GPU and several gigabytes of weights, which the single-machine
-CPU demo cannot assume, so the effort went into an architecture that can accept
-such a family rather than into a path most readers could not execute. Any import
-attempt is refused with `FEATURE_UNAVAILABLE`.
+The tool supports exactly one model shape: a five-class encoder classifier built
+to the recipe above. There is no second bundle schema, no adapter path and no
+reserved import route for another family.
 
-What remains open for that extension is deliberate: model identity is
-content-addressed over output-relevant settings rather than over an architecture
-name, the loader registry is keyed by family, the leakage guard records fold
-membership per article and therefore already covers any future family, and the
-`models.csv` contract accepts a further family and artifact kind without a schema
-change. The two encoder families that do run here report accuracy comparable to
-the larger models in the study.
+The tool is built to run on an ordinary laptop, so it ships the two encoders
+rather than the study's Llama 3 8B and Mistral 24B, which need a CUDA GPU and
+tens of gigabytes of weights per fold. Those checkpoints remain published with
+the paper for anyone who has that hardware.
+
+Almost nothing is given up by leaving them out, and this is the study's own
+finding rather than a convenient excuse:
+
+- RoBERTa is the most accurate publisher-level model of the four (0.69 accuracy,
+  ahead of Mistral 24B at 0.68), and publisher-level inference is precisely what
+  this tool performs;
+- RoBERTa also leads on article-level macro F1 (0.55) and on tolerant accuracy
+  (0.84);
+- the 24B decoder shows no measurable gain despite a context window four times
+  longer, which the study reads as performance being limited by the weak
+  supervision in the labels rather than by model size;
+- the error analysis finds the same directional biases in all four families,
+  describing them as structural properties of the task rather than of any
+  architecture or scale.
+
+Scale did not buy accuracy in the study, so a decoder path would cost every
+visitor a GPU and return nothing the encoders do not already show. What this
+tool demonstrates is the two-stage pipeline — article classification under a
+leakage-safe protocol, then publisher-level aggregation — and that demonstration
+is complete, and at its most accurate, with the encoders it can actually run.
 
 ### 5.3 Custom Transformers bundle
 
@@ -173,8 +188,8 @@ A user model is accepted only as the constrained PRT bundle documented in
 `prt-model.json`, a Hugging Face `config.json`, a local tokenizer, and exactly
 one full `model.safetensors` whose architecture is on the encoder allowlist. The
 manifest declares five classes and uses a `custom_...` family plus held-out fold
-`1..5`. The LoRA adapter variant of this
-contract targets the larger decoder bases and is refused for the reason given in
+`1..5`. A bundle declaring any other schema version, or carrying a `model_kind`
+or `architecture` field, is refused as invalid input for the reason given in
 5.2.
 
 Validation is local-only and uses `trust_remote_code=false`. It rejects

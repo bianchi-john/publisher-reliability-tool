@@ -31,21 +31,20 @@ untouched since the previous scan reuses that result and later starts are quick;
 adding, replacing or modifying a file has it verified again. Run
 `publisher-reliability models scan --full` to re-read every byte on demand.
 
-## Larger decoder checkpoints are not importable yet
+## Only five-class encoder checkpoints belong here
 
-The study also fine-tuned Llama 3 8B and Mistral 24B, and their artifacts are on
-OSF, but **this release cannot import them**. Each fold needs a CUDA GPU and
-several gigabytes of weights, which a single-machine CPU demo cannot assume, so
-any attempt to import one is refused with `FEATURE_UNAVAILABLE` and nothing is
-installed. BERT and RoBERTa run here on CPU and report comparable accuracy in
-the study.
+The study behind this tool also fine-tuned Llama 3 8B and Mistral 24B, and those
+artifacts are published on OSF, but they are outside this tool and there is no
+import path for them. Each fold needs a CUDA GPU and tens of gigabytes of
+weights, which neither a single-machine CPU demo nor the server hosting it can
+provide, so a decoder path could never be exercised here.
 
 ## Custom models
 
 Custom five-class Hugging Face **encoder** sequence classifiers are imported from
 the Models page as self-contained `.zip` bundles and are marked as user models.
-Decoder-only architectures and PEFT adapters are rejected for the same reason as
-above. See [`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for
+Decoder-only architectures and adapter bundles are rejected for the same reason
+as above. See [`docs/custom-model-bundle.md`](../docs/custom-model-bundle.md) for
 the exact safe format.
 
 The application never manages Hugging Face credentials or executes code supplied

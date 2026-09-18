@@ -1,4 +1,10 @@
-"""Safe import of self-contained custom Hugging Face classifier bundles."""
+"""Safe import and integrity checking of self-contained custom classifier bundles.
+
+The tool supports exactly one model shape: a five-class encoder classifier built to
+the same recipe as the study's BERT and RoBERTa checkpoints. There is deliberately
+no second bundle schema and no adapter path, so a bundle either satisfies that one
+contract or it is refused.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
 
-from .errors import LLM_UNDER_DEVELOPMENT, AppError
+from .errors import AppError
 from .identity import sha256_json
 from .storage import Storage, json_field, utc_now
 
@@ -29,17 +35,9 @@ REQUIRED_FILES = {
     "prt-model.json",
     "tokenizer_config.json",
 }
-REQUIRED_ADAPTER_FILES = {
-    "adapter_config.json",
-    "adapter_model.safetensors",
-    "prt-model.json",
-    "tokenizer_config.json",
-    "tokenizer.json",
-}
-CUSTOM_LLM_BASES = {
-    "llama": "meta-llama/Meta-Llama-3-8B",
-    "mistral": "mistralai/Mistral-Small-24B-Base-2501",
-}
+# Managed bundles live under the data directory rather than a configured model root,
+# so they are re-verified against this one kind before any load.
+MANAGED_ARTIFACT_KINDS = {"custom_transformer_bundle"}
 SUPPORTED_CUSTOM_MODEL_TYPES = {
     "albert",
     "bert",
@@ -186,6 +184,30 @@ def directory_identity(root: Path) -> tuple[str, list[dict[str, object]]]:
     return sha256_json(entries), entries
 
 
+def verify_managed_model(storage: Storage, row: dict[str, str]) -> tuple[bool, str]:
+    """Recheck an installed bundle before it is loaded, without executing its code.
+
+    A managed bundle lives inside the data directory rather than a configured model
+    root, so the path is confirmed to stay there, to be a real directory and not a
+    symlink out of it, and to still hash to the digest recorded at import time.
+    """
+
+    candidate = storage.data_dir / row["artifact_locator"]
+    if candidate.is_symlink():
+        return False, "Managed model path is a symbolic link."
+    path = candidate.resolve()
+    managed = (storage.data_dir / "managed-models").resolve()
+    if path.parent != managed or not path.is_dir():
+        return False, "Managed model bundle is missing."
+    try:
+        actual = directory_identity(path)[0]
+    except OSError:
+        return False, "Managed model bundle could not be read."
+    if actual != row["artifact_sha256"]:
+        return False, "Managed model bundle failed its integrity check."
+    return True, ""
+
+
 def _manifest(root: Path) -> dict[str, object]:
     """Read and check the bundle's own description of itself.
 
@@ -208,10 +230,15 @@ def _manifest(root: Path) -> dict[str, object]:
     training = manifest.get("training_data")
     base_model = manifest.get("base_model", "")
     base_revision = manifest.get("base_revision", "")
+    if manifest.get("schema_version") != 1:
+        raise AppError(
+            "INVALID_INPUT",
+            "Only schema_version 1 bundles are supported: a five-class encoder "
+            "classifier built to the same recipe as the study's BERT and RoBERTa "
+            "checkpoints.",
+        )
     common_invalid = (
-        type(manifest.get("schema_version")) is not int
-        or manifest.get("schema_version") not in {1, 2}
-        or not isinstance(manifest.get("display_name"), str)
+        not isinstance(manifest.get("display_name"), str)
         or not 1 <= len(str(manifest["display_name"]).strip()) <= 80
         or not isinstance(family, str)
         or CUSTOM_FAMILY.fullmatch(family) is None
@@ -236,150 +263,15 @@ def _manifest(root: Path) -> dict[str, object]:
             "INVALID_INPUT",
             "Custom manifest does not satisfy the PRT Transformer bundle contract.",
         )
-    schema_version = manifest["schema_version"]
-    if schema_version == 2:
-        # Schema 2 is the LoRA adapter contract for Llama and Mistral. The validation
-        # and loading code below stays as the extension point, but a user cannot
-        # install one until that path is finished.
-        raise AppError("FEATURE_UNAVAILABLE", LLM_UNDER_DEVELOPMENT)
-    if schema_version == 1:
-        contract_invalid = bool(
-            manifest.get("model_kind")
-            or manifest.get("architecture")
-        )
-    else:
-        architecture = manifest.get("architecture")
-        adapter_max_tokens = manifest.get("max_tokens")
-        contract_invalid = (
-            manifest.get("model_kind") != "peft_sequence_classifier"
-            or architecture not in CUSTOM_LLM_BASES
-            or base_model != CUSTOM_LLM_BASES.get(str(architecture), "")
-            or re.fullmatch(r"[0-9a-f]{40}", base_revision) is None
-            or manifest.get("padding_policy") != "dynamic_longest"
-            or (
-                architecture == "llama"
-                and (
-                    type(adapter_max_tokens) is not int
-                    or adapter_max_tokens > 256
-                )
-            )
-            or (
-                architecture == "mistral"
-                and (
-                    type(adapter_max_tokens) is not int
-                    or adapter_max_tokens > 1024
-                )
-            )
-        )
+    # ``model_kind`` and ``architecture`` only ever described the withdrawn adapter
+    # contract, so a bundle that still carries them is not a schema 1 bundle.
+    contract_invalid = bool(manifest.get("model_kind") or manifest.get("architecture"))
     if contract_invalid:
         raise AppError(
             "INVALID_INPUT",
             "Custom manifest does not satisfy the PRT Transformer bundle contract.",
         )
     return manifest
-
-
-def _validate_peft_adapter(
-    root: Path,
-    *,
-    manifest: dict[str, object],
-) -> dict[str, object]:
-    """Check a LoRA sequence-classification adapter against its declared architecture.
-
-    An adapter is only meaningful over the exact base model named in the manifest, so
-    its target modules and five-row classification head are verified here. Remote code
-    mappings are forbidden: loading must never execute Python that arrived in an upload.
-    """
-
-    missing = sorted(name for name in REQUIRED_ADAPTER_FILES if not (root / name).is_file())
-    if missing:
-        raise AppError(
-            "INVALID_INPUT",
-            "Custom PEFT classifier bundle is incomplete.",
-            {"missing": missing},
-        )
-    adapter = _json_file(root / "adapter_config.json")
-    tokenizer_json = _json_file(root / "tokenizer_config.json")
-    if "auto_map" in tokenizer_json or tokenizer_json.get("trust_remote_code"):
-        raise AppError("INVALID_INPUT", "Custom tokenizer code mappings are forbidden.")
-    architecture = str(manifest["architecture"])
-    expected_targets = (
-        {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"}
-        if architecture == "llama"
-        else {"q_proj", "k_proj", "v_proj", "o_proj"}
-    )
-    targets = set(adapter.get("target_modules", []))
-    if (
-        adapter.get("base_model_name_or_path") != manifest["base_model"]
-        or adapter.get("peft_type") != "LORA"
-        or adapter.get("task_type") != "SEQ_CLS"
-        or not targets
-        or not targets.issubset(expected_targets)
-        or type(adapter.get("r")) is not int
-        or not 1 <= int(adapter["r"]) <= 256
-        or not isinstance(adapter.get("lora_alpha"), (int, float))
-        or not set(adapter.get("modules_to_save") or []) & {"classifier", "score"}
-    ):
-        raise AppError(
-            "INVALID_INPUT",
-            "Custom PEFT adapter is not a compatible five-class sequence classifier.",
-        )
-    try:
-        import torch
-        from safetensors import safe_open
-        from transformers import AutoTokenizer
-    except ImportError as exc:
-        raise AppError(
-            "MODEL_NOT_RUNNABLE",
-            "Install the project 'models' extra to validate custom adapters.",
-        ) from exc
-    try:
-        AutoTokenizer.from_pretrained(
-            root,
-            local_files_only=True,
-            trust_remote_code=False,
-        )
-        with safe_open(
-            root / "adapter_model.safetensors",
-            framework="pt",
-            device="cpu",
-        ) as weights:
-            keys = set(weights.keys())
-            heads = [
-                key
-                for key in keys
-                if key.endswith(("score.weight", "classifier.weight"))
-                or ".modules_to_save." in key
-                and key.endswith(".weight")
-                and ("score" in key or "classifier" in key)
-            ]
-            if not heads or not any(weights.get_tensor(key).shape[0] == 5 for key in heads):
-                raise ValueError("classification head does not contain exactly five rows")
-            lora_a = {key.replace("lora_A", "lora_B") for key in keys if "lora_A" in key}
-            if not lora_a or not lora_a.issubset(keys):
-                raise ValueError("LoRA A/B tensor pairs are incomplete")
-            parameter_count = 0
-            for key in sorted(keys):
-                tensor = weights.get_tensor(key)
-                if not bool(torch.isfinite(tensor).all()):
-                    raise ValueError(f"non-finite tensor values in {key}")
-                parameter_count += tensor.numel()
-    except AppError:
-        raise
-    except Exception as exc:
-        raise AppError(
-            "INVALID_INPUT",
-            f"Custom PEFT adapter validation failed: {exc}",
-        ) from exc
-    return {
-        "architecture": architecture,
-        "model_type": architecture,
-        "parameter_count": parameter_count,
-        "tensor_count": len(keys),
-        "adapter_r": adapter["r"],
-        "adapter_alpha": adapter["lora_alpha"],
-        "target_modules": sorted(targets),
-    }
 
 
 def _validate_transformer(root: Path, *, max_tokens: int) -> dict[str, object]:
@@ -490,26 +382,13 @@ def import_custom_transformer_bundle(
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
         manifest = _manifest(root)
-        is_adapter = manifest["schema_version"] == 2
-        validation = (
-            _validate_peft_adapter(root, manifest=manifest)
-            if is_adapter
-            else _validate_transformer(
-                root,
-                max_tokens=int(manifest["max_tokens"]),
-            )
+        validation = _validate_transformer(
+            root,
+            max_tokens=int(manifest["max_tokens"]),
         )
         artifact_digest, entries = directory_identity(root)
-        artifact_kind = (
-            "custom_peft_adapter_bundle"
-            if is_adapter
-            else "custom_transformer_bundle"
-        )
-        loader_recipe = (
-            "custom_peft_sequence_classification"
-            if is_adapter
-            else "custom_auto_sequence_classification_safetensors"
-        )
+        artifact_kind = "custom_transformer_bundle"
+        loader_recipe = "custom_auto_sequence_classification_safetensors"
         identity = {
             "identity_kind": artifact_kind,
             "artifact_sha256": artifact_digest,
@@ -544,17 +423,12 @@ def import_custom_transformer_bundle(
         (row for row in storage.rows["models"] if row["model_id"] == identifier),
         None,
     )
-    if is_adapter:
-        from .official_models import llm_runtime_status
-
-        status, runnable, status_detail = llm_runtime_status()
-    else:
-        status, runnable, status_detail = (
-            "compatible",
-            True,
-            "Custom Transformer and tokenizer validated without custom code. "
-            "Local inference is available.",
-        )
+    status, runnable, status_detail = (
+        "compatible",
+        True,
+        "Custom Transformer and tokenizer validated without custom code. "
+        "Local inference is available.",
+    )
     row: dict[str, object] = {
         "model_id": identifier,
         "family": manifest["family"],
@@ -573,19 +447,13 @@ def import_custom_transformer_bundle(
         "class_order_json": json_field(manifest["class_order"]),
         "max_tokens": manifest["max_tokens"],
         "padding_policy": manifest["padding_policy"],
-        "adapter_config_sha256": (
-            hashlib.sha256((destination / "adapter_config.json").read_bytes()).hexdigest()
-            if is_adapter
-            else ""
-        ),
+        "adapter_config_sha256": "",
         "runtime_scientific_json": json_field(
             {
                 **validation,
                 "bundle_entries": len(entries),
                 "dtype": "from_safetensors",
-                "quantization": (
-                    "bitsandbytes-nf4-double-quant-bfloat16" if is_adapter else None
-                ),
+                "quantization": None,
                 "provenance": "user_custom",
                 "training_data": manifest["training_data"],
             }
@@ -604,9 +472,5 @@ def import_custom_transformer_bundle(
         "fold_id": manifest["fold_id"],
         "status": row["status"],
         "provenance": "user_custom",
-        "message": (
-            "Custom PEFT sequence classifier validated and imported."
-            if is_adapter
-            else "Custom Transformer bundle validated and imported."
-        ),
+        "message": "Custom Transformer bundle validated and imported.",
     }

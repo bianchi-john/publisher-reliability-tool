@@ -14,8 +14,16 @@
 - There is no authentication, CORS configuration, `Idempotency-Key`, SSE,
   cancellation, or retry endpoint.
 - The server binds host loopback only. Every request's `Host` must equal the
-  configured local host/port; mismatch is `INVALID_HOST`. No permissive CORS
-  header is emitted.
+  configured local host/port, or the one public host a published instance names;
+  any other value is `INVALID_HOST`. No permissive CORS header is emitted.
+- **No route deletes anything, on any deployment.** The API exposes no `DELETE`
+  method at all: stored predictions, saved content and job history can only be
+  discarded by removing the data directory on the host. The capability was taken
+  out of the code rather than hidden, so reaching past the interface finds
+  nothing that destroys another visitor's work.
+- A published instance additionally does not register the upload and rescan
+  routes, so they answer `404` there and are absent from its OpenAPI document.
+  See `deployment.md` §4.1 for the exact set.
 - Double-submit prevention is a frontend concern. Scientifically meaningful
   deduplication is server-side: identical imports reuse their digest identity,
   `reuse` creates no run, model scans reuse exact model identity, and every
@@ -69,7 +77,7 @@ contains one of these codes in its `error_code` field.
 | `IMPORT_INVALID` | 422 | Dataset schema/container/row conflict prevents requested import result |
 | `STORAGE_ERROR` | 503 | Lock, structure, reference, write, fsync, or space failure |
 | `PROCESS_INTERRUPTED` | 409 | A queued job lost its acquired source or a running job ended with the process |
-| `FEATURE_UNAVAILABLE` | 501 | A documented extension point exists but the feature is not finished in this release |
+| `TOO_MANY_REQUESTS` | 429 | A published instance already has the maximum number of queued jobs |
 | `INTERNAL_ERROR` | 500 | Unexpected failure hidden behind a safe message |
 
 Synchronous status is exactly the table value. Job creation returns `202` once
@@ -157,15 +165,6 @@ Returns only explicitly saved local content:
 
 Always `Cache-Control: no-store`; absent content is `NOT_FOUND`.
 
-### `DELETE /api/v1/articles/{article_id}/content`
-
-Synchronous local-state purge. Body requires
-`{"confirm_canonical_url":"<exact stored URL>"}`. It rejects while any
-evaluation job is running, rewrites `local_content.csv` atomically, and
-returns `200` with `deleted=true` plus
-`backup_notice="User backups and external copies are unchanged."`. Missing
-content is `NOT_FOUND`; bad confirmation is `INVALID_INPUT`.
-
 ### `GET /api/v1/articles/export`
 
 Streams one row per stored prediction run as CSV using the list filters, so every
@@ -179,19 +178,6 @@ article_id,url,domain,publisher_id,prediction_origin,prediction_run_id,model_id,
 The attachment is named `article-predictions.csv`. Column names match the
 user-prediction block of `dataset/predictions/predictions.csv`. No option can
 include saved or ephemeral content, and no column exposes an artifact path.
-
-### `DELETE /api/v1/user-data`
-
-Synchronous, permanent purge of every locally created evaluation. Body requires
-`{"confirmation":"DELETE"}`. It rejects while any evaluation job is running.
-It then removes the private prediction mirror
-(`dataset/predictions/user-predictions.csv`) before replacing `prediction_runs.csv`
-with everything except `local_inference` rows, and replaces `local_content.csv`
-with nothing — that ledger holds only content the user chose to save locally,
-regardless of which run's prediction they were viewing when they saved it. The
-released dataset and every `bundled_import`/`user_import` run are untouched.
-Returns `200` with `{"deleted_predictions":<int>,"deleted_saved_content":<int>}`.
-Bad confirmation is `INVALID_INPUT`.
 
 ## 6. Publishers
 
@@ -235,8 +221,8 @@ counted articles reports no class and states why. An unknown method is
 ### `GET /api/v1/models`
 
 Returns every historical/registered model with family, fold, model ID, support
-level (`core` for BERT/RoBERTa, `paper_llm` for a study decoder checkpoint,
-`custom` for an imported bundle, `optional` otherwise), status, artifact
+level (`core` for BERT/RoBERTa, `custom` for an imported bundle, `optional`
+otherwise), status, artifact
 availability, runnable flag, redacted
 root-relative locator, digest, recipe/version, immutable base/tokenizer
 revisions, input policy, provenance (`paper_official`, `user_custom`,
@@ -303,17 +289,9 @@ key/shape mismatch.
 Successful validation atomically moves the extracted bundle under
 `<data-dir>/managed-models/<model_id>` and registers it in `models.csv` as
 `custom_transformer_bundle`, accepting the documented encoder allowlist. A
-bundle declaring the LoRA adapter schema for the study's larger decoder bases is
-refused with `FEATURE_UNAVAILABLE` while that support is under development.
-Terminal success/failure deletes the acquired ZIP. The returned job result
+bundle declaring any other schema or architecture is refused with
+`INVALID_INPUT`. Terminal success/failure deletes the acquired ZIP. The returned job result
 includes model ID, family, fold and validation status.
-
-### `POST /api/v1/models/official-upload`
-
-Reserved for importing the study's larger decoder checkpoints (Llama 3 8B,
-Mistral 24B). That support is under development, so the endpoint refuses every
-request with `501 FEATURE_UNAVAILABLE` before reading any upload bytes, and
-registers nothing.
 
 ## 8. Evaluation
 
@@ -350,14 +328,6 @@ The frontend polls this endpoint about once per second while a job runs.
 Failed jobs return HTTP
 `200`; absent jobs return `NOT_FOUND`.
 
-### `DELETE /api/v1/jobs`
-
-Deletes every job row and returns `200 {"deleted":<int>}`. No request body or
-confirmation is required: unlike the purges above, this is disposable
-operational history, not something a user produced. It refuses with
-`INVALID_INPUT` while any job is `queued` or `running`, leaving every row
-untouched, rather than risk a queued job vanishing before the worker ever runs
-it or a running job's own completion write resurrecting its row afterward.
 
 ## 10. Imports
 

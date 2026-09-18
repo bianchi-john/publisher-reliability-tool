@@ -25,18 +25,10 @@ HTTP_STATUS = {
     "IMPORT_INVALID": 422,
     "STORAGE_ERROR": 503,
     "PROCESS_INTERRUPTED": 409,
-    "FEATURE_UNAVAILABLE": 501,
+    "TOO_MANY_REQUESTS": 429,
     "INTERNAL_ERROR": 500,
 }
 
-# Large decoder checkpoints are an extension point, not a shipped feature: the
-# loaders and identity rules exist, but importing one is refused until the work is
-# finished. One message keeps the refusal identical wherever it is raised.
-LLM_UNDER_DEVELOPMENT = (
-    "Importing large decoder models (Llama, Mistral) is still under development "
-    "and is not available yet. This release evaluates BERT and RoBERTa "
-    "checkpoints, whose reported accuracy is comparable."
-)
 
 
 @dataclass(slots=True)

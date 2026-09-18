@@ -317,30 +317,6 @@ CONTENT_RESPONSES = {
     404: {"content": {"application/json": {"example": NOT_FOUND_EXAMPLE["value"]}}},
 }
 
-DELETE_CONTENT_BODY_EXAMPLE = {"confirm_canonical_url": _ARTICLE_URL}
-DELETE_CONTENT_RESPONSES = {
-    200: {
-        "content": {
-            "application/json": {
-                "example": {
-                    "deleted": True,
-                    "backup_notice": "User backups and external copies are unchanged.",
-                }
-            }
-        }
-    },
-    404: {"content": {"application/json": {"example": NOT_FOUND_EXAMPLE["value"]}}},
-    422: {
-        "content": {
-            "application/json": {
-                "example": _error_example(
-                    "INVALID_INPUT", "Canonical URL confirmation does not match."
-                )["value"]
-            }
-        }
-    },
-}
-
 EXPORT_RESPONSES = {
     200: {
         "content": {
@@ -370,26 +346,6 @@ EXPORT_RESPONSES = {
             "with that model's own predicted label and full probability vector."
         ),
     }
-}
-
-CLEAR_USER_DATA_BODY_EXAMPLE = {"confirmation": "DELETE"}
-CLEAR_USER_DATA_RESPONSES = {
-    200: {
-        "content": {
-            "application/json": {
-                "example": {"deleted_predictions": 3, "deleted_saved_content": 1}
-            }
-        }
-    },
-    422: {
-        "content": {
-            "application/json": {
-                "example": _error_example(
-                    "INVALID_INPUT", 'Type "DELETE" to confirm.'
-                )["value"]
-            }
-        }
-    },
 }
 
 # ---------------------------------------------------------------------------
@@ -685,22 +641,6 @@ AVAILABLE_MODELS_RESPONSES = {
 
 MODEL_UPLOAD_RESPONSES = {202: {"content": {"application/json": {"example": {"job_id": "9b1c2e4a-5f6d-4e8b-9a3c-1d2e3f4a5b6c"}}}}}
 
-OFFICIAL_UPLOAD_RESPONSES = {
-    501: {
-        "content": {
-            "application/json": {
-                "example": _error_example(
-                    "FEATURE_UNAVAILABLE",
-                    "Importing large decoder models (Llama, Mistral) is still under "
-                    "development and is not available yet. This release evaluates "
-                    "BERT and RoBERTa checkpoints, whose reported accuracy is "
-                    "comparable.",
-                )["value"]
-            }
-        }
-    }
-}
-
 # ---------------------------------------------------------------------------
 # 8. Evaluation
 # ---------------------------------------------------------------------------
@@ -864,20 +804,6 @@ GET_JOB_RESPONSES = {
         }
     },
     404: {"content": {"application/json": {"example": NOT_FOUND_EXAMPLE["value"]}}},
-}
-
-CLEAR_JOBS_RESPONSES = {
-    200: {"content": {"application/json": {"example": {"deleted": 4}}}},
-    422: {
-        "content": {
-            "application/json": {
-                "example": _error_example(
-                    "INVALID_INPUT",
-                    "Jobs cannot be cleared while one is queued or running.",
-                )["value"]
-            }
-        }
-    },
 }
 
 # ---------------------------------------------------------------------------

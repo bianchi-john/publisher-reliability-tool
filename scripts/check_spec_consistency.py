@@ -177,6 +177,7 @@ def main() -> int:
         "PRT_LOG_LEVEL",
         "PRT_DATASET_UPLOAD_MAX_BYTES",
         "PRT_MODEL_UPLOAD_MAX_BYTES",
+        "PRT_PUBLIC_HOST",
     }
     config_rows = set(
         re.findall(r"^\| `(PRT_[A-Z0-9_]+)` \|", deployment, re.MULTILINE)
