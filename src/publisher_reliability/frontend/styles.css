@@ -1,7 +1,12 @@
 :root {
   color-scheme: light;
-  --ink: #1e252c;
-  --muted: #5f6c78;
+  /* The text greys are deliberately neutral. They used to be tinted towards the
+     accent, which made every unhighlighted word faintly blue and left nothing for
+     the accent itself to stand out against. What is emphasised is now blue --
+     links, the held navigation entry, the eyebrow -- and everything else is black
+     or grey by weight: near-black for reading, mid grey for secondary text. */
+  --ink: #17191b;
+  --muted: #5e6266;
   --paper: #eef2f6;
   --surface: #f8fafc;
   --line: #cfdbe5;
@@ -27,10 +32,10 @@
      the interface is unchanged until a palette says otherwise. */
   --frame: #f8fafc;        /* background of top bar, sidebar and footer */
   --frame-line: #cfdbe5;   /* their borders against the content */
-  --frame-ink: #51616e;    /* navigation entries */
-  --frame-strong: #1e252c; /* the wordmark */
-  --frame-muted: #5f6c78;  /* the wordmark's subtitle, and the footer text */
-  --nav-ink: #51616e;
+  --frame-ink: #1d2023;    /* navigation entries */
+  --frame-strong: #101315; /* the wordmark */
+  --frame-muted: #5e6266;  /* the wordmark's subtitle, and the footer text */
+  --nav-ink: #3a3e42;
   --control: #fbfdfe;
   --control-line: #a9c1d3;
   --table-head: #e9f0f6;
