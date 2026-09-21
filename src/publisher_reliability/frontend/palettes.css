@@ -1,0 +1,391 @@
+/* TEMPORARY -- palette preview, for choosing the interface colours.
+ *
+ * Delete this file, its <link> in index.html and js/palette-preview.js once a
+ * palette is picked; then fold the chosen values into the :root block of
+ * styles.css. Nothing else in the application refers to any of this.
+ *
+ * Each block redefines only the tokens that carry a hue. The semantic colours --
+ * the stable/elevated/high dispersion bands, the warning and failure fills -- are
+ * deliberately left alone: they mean something, and a palette must not restate
+ * them. Every palette below clears 4.5:1 on body text, muted text, links, menu
+ * entries, the labels of filled buttons and the status badge.
+ */
+
+/* Harbour */
+:root[data-palette="harbour"] {
+  --ink: #202428;
+  --muted: #68737d;
+  --paper: #eef1f4;
+  --surface: #fbfbfc;
+  --line: #ced4da;
+  --accent: #3274ae;
+  --accent-soft: #dee5ea;
+  --focus: #122e48;
+  --on-accent: #f7f9fa;
+  --nav-ink: #596169;
+  --control: #fcfcfd;
+  --control-line: #adb6bd;
+  --table-head: #e9ecef;
+  --row-line: #e0e3e6;
+  --chip: #dee3e8;
+  --highlight: #f7d264;
+  --highlight-soft: #f7eed4;
+  --highlight-line: #a57e09;
+  --highlight-ink: #6f5506;
+  --inspect: #307e59;
+  --on-inspect: #f7faf9;
+  --dataset: #3d76a8;
+  --dataset-soft: #e0e6eb;
+  --user: #8c6d13;
+  --user-soft: #efeadc;
+  --track: #d7dce0;
+  --track-fill: #7ea0be;
+}
+/* Blue & Terracotta */
+:root[data-palette="terracotta"] {
+  --ink: #2a231d;
+  --muted: #847061;
+  --paper: #f4eee9;
+  --surface: #fbfaf9;
+  --line: #dcd0c6;
+  --accent: #3871b2;
+  --accent-soft: #dbe1e8;
+  --focus: #132b46;
+  --on-accent: #f7f9fa;
+  --nav-ink: #6b5d52;
+  --control: #fdfcfc;
+  --control-line: #c1b1a4;
+  --table-head: #e6e9ed;
+  --row-line: #e7e0da;
+  --chip: #dbe0e5;
+  --highlight: #e29578;
+  --highlight-soft: #f2e0d9;
+  --highlight-line: #8f3c1e;
+  --highlight-ink: #652b15;
+  --inspect: #367d73;
+  --on-inspect: #f7fafa;
+  --dataset: #4374ad;
+  --dataset-soft: #dde3e9;
+  --user: #b65734;
+  --user-soft: #eae0dc;
+  --track: #e1d8d1;
+  --track-fill: #809cbc;
+}
+/* Blue & Teal */
+:root[data-palette="teal"] {
+  --ink: #1f2729;
+  --muted: #61777a;
+  --paper: #edf4f5;
+  --surface: #fbfcfc;
+  --line: #ccd9dc;
+  --accent: #406ebf;
+  --accent-soft: #dfe3ea;
+  --focus: #142645;
+  --on-accent: #f7f8fa;
+  --nav-ink: #526365;
+  --control: #fcfdfd;
+  --control-line: #aabdc0;
+  --table-head: #e9ebef;
+  --row-line: #dfe6e7;
+  --chip: #dee2e7;
+  --highlight: #81d1da;
+  --highlight-soft: #dbeef0;
+  --highlight-line: #277d86;
+  --highlight-ink: #1c585f;
+  --inspect: #307e4c;
+  --on-inspect: #f7faf8;
+  --dataset: #4d74b7;
+  --dataset-soft: #e0e4eb;
+  --user: #317e87;
+  --user-soft: #e0eaeb;
+  --track: #d6dfe1;
+  --track-fill: #8196bb;
+}
+/* Navy & Mustard */
+:root[data-palette="mustard"] {
+  --ink: #2a271e;
+  --muted: #7a735d;
+  --paper: #f5f3ed;
+  --surface: #fcfbfb;
+  --line: #ddd9cb;
+  --accent: #3e63cc;
+  --accent-soft: #dee1eb;
+  --focus: #101f49;
+  --on-accent: #f7f8fa;
+  --nav-ink: #645f4f;
+  --control: #fdfdfc;
+  --control-line: #c1bca9;
+  --table-head: #e9eaef;
+  --row-line: #e8e6de;
+  --chip: #dee1e8;
+  --highlight: #ebca70;
+  --highlight-soft: #f4ecd7;
+  --highlight-line: #987516;
+  --highlight-ink: #6b530f;
+  --inspect: #327b60;
+  --on-inspect: #f7faf9;
+  --dataset: #4868c1;
+  --dataset-soft: #e0e3eb;
+  --user: #8e701f;
+  --user-soft: #ede9de;
+  --track: #e2dfd5;
+  --track-fill: #7c8ec0;
+}
+/* Slate & Copper */
+:root[data-palette="copper"] {
+  --ink: #212427;
+  --muted: #6a737b;
+  --paper: #eaedf0;
+  --surface: #f8f9f9;
+  --line: #cbd0d5;
+  --accent: #4c7594;
+  --accent-soft: #dce1e5;
+  --focus: #1d2f3c;
+  --on-accent: #f7f9fa;
+  --nav-ink: #585f64;
+  --control: #fbfbfb;
+  --control-line: #aab2b8;
+  --table-head: #e6e8ea;
+  --row-line: #dcdfe2;
+  --chip: #dce0e2;
+  --highlight: #dda47e;
+  --highlight-soft: #f1e3da;
+  --highlight-line: #894d24;
+  --highlight-ink: #61361a;
+  --inspect: #407d40;
+  --on-inspect: #f7faf7;
+  --dataset: #52748f;
+  --dataset-soft: #dee2e5;
+  --user: #a46338;
+  --user-soft: #e8e0db;
+  --track: #d4d8db;
+  --track-fill: #8ba1b1;
+}
+/* Forest & Gold */
+:root[data-palette="forest"] {
+  --ink: #21281f;
+  --muted: #677963;
+  --paper: #eff4ee;
+  --surface: #fbfcfb;
+  --line: #d0dacd;
+  --accent: #2d8059;
+  --accent-soft: #dfeae5;
+  --focus: #15442e;
+  --on-accent: #f7faf9;
+  --nav-ink: #576454;
+  --control: #fcfdfc;
+  --control-line: #b0beac;
+  --table-head: #e9efec;
+  --row-line: #e1e7df;
+  --chip: #dfe7e3;
+  --highlight: #e8c573;
+  --highlight-soft: #f3ebd8;
+  --highlight-line: #957018;
+  --highlight-ink: #694f11;
+  --inspect: #3c73aa;
+  --on-inspect: #f7f9fa;
+  --dataset: #36815e;
+  --dataset-soft: #e1eae6;
+  --user: #906f23;
+  --user-soft: #ede8de;
+  --track: #d8e0d7;
+  --track-fill: #82baa0;
+}
+/* Oxford & Burgundy */
+:root[data-palette="burgundy"] {
+  --ink: #282021;
+  --muted: #836d71;
+  --paper: #f4eeef;
+  --surface: #fcfbfb;
+  --line: #daced0;
+  --accent: #396bd0;
+  --accent-soft: #dde2eb;
+  --focus: #0e224b;
+  --on-accent: #f7f8fa;
+  --nav-ink: #6b5b5e;
+  --control: #fdfcfc;
+  --control-line: #bdadb0;
+  --table-head: #e8ebef;
+  --row-line: #e6e0e1;
+  --chip: #dde1e9;
+  --highlight: #d68595;
+  --highlight-soft: #efdce0;
+  --highlight-line: #822b3d;
+  --highlight-ink: #581d29;
+  --inspect: #916a27;
+  --on-inspect: #faf9f7;
+  --dataset: #446fc5;
+  --dataset-soft: #dfe3ec;
+  --user: #b95165;
+  --user-soft: #ebe0e2;
+  --track: #e0d7d8;
+  --track-fill: #7a92c2;
+}
+/* Olive & Plum */
+:root[data-palette="plum"] {
+  --ink: #26281f;
+  --muted: #717660;
+  --paper: #f1f3ec;
+  --surface: #fbfcfb;
+  --line: #d6d9cc;
+  --accent: #5b7934;
+  --accent-soft: #e4e8de;
+  --focus: #2f4019;
+  --on-accent: #f9faf7;
+  --nav-ink: #5d6151;
+  --control: #fdfdfc;
+  --control-line: #b9bdab;
+  --table-head: #ebede8;
+  --row-line: #e4e6de;
+  --chip: #e2e5de;
+  --highlight: #c992c9;
+  --highlight-soft: #ecdfec;
+  --highlight-line: #743974;
+  --highlight-ink: #522852;
+  --inspect: #9d632a;
+  --on-inspect: #faf9f7;
+  --dataset: #607b3d;
+  --dataset-soft: #e5e9e0;
+  --user: #a159a1;
+  --user-soft: #e8e1e8;
+  --track: #dddfd5;
+  --track-fill: #a1b587;
+}
+/* Retro Grey */
+:root[data-palette="retro"] {
+  --ink: #272420;
+  --muted: #776f65;
+  --paper: #edeae5;
+  --surface: #f6f5f4;
+  --line: #d2cdc6;
+  --accent: #63707e;
+  --accent-soft: #dbddde;
+  --focus: #272d33;
+  --on-accent: #f7f9fa;
+  --nav-ink: #605a53;
+  --control: #f8f7f7;
+  --control-line: #b5aea5;
+  --table-head: #e3e4e5;
+  --row-line: #dfdcd7;
+  --chip: #dadbdd;
+  --highlight: #d29c89;
+  --highlight-soft: #eee1dd;
+  --highlight-line: #7e4430;
+  --highlight-ink: #593022;
+  --inspect: #527a66;
+  --on-inspect: #f7faf9;
+  --dataset: #65707c;
+  --dataset-soft: #dcdedf;
+  --user: #9f5e47;
+  --user-soft: #e4dbd8;
+  --track: #d8d4cf;
+  --track-fill: #979ea5;
+}
+/* Retro Newsprint */
+:root[data-palette="newsprint"] {
+  --ink: #29251f;
+  --muted: #756c5c;
+  --paper: #ece7df;
+  --surface: #f3f1ef;
+  --line: #d2cbbe;
+  --accent: #7e6758;
+  --accent-soft: #dcd8d6;
+  --focus: #352b24;
+  --on-accent: #faf8f7;
+  --nav-ink: #60594e;
+  --control: #f5f4f2;
+  --control-line: #b6ad9d;
+  --table-head: #e2e0df;
+  --row-line: #ded9d1;
+  --chip: #dad7d5;
+  --highlight: #d88983;
+  --highlight-soft: #efdddc;
+  --highlight-line: #84302a;
+  --highlight-ink: #59201c;
+  --inspect: #497788;
+  --on-inspect: #f7f9fa;
+  --dataset: #7e6a5d;
+  --dataset-soft: #ddd9d7;
+  --user: #b44d46;
+  --user-soft: #e2d3d2;
+  --track: #d7d2c8;
+  --track-fill: #a99c94;
+}
+/* Blueprint */
+:root[data-palette="blueprint"] {
+  --ink: #1d232a;
+  --muted: #647386;
+  --paper: #e7ecf3;
+  --surface: #f8f9fa;
+  --line: #c5ceda;
+  --accent: #2a70cb;
+  --accent-soft: #d8dfe9;
+  --focus: #0c284d;
+  --on-accent: #f7f8fa;
+  --nav-ink: #525d6a;
+  --control: #fbfbfc;
+  --control-line: #a4afbf;
+  --table-head: #e4e7ed;
+  --row-line: #d9dee5;
+  --chip: #d8dee6;
+  --highlight: #8bbdd0;
+  --highlight-soft: #dde9ee;
+  --highlight-line: #32687b;
+  --highlight-ink: #234957;
+  --inspect: #a16326;
+  --on-inspect: #faf9f7;
+  --dataset: #3671bf;
+  --dataset-soft: #dae1e9;
+  --user: #437a8e;
+  --user-soft: #dde4e7;
+  --track: #d0d6df;
+  --track-fill: #7899c4;
+}
+/* Sage & Clay */
+:root[data-palette="sage"] {
+  --ink: #232820;
+  --muted: #6d7864;
+  --paper: #f1f4ee;
+  --surface: #fbfcfb;
+  --line: #d3dace;
+  --accent: #427b66;
+  --accent-soft: #e1e8e5;
+  --focus: #1e3b31;
+  --on-accent: #f7faf9;
+  --nav-ink: #5b6354;
+  --control: #fcfdfc;
+  --control-line: #b5bdad;
+  --table-head: #eaeeec;
+  --row-line: #e3e6e0;
+  --chip: #e0e6e4;
+  --highlight: #d89483;
+  --highlight-soft: #efe0dc;
+  --highlight-line: #843c2a;
+  --highlight-ink: #5d2a1d;
+  --inspect: #4e6db7;
+  --on-inspect: #f7f8fa;
+  --dataset: #4a7d6a;
+  --dataset-soft: #e2e9e6;
+  --user: #b15a44;
+  --user-soft: #ebe2e0;
+  --track: #dbe0d7;
+  --track-fill: #8db0a3;
+}
+
+/* The panel itself. Fixed colours on purpose: it has to stay readable while the
+   palette it is changing is anything at all. */
+#palette-panel {
+  position: fixed; right: 16px; bottom: 16px; z-index: 50;
+  display: grid; gap: 4px; width: 250px; max-height: 80vh; overflow-y: auto;
+  padding: 12px; border: 1px solid #98a4b0; border-radius: 12px;
+  background: #ffffff; box-shadow: 0 18px 48px rgba(22, 45, 83, .28);
+}
+#palette-panel p { margin: 0 0 6px; color: #1e252c; font-size: 13px; }
+#palette-panel small { color: #5f6c78; }
+#palette-panel button {
+  min-height: 30px; padding: 4px 9px; border: 1px solid #c3ccd5; border-radius: 7px;
+  background: #ffffff; color: #1e252c; font-size: 13px; font-weight: 400; text-align: left;
+}
+#palette-panel button[aria-pressed="true"] {
+  border-color: #1e252c; background: #1e252c; color: #ffffff; font-weight: 650;
+}

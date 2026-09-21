@@ -10,6 +10,7 @@ import {api} from "./api.js";
 import {errorCard} from "./components.js";
 import {registerPage, startRouter} from "./router.js";
 import {loadTemplates} from "./templates.js";
+import {initPalettePreview} from "./palette-preview.js";  // TEMPORARY
 import {initTopbar} from "./topbar.js";
 import {content} from "./view.js";
 
@@ -44,6 +45,7 @@ async function markInstanceKind() {
 
 async function start() {
   initTopbar();
+  initPalettePreview();  // TEMPORARY: remove with the palette files.
   await markInstanceKind();
   try {
     // Templates are cached up front so pages can render without awaiting them.
