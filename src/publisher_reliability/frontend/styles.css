@@ -291,6 +291,17 @@ input, select, textarea, button {
   min-height: 40px; border: 1px solid var(--control-line); border-radius: 8px;
   background: var(--control); color: var(--ink); padding: 8px 11px; font: inherit;
 }
+/* A link styled as a button is not a form control, so the rule above passes it by
+   and it renders as plain text. Repeating the box here is what makes the two look
+   alike. It has to lay out as an inline flex box rather than inline: min-height has
+   no effect on an inline element, and centring the label is what a real button does
+   for its own text. This rule stays above the colour rule so the accent border and
+   background declared there still win. */
+.button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 40px; border: 1px solid var(--control-line); border-radius: 8px;
+  padding: 8px 11px; font: inherit;
+}
 input[type="search"] { min-width: 280px; }
 textarea { width: min(720px, 100%); min-height: 110px; resize: vertical; }
 button, .button { cursor: pointer; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; }
@@ -396,7 +407,6 @@ tr:last-child td { border-bottom: 0; }
 .detail-link { color: var(--accent); font-weight: 650; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .probability { white-space: nowrap; text-align: right; }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 16px; }
-.pager .button { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 11px; border: 1px solid var(--accent); border-radius: 8px; }
 .grow { flex: 1 1 420px; }
 .grow input { width: 100%; }
 .detail-metrics { margin-bottom: 30px; }
