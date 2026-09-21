@@ -19,6 +19,7 @@
      opens a row's detail page. It is darker than --stable so the two do not look
      like the same signal, and carries white at 6.3:1. */
   --inspect: #26694a;
+  --on-inspect: #f4fbf7;
   --dataset: #35688f;
   --dataset-soft: #d9e7f0;
   --user: #29587f;
@@ -340,20 +341,9 @@ button.danger, .button.danger { border-color: var(--red); background: var(--red)
    would sit in a field of colour and read as decoration rather than as a button. */
 .button.inspect {
   width: 40px; padding: 0;
-  border-color: var(--inspect);
-  /* Pale rather than filled: the glass is a colour emoji with a dark handle, and
-     on a solid dark green the handle disappeared into the background. Mixing the
-     fill from --inspect itself means it follows whatever hue that token holds.
-     The flat colour above it is the fallback where color-mix is unsupported. */
-  background: #e4f1ea;
-  background: color-mix(in srgb, var(--inspect) 14%, white);
-  /* Only seen if the reader has no emoji font and the browser draws a placeholder
-     box in its place; dark on pale is legible, white on pale would not be. */
-  color: var(--inspect);
+  border-color: var(--inspect); background: var(--inspect); color: var(--on-inspect);
 }
-/* The glass is a character, so it is sized with the font rather than with a box,
-   and line-height 1 keeps the button square around it. */
-.button.inspect .emoji { font-size: 18px; line-height: 1; }
+.button.inspect svg { width: 18px; height: 18px; }
 /* The column is as narrow as its button and sits at the end of the row. The header
    is a span inside the cell rather than the cell itself, because the table helper
    writes the <th> and only its contents are passed in. */

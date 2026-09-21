@@ -7,10 +7,10 @@ import {mount, replaceLoading} from "../view.js";
 
 const PAGE_SIZE = 25;
 
-/* A character, not an icon file: the application loads no icon font and nothing
-   from a CDN. It is drawn by whatever emoji font the reader's system has, so it
-   is in colour and its exact shape varies between platforms. */
-const MAGNIFIER = `<span class="emoji" aria-hidden="true">\u{1F50E}</span>`;
+/* Drawn here rather than fetched: the application loads no icon font and no file
+   from a CDN, and one glass is cheaper inline than a request per page. */
+const MAGNIFIER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 L21 21"></path></svg>`;
 
 function publisherRow(row) {
   const href = `#publisher/${encodeURIComponent(row.publisher_id)}`;
