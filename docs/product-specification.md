@@ -347,7 +347,9 @@ job is `queued` or `running`, because the ledger disappearing out from under a
 live job either loses a queued one before it runs or lets a running one
 resurrect its own row when it finishes.
 
-The UI has Evaluate, Articles, Publishers, Models, and Jobs. Evaluate is the
+The UI has Evaluate, Articles, Publishers, Models, Jobs, and About, the last
+being a fixed page describing the tool and citing the study it implements.
+Evaluate is the
 default and first navigation item. The top-bar status control (`Ready · online`,
 or `Ready · offline` when network retrieval is disabled, which is the condition
 that changes what the visitor can do) opens a small popover with workspace counts and

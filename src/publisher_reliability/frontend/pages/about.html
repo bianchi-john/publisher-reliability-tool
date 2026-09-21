@@ -1,0 +1,43 @@
+<header class="page-head">
+  <div>
+    <div class="eyebrow">About this tool</div>
+    <h1>Publisher Reliability Tool</h1>
+    <p class="intro">An open-source workspace for inspecting how a language model rates the reliability of a news publisher, one article at a time.</p>
+  </div>
+</header>
+
+<section class="card full">
+  <h2>What it does</h2>
+  <p>A reliability study normally arrives as a table of aggregate scores, and there is no way to ask why one publisher ended up where it did. This tool turns such a study back into something you can open.</p>
+  <ul>
+    <li><b>Classify one article.</b> Paste a public article URL and a five-class encoder runs on it, on CPU, in a couple of seconds.</li>
+    <li><b>Read a publisher's class.</b> It is not stored anywhere: it is computed, when you ask for it, from the articles of that publisher already classified. Six documented formulas are offered, and they do not always agree.</li>
+    <li><b>Follow the provenance.</b> Every prediction carries all five class probabilities, the exact checkpoint that produced it, and the run it came from.</li>
+  </ul>
+</section>
+
+<section class="card full">
+  <h2>The study behind it</h2>
+  <!-- TODO: replace arXiv.PLACEHOLDER with the real identifier once it is
+       assigned. The same placeholder appears in README.md, paper/references.bib,
+       docs/scientific-contract.md, docs/user-guide.md and dataset/README.md. -->
+  <p>The predictions and the method come from <i>From Articles to Publishers: Aggregating Language Model Predictions for News Source Reliability Inference</i>, by John Bianchi, Manuel Pratelli, Fabio Pinelli and Marinella Petrocchi — IEEE Transactions on Computational Social Systems, 2026, under review. The preprint is on <a href="https://arxiv.org/abs/arXiv.PLACEHOLDER" target="_blank" rel="noopener">arXiv</a>.</p>
+  <p>This application is the reference implementation of that study, and is itself the subject of a demonstration paper submitted to <b>ECIR 2027</b>.</p>
+</section>
+
+<section class="card full">
+  <h2>What is in the release</h2>
+  <p>34,564 article-level predictions over 17,269 English political news articles from 372 publishers, produced by BERT and RoBERTa classifiers under a five-fold, publisher-disjoint protocol. Each article was classified by the fold that was not trained on it.</p>
+  <p><span class="mono">Class 0</span> to <span class="mono">Class 4</span> are reliability bands in ascending order, the lowest covering the least reliable sources. Training labels came from NewsGuard's published ratings; those ratings are licensed material and are <b>not</b> part of this release. What ships is the model output derived from them.</p>
+</section>
+
+<section class="card full">
+  <h2>What it is not</h2>
+  <p>Every class on every page is a model prediction. It is not a fact check, not a verdict on an article's contents, and not a ground-truth rating of a publisher. The tool carries no reference labels, so nothing here can tell you whether a prediction is correct — only how the articles behind it agree or disagree.</p>
+  <p>Nothing in the tool deletes anything. There is no button and no route that removes a prediction, a saved article or a job record.</p>
+</section>
+
+<section class="card full">
+  <h2>Code and licence</h2>
+  <p>The source is at <a href="https://github.com/bianchi-john/publisher-reliability-tool" target="_blank" rel="noopener">github.com/bianchi-john/publisher-reliability-tool</a>, under Apache-2.0. The prediction outputs carry a limited CC0 dedication; publisher names, source pages and model weights remain third-party material.</p>
+</section>

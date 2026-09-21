@@ -297,7 +297,7 @@ quantization value changes it.
 
 ### AT-040 — Essential navigation
 
-Evaluate, Articles, Publishers, Models, and Jobs are keyboard reachable and
+Evaluate, Articles, Publishers, Models, Jobs, and About are keyboard reachable and
 present loading, empty, offline, missing-model, partial, and error states with
 clear English actions. The top-bar status control opens a keyboard-reachable
 popover with workspace counts and runtime details. Articles exposes distinct dataset and

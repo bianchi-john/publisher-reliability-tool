@@ -13,6 +13,7 @@ import {loadTemplates} from "./templates.js";
 import {initTopbar} from "./topbar.js";
 import {content} from "./view.js";
 
+import {aboutPage} from "./pages/about.js";
 import {articleDetailPage} from "./pages/article.js";
 import {articlesPage} from "./pages/articles.js";
 import {evaluatePage} from "./pages/evaluate.js";
@@ -28,6 +29,7 @@ registerPage("publishers", publishersPage);
 registerPage("publisher", publisherDetailPage);
 registerPage("models", modelsPage);
 registerPage("jobs", jobsPage);
+registerPage("about", aboutPage);
 
 /** Record what this deployment serves, so local-only controls can be hidden. */
 async function markInstanceKind() {

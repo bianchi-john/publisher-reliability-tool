@@ -277,7 +277,14 @@ font or style CDN. The top bar remains mounted while navigating; the current
 page is retained until the next page is ready so the header and scrollbar do
 not flicker between tabs.
 
-## 7. Jobs
+## 7. About
+
+**About** is a fixed page: what the tool does, the study it implements and where
+to find its preprint, what is in the bundled release, and what a predicted class
+is not. It makes no request and shows no stored data, so it reads the same on a
+published instance as it does on your own machine.
+
+## 8. Jobs
 
 **Jobs** lists every model scan, dataset import and evaluation the worker has
 run, newest first. The list only grows: as with everything else the tool stores,

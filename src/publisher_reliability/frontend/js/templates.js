@@ -12,7 +12,7 @@
 
 const PAGE_TEMPLATES = [
   "evaluate", "articles", "article", "publishers", "publisher", "models", "jobs", "error",
-  "prediction-result",
+  "prediction-result", "about",
 ];
 
 const cache = new Map();
