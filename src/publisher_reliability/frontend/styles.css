@@ -305,7 +305,13 @@ p { max-width: 760px; }
 .page-head .toolbar { flex-wrap: nowrap; flex-shrink: 0; }
 form .row + .row, form .row + .notice, form .notice + .row { margin-top: 18px; }
 form .row.evaluation-actions { align-items: center; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
-label { display: grid; gap: 5px; color: var(--nav-ink); font-size: 13px; font-weight: 600; }
+/* Both of the sizing overrides here are load-bearing, and for the same reason in
+   two places: a label is a flex item inside a form row and a grid container for
+   its own control, and in each role the default minimum size is the content's, so
+   nothing can be made narrower than the widest thing inside it. `min-width: 0`
+   lets the label shrink within the row; `minmax(0, 1fr)` lets its column shrink
+   within the label, which is what finally bounds a wide control. */
+label { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 5px; color: var(--nav-ink); font-size: 13px; font-weight: 600; }
 label small { max-width: 330px; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
 input, select, textarea, button {
   min-height: 40px; border: 1px solid var(--control-line); border-radius: 8px;
@@ -322,6 +328,10 @@ input, select, textarea, button {
   min-height: 40px; border: 1px solid var(--control-line); border-radius: 8px;
   padding: 8px 11px; font: inherit;
 }
+/* A <select> is as wide as its longest option, with no way to wrap it. One long
+   model name -- family, fold, provenance and compatibility in a single line --
+   was therefore wider than a phone, and pushed the whole page sideways. */
+select { max-width: 100%; }
 input[type="search"] { min-width: 280px; }
 textarea { width: min(720px, 100%); min-height: 110px; resize: vertical; }
 button, .button { cursor: pointer; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; }
