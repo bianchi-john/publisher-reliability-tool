@@ -399,6 +399,14 @@ tr:last-child td { border-bottom: 0; }
 .exclusion-item .url { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 .notice { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; }
 .notice-warning { border-color: var(--warning); background: var(--warning-bg); color: var(--warning-ink); }
+/* The About page is one card in the shape of the project README: a line of tags,
+   the warning the README opens with, then short sections parted by rules. Separate
+   cards were tried first and were wrong for it -- they turn one short page that is
+   read top to bottom into five objects that look independently browsable. */
+.about h2 { margin-bottom: 6px; }
+.about hr { margin: 24px 0; border: 0; border-top: 1px solid var(--row-line); }
+.about > p:last-child { margin-bottom: 0; }
+.about-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .error-card {
   display: flex; align-items: flex-start; gap: 10px; margin-top: 18px;
   padding: 14px 16px; border: 1px solid var(--red); border-radius: 10px;
