@@ -298,7 +298,7 @@ input, select, textarea, button {
    for its own text. This rule stays above the colour rule so the accent border and
    background declared there still win. */
 .button {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 40px; border: 1px solid var(--control-line); border-radius: 8px;
   padding: 8px 11px; font: inherit;
 }
@@ -322,6 +322,22 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--row-line); text-align: left; vertical-align: top; }
 th { color: var(--muted); background: var(--table-head); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
+/* A list whose rows each open a page of their own. The tinted row under the pointer
+   says the whole row is one target, and the action cell holds the button that names
+   where it leads; both are needed, because a table of numbers otherwise gives no
+   sign that anything in it is clickable. The tint is the header colour rather than a
+   new one, so the table still reads as a single object. */
+.linked-rows tbody tr:hover { background: var(--table-head); }
+td.row-action { text-align: right; white-space: nowrap; }
+/* Row-sized buttons: a full-height control in every row would make the table as tall
+   as a form and drown the numbers it exists to show. */
+.button.compact, button.compact { min-height: 32px; padding: 5px 10px; font-size: 13px; }
+/* Visible to a screen reader only. Used for a column header whose meaning is obvious
+   on screen from the buttons beneath it, but which still has to be named. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 .url { display: block; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: "Times New Roman", Times, serif; font-size: 12px; }
 .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
