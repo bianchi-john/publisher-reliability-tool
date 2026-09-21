@@ -10,15 +10,10 @@ export const errorCard = (message) =>
 /**
  * Wrap pre-rendered `<tr>` strings in a table, or show an empty-state notice.
  * Headers are inserted verbatim so they may contain markup.
- *
- * `className` is for tables whose rows behave differently from the rest, such as a
- * list where every row opens a page of its own. It is optional so that a table
- * without such behaviour is not made to declare that it has none.
  */
-export function table(headers, rows, className = "") {
+export function table(headers, rows) {
   if (!rows.length) return `<div class="empty notice">No records match this view.</div>`;
-  const named = className ? ` class="${className}"` : "";
-  return `<div class="table-wrap"><table${named}><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
     <tbody>${rows.join("")}</tbody></table></div>`;
 }
 
