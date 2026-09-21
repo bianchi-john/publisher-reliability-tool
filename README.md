@@ -3,7 +3,7 @@
 > A local research application for classifying news articles and reading a
 > publisher's reliability class from the articles already classified.
 
-**Local only** · **Predictions, no ground-truth labels** · **Plain CSV storage**
+**Runs on your own machine** · **Predictions, no ground-truth labels** · **Plain CSV storage**
 
 > [!IMPORTANT]
 > Every result is a model prediction — not a fact, a fact check, or a
@@ -17,6 +17,12 @@ Aggregating Language Model Predictions for News Source Reliability Inference*
 Social Systems, 2026, under review) — preprint:
 <https://arxiv.org/abs/arXiv.PLACEHOLDER>. Every number the tool shows comes from
 that study's five-fold, publisher-disjoint protocol.
+
+A public instance is at <https://publisher-reliability.iit.cnr.it>. It classifies
+a submitted article and reads publisher classes, but does not serve the upload
+and rescan routes, keeps no article text, and deletes nothing. Everything below
+describes running your own copy, which is the only way to import data or add
+checkpoints.
 
 ## Start
 
