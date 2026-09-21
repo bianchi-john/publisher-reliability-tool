@@ -343,7 +343,9 @@ button.danger, .button.danger { border-color: var(--red); background: var(--red)
   width: 40px; padding: 0;
   border-color: var(--inspect); background: var(--inspect); color: var(--on-inspect);
 }
-.button.inspect svg { width: 18px; height: 18px; }
+/* The glass is a character, so it is sized with the font rather than with a box,
+   and line-height 1 keeps the button square around it. */
+.button.inspect .emoji { font-size: 18px; line-height: 1; }
 /* The column is as narrow as its button and sits at the end of the row. The header
    is a span inside the cell rather than the cell itself, because the table helper
    writes the <th> and only its contents are passed in. */
