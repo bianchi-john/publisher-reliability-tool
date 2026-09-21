@@ -14,13 +14,15 @@ const systemPopover = document.querySelector("#system-popover");
 
 /** Name the kind of instance this is, for the badge in the top bar.
  *
- * "local" would read as wrong to a visitor of the published demo, who is plainly
- * not local to it, so a published instance says so instead. Offline wins over both
- * because it is the condition that changes what the visitor can actually do.
+ * "local" would read as wrong to a visitor of the published instance, who is
+ * plainly not local to it, so that instance says "online" instead. The offline
+ * check comes first and is not just presentation: strict offline mode cannot
+ * retrieve a new article, so the badge must never claim to be online when the
+ * service is not actually reaching the network.
  */
 function instanceLabel(status) {
   if (status.offline) return "Ready · offline";
-  return status.public_instance ? "Ready · public demo" : "Ready · local";
+  return status.public_instance ? "Ready · online" : "Ready · local";
 }
 
 /** Show whether the backend is reachable, and what kind of instance it is. */

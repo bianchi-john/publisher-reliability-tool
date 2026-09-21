@@ -349,7 +349,7 @@ resurrect its own row when it finishes.
 
 The UI has Evaluate, Articles, Publishers, Models, and Jobs. Evaluate is the
 default and first navigation item. The top-bar status control (`Ready ·
-local`, `Ready · public demo` on a published instance, or `Ready · offline`, which
+local`, `Ready · online` on a published instance, or `Ready · offline`, which
 wins over both because it changes what the visitor can do) opens a small popover with workspace counts and
 runtime details, replacing a dedicated dashboard page. It favors provenance
 and scientific explanation over administration. Loading,
