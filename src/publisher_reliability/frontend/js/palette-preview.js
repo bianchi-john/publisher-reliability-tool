@@ -13,18 +13,29 @@ const STORAGE_KEY = "prt-palette-preview";
 
 const PALETTES = [
   ["", "Current (default)"],
-  ["ink", "Ink & Amber"],
-  ["oxford", "Oxford & Rust"],
-  ["bottle", "Bottle & Gold"],
-  ["cobalt", "Cobalt & Coral"],
-  ["teal", "Teal & Magenta"],
-  ["plum", "Plum & Lime"],
-  ["burgundy", "Burgundy & Brass"],
-  ["petrol", "Petrol & Apricot"],
-  ["retro", "Retro Grey & Red"],
-  ["newsprint", "Retro Newsprint"],
-  ["blueprint", "Blueprint"],
-  ["forest", "Forest & Clay"],
+  // Today's blue and light frame on white paper, differing in the buttons.
+  ["c-square", "Classic · square buttons"],
+  ["c-pill", "Classic · pill buttons"],
+  ["c-outline", "Classic · outline buttons"],
+  ["c-raised", "Classic · raised buttons"],
+  ["c-key", "Classic · keycap buttons"],
+  ["c-soft", "Classic · soft buttons"],
+  ["c-slab", "Classic · ink slab buttons"],
+  ["c-amber", "Classic · amber action"],
+  ["c-duo", "Classic · blue and amber pair"],
+  // A coloured frame around white content.
+  ["ink", "Bold · Ink & Amber"],
+  ["oxford", "Bold · Oxford & Rust"],
+  ["bottle", "Bold · Bottle & Gold"],
+  ["cobalt", "Bold · Cobalt & Coral"],
+  ["teal", "Bold · Teal & Magenta"],
+  ["plum", "Bold · Plum & Lime"],
+  ["burgundy", "Bold · Burgundy & Brass"],
+  ["petrol", "Bold · Petrol & Apricot"],
+  ["retro", "Bold · Retro Grey & Red"],
+  ["newsprint", "Bold · Retro Newsprint"],
+  ["blueprint", "Bold · Blueprint"],
+  ["forest", "Bold · Forest & Clay"],
 ];
 
 function stored() {

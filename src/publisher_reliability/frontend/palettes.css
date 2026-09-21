@@ -444,6 +444,102 @@
   --frame-muted: #4a7356;
 }
 
+/* ---- Classic family ------------------------------------------------------
+   The interface as it is today -- the restrained blue, the light frame -- but on
+   white paper. They share one set of tokens and differ only in how the buttons
+   are drawn, which is the thing being chosen between them.
+
+   The detail button keeps its green everywhere, so every rule that would repaint
+   a button excludes it, and so does the secondary variant where a family gives it
+   a part of its own. */
+:root[data-palette="c-square"],
+:root[data-palette="c-pill"],
+:root[data-palette="c-outline"],
+:root[data-palette="c-raised"],
+:root[data-palette="c-key"],
+:root[data-palette="c-soft"],
+:root[data-palette="c-slab"],
+:root[data-palette="c-amber"],
+:root[data-palette="c-duo"] {
+  --paper: #ffffff;
+  --surface: #ffffff;
+  --frame: #f3f7fa;
+  --frame-line: #d3dfe9;
+  --line: #c8d6e2;
+  --row-line: #dde7ef;
+  --table-head: #eaf1f7;
+  --control: #ffffff;
+  --control-line: #a4bccf;
+  --chip: #dbe8f2;
+  --accent-soft: #dceaf5;
+  --track: #d4e2ec;
+}
+
+/* Squared — the corners come off entirely. */
+:root[data-palette="c-square"] button,
+:root[data-palette="c-square"] .button,
+:root[data-palette="c-square"] input,
+:root[data-palette="c-square"] select { border-radius: 2px; }
+
+/* Pill — fully rounded, and wider, because a pill needs room at the ends. */
+:root[data-palette="c-pill"] button,
+:root[data-palette="c-pill"] .button { border-radius: 999px; padding-inline: 18px; }
+:root[data-palette="c-pill"] .button.inspect { padding: 0; }
+
+/* Outline — nothing is filled: the border does the work, at double thickness. */
+:root[data-palette="c-outline"] button:not(.inspect),
+:root[data-palette="c-outline"] .button:not(.inspect) {
+  border-width: 2px; background: #ffffff; color: var(--accent);
+}
+
+/* Raised — filled and lifted off the page. */
+:root[data-palette="c-raised"] button:not(.inspect),
+:root[data-palette="c-raised"] .button:not(.inspect) {
+  border-color: transparent; box-shadow: 0 2px 0 #1b4266, 0 6px 14px rgba(22, 45, 83, .22);
+}
+:root[data-palette="c-raised"] button.secondary,
+:root[data-palette="c-raised"] .button.secondary {
+  box-shadow: 0 2px 0 var(--control-line), 0 6px 14px rgba(22, 45, 83, .12);
+}
+
+/* Keycap — one darker edge along the bottom, like a key you can press. */
+:root[data-palette="c-key"] button:not(.inspect),
+:root[data-palette="c-key"] .button:not(.inspect) {
+  border-bottom: 3px solid #0e2b45; padding-bottom: 6px;
+}
+:root[data-palette="c-key"] button.secondary,
+:root[data-palette="c-key"] .button.secondary { border-bottom-color: var(--accent); }
+
+/* Soft — a pale fill instead of a solid one, so the page stays quiet. */
+:root[data-palette="c-soft"] button:not(.inspect),
+:root[data-palette="c-soft"] .button:not(.inspect) {
+  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+
+/* Slab — buttons as blocks of ink, lettered like a label. */
+:root[data-palette="c-slab"] button:not(.inspect),
+:root[data-palette="c-slab"] .button:not(.inspect) {
+  border-radius: 3px; border-color: #1c2531; background: #1c2531; color: #ffffff;
+  font-size: 13px; letter-spacing: .07em; text-transform: uppercase;
+}
+:root[data-palette="c-slab"] button.secondary,
+:root[data-palette="c-slab"] .button.secondary {
+  background: #ffffff; color: #1c2531;
+}
+
+/* Amber action — the blue stays for links and chrome; what you press is gold. */
+:root[data-palette="c-amber"] button:not(.secondary):not(.inspect),
+:root[data-palette="c-amber"] .button:not(.secondary):not(.inspect) {
+  border-color: #b8860b; background: #f2c14e; color: #3a2a02; font-weight: 700;
+}
+
+/* Two parts — a filled blue for the action, an amber outline for the alternative,
+   so a pair of buttons no longer reads as one thing twice. */
+:root[data-palette="c-duo"] button.secondary,
+:root[data-palette="c-duo"] .button.secondary {
+  border-color: #b8860b; background: #fffaf0; color: #7a5a06;
+}
+
 /* The panel itself. Fixed colours on purpose: it has to stay readable while the
    palette it is changing is anything at all. */
 #palette-panel {
