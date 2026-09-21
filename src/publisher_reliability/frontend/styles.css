@@ -20,6 +20,16 @@
   --user: #29587f;
   --user-soft: #d8e6ef;
   --topbar: rgba(248, 250, 252, .96);
+  /* The frame: the top bar, the sidebar and the footer, as distinct from the paper
+     the content sits on. They were painted with --surface, the same token as the
+     cards, which made it impossible to give the frame a colour of its own without
+     colouring every card too. Each default here is the value that was in use, so
+     the interface is unchanged until a palette says otherwise. */
+  --frame: #f8fafc;        /* background of top bar, sidebar and footer */
+  --frame-line: #cfdbe5;   /* their borders against the content */
+  --frame-ink: #51616e;    /* navigation entries */
+  --frame-strong: #1e252c; /* the wordmark */
+  --frame-muted: #5f6c78;  /* the wordmark's subtitle, and the footer text */
   --nav-ink: #51616e;
   --control: #fbfdfe;
   --control-line: #a9c1d3;
@@ -158,7 +168,7 @@ summary, label.exclusion-item { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   padding: 0 30px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--frame-line);
   background: var(--topbar);
   backdrop-filter: blur(12px);
   box-shadow: var(--frame-shadow-down);
@@ -173,8 +183,8 @@ summary, label.exclusion-item { cursor: pointer; }
   border-radius: 12px; color: var(--on-accent); background: var(--accent);
   font: 700 14px/1 "Times New Roman", Times, serif; letter-spacing: .08em;
 }
-.brand strong { font-family: "Times New Roman", Times, serif; font-weight: 400; }
-.brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
+.brand strong { color: var(--frame-strong); font-family: "Times New Roman", Times, serif; font-weight: 400; }
+.brand small { display: block; color: var(--frame-muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .topbar-actions { position: relative; display: flex; align-items: center; gap: 10px; }
 /* The workspace status control. It was a flat tinted pill, which read as a label
    rather than as something to press. Three things now say "button": a real border,
@@ -240,14 +250,14 @@ nav {
   position: relative;
   z-index: 1;
   padding: 28px 18px;
-  border-right: 1px solid var(--line);
-  background: var(--surface);
+  border-right: 1px solid var(--frame-line);
+  background: var(--frame);
   box-shadow: var(--frame-shadow-right);
 }
 /* The sidebar entries carry their own chrome: a hover fill and a held active
    state. Underlining all five at rest would be noise, so the underline appears on
    hover and focus, where the question "can I click this?" is actually being asked. */
-nav a { display: block; padding: 10px 13px; margin-bottom: 3px; border-radius: 9px; text-decoration: none; color: var(--nav-ink); }
+nav a { display: block; padding: 10px 13px; margin-bottom: 3px; border-radius: 9px; text-decoration: none; color: var(--frame-ink); }
 nav a:hover, nav a.active { color: var(--accent); background: var(--accent-soft); }
 nav a:hover, nav a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
 main { width: 100%; max-width: 1450px; min-height: calc(100vh - 112px); padding: 42px 5vw 70px; }
@@ -440,7 +450,7 @@ tr:last-child td { border-bottom: 0; }
 /* The one piece of frame with no shadow, deliberately: it is static and sits at the
    end of the document, so nothing ever scrolls beneath it. A seam here would claim
    a layer that does not exist. Its top border is the whole separation it needs. */
-footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface); font-size: 12px; }
+footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--frame-line); color: var(--frame-muted); background: var(--frame); font-size: 12px; }
 @keyframes pulse { to { opacity: .45; } }
 /* --- Publisher aggregation ------------------------------------------------- */
 

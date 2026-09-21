@@ -13,18 +13,18 @@ const STORAGE_KEY = "prt-palette-preview";
 
 const PALETTES = [
   ["", "Current (default)"],
-  ["harbour", "Harbour — blue and amber"],
-  ["terracotta", "Blue & Terracotta"],
-  ["teal", "Blue & Teal"],
-  ["mustard", "Navy & Mustard"],
-  ["copper", "Slate & Copper"],
-  ["forest", "Forest & Gold"],
-  ["burgundy", "Oxford & Burgundy"],
-  ["plum", "Olive & Plum"],
-  ["retro", "Retro Grey"],
+  ["ink", "Ink & Amber"],
+  ["oxford", "Oxford & Rust"],
+  ["bottle", "Bottle & Gold"],
+  ["cobalt", "Cobalt & Coral"],
+  ["teal", "Teal & Magenta"],
+  ["plum", "Plum & Lime"],
+  ["burgundy", "Burgundy & Brass"],
+  ["petrol", "Petrol & Apricot"],
+  ["retro", "Retro Grey & Red"],
   ["newsprint", "Retro Newsprint"],
   ["blueprint", "Blueprint"],
-  ["sage", "Sage & Clay"],
+  ["forest", "Forest & Clay"],
 ];
 
 function stored() {
