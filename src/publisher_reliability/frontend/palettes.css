@@ -444,6 +444,31 @@
   --frame-muted: #4a7356;
 }
 
+/* Black text — everything else exactly as it is today.
+ *
+ * Only the tokens that are nothing but a text colour are redefined, and all of
+ * them become pure black: body copy, the muted secondary text, form labels, the
+ * navigation entries, the wordmark and its subtitle, the footer, and the label
+ * of the status badge. Backgrounds, borders, the accent, the fills and the
+ * spacing are left untouched, and so is every white text: --on-accent and
+ * --on-inspect are what a filled button and the detail button write with, and
+ * they stay light.
+ *
+ * The dispersion bands are deliberately not blackened either. Their green, amber
+ * and red are how "stable", "elevated" and "high" are told apart at a glance, so
+ * a palette that flattened them would be changing what the page says, not how it
+ * looks.
+ */
+:root[data-palette="blacktext"] {
+  --ink: #000000;
+  --muted: #000000;
+  --nav-ink: #000000;
+  --frame-ink: #000000;
+  --frame-strong: #000000;
+  --frame-muted: #000000;
+  --highlight-ink: #000000;
+}
+
 /* ---- Classic family ------------------------------------------------------
    The interface as it is today -- the restrained blue, the light frame -- but on
    white paper. They share one set of tokens and differ only in how the buttons

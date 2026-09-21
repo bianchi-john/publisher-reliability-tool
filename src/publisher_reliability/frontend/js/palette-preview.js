@@ -13,6 +13,7 @@ const STORAGE_KEY = "prt-palette-preview";
 
 const PALETTES = [
   ["", "Current (default)"],
+  ["blacktext", "Current, but black text"],
   // Today's blue and light frame on white paper, differing in the buttons.
   ["c-square", "Classic · square buttons"],
   ["c-pill", "Classic · pill buttons"],
