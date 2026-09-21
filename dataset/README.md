@@ -8,6 +8,15 @@
 > evaluation history never enters version control. Neither file contains
 > ground-truth labels or article content.
 
+<!-- TODO: replace arXiv.PLACEHOLDER with the real arXiv identifier once it
+     is assigned. The same placeholder appears in paper/references.bib. -->
+These predictions were produced for *From Articles to Publishers: Aggregating
+Language Model Predictions for News Source Reliability Inference* (Bianchi,
+Pratelli, Pinelli and Petrocchi, IEEE Transactions on Computational Social
+Systems, 2026, under review), preprint at
+<https://arxiv.org/abs/arXiv.PLACEHOLDER>. Cite that paper when using this
+dataset.
+
 ## Contents
 
 ```text

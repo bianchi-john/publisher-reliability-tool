@@ -3,6 +3,14 @@
 This guide describes the current browser workflow for models, article
 predictions, and publisher aggregations.
 
+<!-- TODO: replace arXiv.PLACEHOLDER with the real arXiv identifier once it
+     is assigned. The same placeholder appears in paper/references.bib. -->
+The predictions and the method behind them come from *From Articles to
+Publishers: Aggregating Language Model Predictions for News Source Reliability
+Inference* (Bianchi, Pratelli, Pinelli and Petrocchi, IEEE Transactions on
+Computational Social Systems, 2026, under review), preprint at
+<https://arxiv.org/abs/arXiv.PLACEHOLDER>.
+
 ## 1. Understand the workspace overview
 
 Click **Ready · local** (or **Ready · offline**) in the top bar to open a

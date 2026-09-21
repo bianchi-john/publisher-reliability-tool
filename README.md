@@ -9,6 +9,15 @@
 > Every result is a model prediction — not a fact, a fact check, or a
 > ground-truth rating.
 
+<!-- TODO: replace arXiv.PLACEHOLDER with the real arXiv identifier once it
+     is assigned. The same placeholder appears in paper/references.bib. -->
+This tool is the reference implementation of *From Articles to Publishers:
+Aggregating Language Model Predictions for News Source Reliability Inference*
+(Bianchi, Pratelli, Pinelli and Petrocchi, IEEE Transactions on Computational
+Social Systems, 2026, under review) — preprint:
+<https://arxiv.org/abs/arXiv.PLACEHOLDER>. Every number the tool shows comes from
+that study's five-fold, publisher-disjoint protocol.
+
 ## Start
 
 Requires Linux, Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
