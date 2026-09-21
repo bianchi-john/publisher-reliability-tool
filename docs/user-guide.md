@@ -13,10 +13,9 @@ Computational Social Systems, 2026, under review), preprint at
 
 ## 1. Understand the workspace overview
 
-Click the status badge in the top bar — **Ready · local** on your own machine,
-**Ready · online** on the published instance, and **Ready · offline** whenever
-network retrieval is disabled — to open a compact overview popover with the
-same counts a dashboard would show:
+Click the status badge in the top bar — **Ready · online**, or **Ready ·
+offline** whenever network retrieval is disabled — to open a compact overview
+popover with the same counts a dashboard would show:
 
 - **Stored predictions** are immutable article-level outputs. The bundled
   release contains BERT and RoBERTa only, with one predicted label and all five

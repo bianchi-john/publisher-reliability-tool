@@ -348,9 +348,9 @@ live job either loses a queued one before it runs or lets a running one
 resurrect its own row when it finishes.
 
 The UI has Evaluate, Articles, Publishers, Models, and Jobs. Evaluate is the
-default and first navigation item. The top-bar status control (`Ready ·
-local`, `Ready · online` on a published instance, or `Ready · offline`, which
-wins over both because it changes what the visitor can do) opens a small popover with workspace counts and
+default and first navigation item. The top-bar status control (`Ready · online`,
+or `Ready · offline` when network retrieval is disabled, which is the condition
+that changes what the visitor can do) opens a small popover with workspace counts and
 runtime details, replacing a dedicated dashboard page. It favors provenance
 and scientific explanation over administration. Loading,
 empty, offline, missing-model, partial, and error states use clear English text.
