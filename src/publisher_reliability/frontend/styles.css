@@ -431,7 +431,11 @@ tr:last-child td { border-bottom: 0; }
 .about h2 { margin-bottom: 6px; }
 .about hr { margin: 24px 0; border: 0; border-top: 1px solid var(--row-line); }
 .about > p:last-child { margin-bottom: 0; }
-.about-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The tags are a caption for the whole page, not a heading for the first
+   section, so they are parted from it by the same rule every other section uses
+   and stand a little further apart from each other than a dense pill row would. */
+.about-tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.about-tags .pill { padding: 5px 12px; }
 .error-card {
   display: flex; align-items: flex-start; gap: 10px; margin-top: 18px;
   padding: 14px 16px; border: 1px solid var(--red); border-radius: 10px;
