@@ -10,6 +10,11 @@
   --focus: #0b2d4d;
   --on-accent: #f6fafc;
   --red: #a83d32;
+  /* The only green outside the dispersion bands below, used for the control that
+     opens a row's detail page. It is darker than --stable so the two do not look
+     like the same signal, and carries white at 6.3:1. */
+  --inspect: #26694a;
+  --on-inspect: #f4fbf7;
   --dataset: #35688f;
   --dataset-soft: #d9e7f0;
   --user: #29587f;
@@ -307,6 +312,18 @@ textarea { width: min(720px, 100%); min-height: 110px; resize: vertical; }
 button, .button { cursor: pointer; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; }
 button.secondary, .button.secondary { background: var(--surface); color: var(--accent); }
 button.danger, .button.danger { border-color: var(--red); background: var(--red); color: var(--on-accent); }
+/* An icon-only control, so it is square: in a rectangle sized for a word the glass
+   would sit in a field of colour and read as decoration rather than as a button. */
+.button.inspect {
+  width: 40px; padding: 0;
+  border-color: var(--inspect); background: var(--inspect); color: var(--on-inspect);
+}
+.button.inspect svg { width: 18px; height: 18px; }
+/* The column is as narrow as its button and sits at the end of the row. The header
+   is a span inside the cell rather than the cell itself, because the table helper
+   writes the <th> and only its contents are passed in. */
+td.row-action { width: 1%; text-align: right; white-space: nowrap; }
+th .row-action { display: block; text-align: right; }
 /* The offset keeps the ring on the page background instead of on the control, so its
    contrast is read against that background: this one clears 12:1 on every surface
    here, where the previous colour stayed below the 3:1 minimum on all of them. */
@@ -322,11 +339,6 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--row-line); text-align: left; vertical-align: top; }
 th { color: var(--muted); background: var(--table-head); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
-/* Cells align to the top everywhere else because a cell may hold a wrapped URL or
-   several lines, and a ragged first line reads worse than a ragged last one. Here
-   the first cell is a button two lines tall while the rest are single numbers, so
-   top alignment leaves the numbers floating 9px above the name they belong to. */
-.publisher-row td { vertical-align: middle; }
 .url { display: block; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: "Times New Roman", Times, serif; font-size: 12px; }
 .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }

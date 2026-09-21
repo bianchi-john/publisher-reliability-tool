@@ -2,17 +2,26 @@
 
 import {api} from "../api.js";
 import {pager, table} from "../components.js";
-import {escapeHtml} from "../format.js";
+import {escapeHtml, shortId} from "../format.js";
 import {mount, replaceLoading} from "../view.js";
 
 const PAGE_SIZE = 25;
 
+/* Drawn here rather than fetched: the application loads no icon font and no file
+   from a CDN, and one glass is cheaper inline than a request per page. */
+const MAGNIFIER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 L21 21"></path></svg>`;
+
 function publisherRow(row) {
-  // The name is the button rather than a link beside one: in a grid of numbers a
-  // link reads as a label, and nothing then says the row opens a page of its own.
-  return `<tr class="publisher-row"><td><a class="button" href="#publisher/${encodeURIComponent(row.publisher_id)}">${escapeHtml(row.normalized_hostname)}</a></td>
+  const href = `#publisher/${encodeURIComponent(row.publisher_id)}`;
+  // The hostname is a link, which a table of numbers makes easy to overlook. The
+  // button in the last column is what says the row opens a page of its own; its
+  // label is for a screen reader, since on screen the glass is the whole message.
+  const name = escapeHtml(row.normalized_hostname);
+  return `<tr><td><a class="detail-link" href="${href}"><b>${name}</b></a><br>${shortId(row.publisher_id)}</td>
       <td>${row.article_count}</td><td>${row.model_count}</td><td>${row.run_count}</td>
-      <td>${row.probability_run_count}</td></tr>`;
+      <td>${row.probability_run_count}</td>
+      <td class="row-action"><a class="button inspect" href="${href}" title="Open ${name}" aria-label="Open ${name}">${MAGNIFIER}</a></td></tr>`;
 }
 
 export async function publishersPage(_id, params) {
@@ -20,7 +29,8 @@ export async function publishersPage(_id, params) {
   mount("publishers");
   const data = await api(`/api/v1/publishers?limit=${PAGE_SIZE}&offset=${offset}`);
   replaceLoading(table(
-    ["Publisher", "Articles", "Models", "Predictions", "With probabilities"],
+    ["Publisher", "Articles", "Models", "Predictions", "With probabilities",
+     `<span class="row-action">Detail</span>`],
     data.items.map(publisherRow),
   ) + pager("publishers", data.page, data.items.length));
 }
