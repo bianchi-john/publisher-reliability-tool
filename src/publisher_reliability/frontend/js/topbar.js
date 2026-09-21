@@ -12,11 +12,22 @@ import {escapeHtml} from "./format.js";
 const stateBadge = document.querySelector("#system-state");
 const systemPopover = document.querySelector("#system-popover");
 
-/** Show whether the backend is reachable, and whether it is running offline. */
+/** Name the kind of instance this is, for the badge in the top bar.
+ *
+ * "local" would read as wrong to a visitor of the published demo, who is plainly
+ * not local to it, so a published instance says so instead. Offline wins over both
+ * because it is the condition that changes what the visitor can actually do.
+ */
+function instanceLabel(status) {
+  if (status.offline) return "Ready · offline";
+  return status.public_instance ? "Ready · public demo" : "Ready · local";
+}
+
+/** Show whether the backend is reachable, and what kind of instance it is. */
 async function refreshSystemBadge() {
   try {
     const status = await api("/api/v1/status");
-    stateBadge.textContent = status.offline ? "Ready · offline" : "Ready · local";
+    stateBadge.textContent = instanceLabel(status);
     return status;
   } catch (error) {
     stateBadge.textContent = "Status unavailable";
