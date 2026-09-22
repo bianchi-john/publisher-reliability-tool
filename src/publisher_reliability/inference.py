@@ -19,6 +19,7 @@ import httpx
 
 from . import __version__
 from .errors import AppError
+from .page_kind import refuse_non_article_text, refuse_site_address
 from .identity import normalize_url
 from .custom_models import MANAGED_ARTIFACT_KINDS, verify_managed_model
 from .storage import Storage
@@ -129,6 +130,10 @@ def extract_english_article(html: bytes, canonical_url: str) -> RetrievedArticle
             "Newspaper3k could not parse the article HTML.",
         ) from exc
     stripped = text.strip()
+    # Before the length floor: a front page is long enough to clear it, and
+    # reporting it as "too short" would send the reader looking for the wrong
+    # problem.
+    refuse_non_article_text(canonical_url, html, stripped)
     if len(stripped) < 200 or len(stripped.split()) < 30:
         raise AppError(
             "TEXT_TOO_SHORT",
@@ -154,6 +159,9 @@ def fetch_article(raw_url: str, *, offline: bool = False) -> RetrievedArticle:
     if offline:
         raise AppError("NETWORK_REQUIRED", "Article retrieval is disabled offline.")
     current = normalize_url(raw_url)
+    # Cheapest possible refusal, and the most certain: a site address cannot
+    # become an article by being downloaded.
+    refuse_site_address(current)
     try:
         with httpx.Client(
             follow_redirects=False,

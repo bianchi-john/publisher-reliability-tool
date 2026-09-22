@@ -193,6 +193,16 @@ The request sends `Accept-Language: en-US,en;q=0.9`. Newspaper3k receives only
 the already downloaded HTML and is configured with `language="en"`; it cannot
 issue a second request. No secondary extractor is registered: parsing failure
 is `EXTRACTION_FAILED`, and insufficient Newspaper3k text is `TEXT_TOO_SHORT`.
+
+Two checks stand between a URL and the classifier, because Newspaper3k extracts
+text from any page with paragraphs in it and a publisher's front page comes back
+as a long wall of headlines that clears every length floor. Before the request,
+`page_kind.refuse_site_address` rejects a URL whose path names a site or a
+section rather than a page (`PUBLISHER_HOMEPAGE`); after parsing,
+`page_kind.refuse_non_article_text` rejects a page that declares an `og:type`
+other than an article, or whose extracted text is not mostly long blocks
+(`NOT_AN_ARTICLE`). Both are heuristics, tuned to catch the obvious mistake
+rather than to adjudicate: a page the checks let through may still be unusual.
 HTML, authors, and extracted content stay in job memory. Only validated
 title/body may cross into `local_content.csv` after `save_local`; authors and
 raw HTML are always released. Offline mode blocks retrieval and configures core

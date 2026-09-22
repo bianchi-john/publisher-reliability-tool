@@ -174,6 +174,13 @@ Newspaper3k uses `language="en"` and no secondary extractor. Newspaper3k parser
 failure is `EXTRACTION_FAILED`, minimum-length failure is `TEXT_TOO_SHORT`, and
 seed-zero language validation accepts exact `en` or returns `NON_ENGLISH`.
 
+A URL addressing a publisher's home or section page is refused before the
+request with `PUBLISHER_HOMEPAGE`, both when starting an evaluation and when
+asking which models are available. A page that declares an `og:type` other than
+an article, or whose extracted text is not mostly continuous prose, is refused
+after parsing with `NOT_AN_ARTICLE`. A page that declares itself an article and
+yields no text remains `EXTRACTION_FAILED`.
+
 ## E. Evaluation and provenance
 
 ### AT-026 — Single-article reuse

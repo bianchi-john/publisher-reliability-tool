@@ -14,6 +14,7 @@ from typing import Iterable
 
 from .aggregation import METHODS, WARNING, aggregate
 from .errors import AppError
+from .page_kind import refuse_site_address
 from .identity import article_id, normalize_url, normalized_hostname, publisher_id
 from .inference import InferenceEngine, RetrievedArticle, fetch_article
 from .prediction_dataset import sync_user_predictions
@@ -619,6 +620,10 @@ class ResearchService:
         """
 
         canonical = normalize_url(url)
+        # Refused here as well as during retrieval, so the interface can say that
+        # a homepage is a homepage while the reader is still typing, instead of
+        # letting them start a job that is certain to fail.
+        refuse_site_address(canonical)
         identifier = article_id(canonical)
         stored_runs = [
             row
