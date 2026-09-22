@@ -2,12 +2,10 @@
 
 **Status:** Normative research-demo scientific contract
 
-<!-- TODO: replace arXiv.PLACEHOLDER with the real arXiv identifier once it
-     is assigned. The same placeholder appears in paper/references.bib. -->
 **Source study:** Bianchi, Pratelli, Pinelli and Petrocchi, *From Articles to
 Publishers: Aggregating Language Model Predictions for News Source Reliability
 Inference*, IEEE Transactions on Computational Social Systems, 2026 (under
-review). Preprint: <https://arxiv.org/abs/arXiv.PLACEHOLDER>. Every rule below —
+review). Preprint: <https://arxiv.org/abs/2609.24219>. Every rule below —
 the five ordinal classes, the publisher-disjoint folds, the aggregation methods
 and the dispersion bands — follows that study; where this document cites a
 measured figure, the study is where it was measured.
