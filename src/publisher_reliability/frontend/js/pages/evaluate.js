@@ -3,6 +3,8 @@
  *
  * Typing a URL asks the backend which models may be used for it; models whose
  * training set contains that article are reported as blocked, never offered.
+ * That lookup is about models only. Whether the link is an article at all is
+ * decided by the evaluation itself, once the reader presses the button.
  */
 
 import {api} from "../api.js";
@@ -59,8 +61,13 @@ export async function evaluatePage() {
   async function refreshAvailable() {
     clearTimeout(timer);
     const ticket = ++latestLookup;
+    // The only test applied while typing is the browser's own check that the box
+    // holds something URL-shaped. Whether the address is a homepage, or leads to
+    // a page that is not an article at all, is settled when the evaluation is
+    // started: those answers cost a request, and the reader has not asked for
+    // one yet.
     if (!urlField.validity.valid || !urlField.value) {
-      modelField.innerHTML = `<option value="">Enter a valid URL first</option>`;
+      modelField.innerHTML = `<option value="">Enter a URL first</option>`;
       disableModelChoice(IDLE_AVAILABILITY);
       return;
     }

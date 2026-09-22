@@ -198,11 +198,17 @@ Two checks stand between a URL and the classifier, because Newspaper3k extracts
 text from any page with paragraphs in it and a publisher's front page comes back
 as a long wall of headlines that clears every length floor. Before the request,
 `page_kind.refuse_site_address` rejects a URL whose path names a site or a
-section rather than a page (`PUBLISHER_HOMEPAGE`); after parsing,
-`page_kind.refuse_non_article_text` rejects a page that declares an `og:type`
-other than an article, or whose extracted text is not mostly long blocks
-(`NOT_AN_ARTICLE`). Both are heuristics, tuned to catch the obvious mistake
-rather than to adjudicate: a page the checks let through may still be unusual.
+section rather than a page; after parsing, `page_kind.refuse_non_article_text`
+rejects a page that declares an `og:type` other than an article, or whose
+extracted text is not mostly long blocks. Both report `NOT_AN_ARTICLE` and put
+the deciding signal in `details.reason`, because the reader's next step is the
+same either way.
+
+Both run inside the evaluation job and nowhere else. The availability lookup the
+interface makes while a URL is being typed answers only about models, so nothing
+is fetched and nothing is judged until the reader starts the evaluation. Both
+are heuristics, tuned to catch the obvious mistake rather than to adjudicate: a
+page the checks let through may still be unusual.
 HTML, authors, and extracted content stay in job memory. Only validated
 title/body may cross into `local_content.csv` after `save_local`; authors and
 raw HTML are always released. Offline mode blocks retrieval and configures core

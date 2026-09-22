@@ -6,14 +6,18 @@ long enough to clear the minimum length and would then be classified as though i
 were one article. The class that came back would be meaningless, and nothing in
 the interface would say so.
 
-Two checks stand in the way, and they are deliberately separate because the
-advice a reader needs is different in each case:
+Two checks stand in the way, at different moments:
 
   * a URL that addresses a site rather than a page is refused before anything is
     downloaded, since no amount of parsing would change the answer;
-  * a page whose extracted text is not continuous prose is refused after parsing,
+  * a page whose extracted text is not an article's is refused after parsing,
     because only the text can tell a long article from a list of links to
     articles.
+
+They report one error between them, NOT_AN_ARTICLE. The distinction between a
+homepage and some other unsuitable page is real, and the details of the error
+carry it, but it does not change what the reader has to do -- find the article
+and paste its link -- so it does not deserve a second code to handle.
 
 Both are heuristics, so both are tuned to be quiet: the point is to catch the
 obvious mistakes -- pasting a homepage, pasting a video page, pasting a search
@@ -123,40 +127,33 @@ def prose_measure(text: str) -> tuple[int, float]:
     return prose, (prose / total if total else 0.0)
 
 
+# One sentence for every refusal, because one action follows from all of them.
+REFUSAL = (
+    "This is not a valid article. Paste the link to a single news article, not a "
+    "publisher's homepage or another kind of page."
+)
+
+
 def refuse_site_address(url: str) -> None:
     """Refuse a URL that addresses a site rather than an article."""
 
     if addresses_a_site(url):
         raise AppError(
-            "PUBLISHER_HOMEPAGE",
-            "This address is a publisher's home or section page, not an article. "
-            "Open the article you want and paste the link to that page.",
-            {"url": url},
+            "NOT_AN_ARTICLE",
+            REFUSAL,
+            {"url": url, "reason": "the URL addresses a site or a section, not a page"},
         )
 
 
 def _refuse(url: str, reason: str, details: dict[str, object]) -> None:
-    """Raise the refusal that the evidence supports.
+    """Refuse the page, recording why in the details rather than in the message.
 
-    The homepage code is reserved for the case the URL itself settles, because
-    that is the only evidence strong enough to name where the reader ended up.
-    Everything else says what is wrong with the page and leaves the reader to
-    recognise it.
+    The reader is told the one thing they can act on. Which signal decided it --
+    the declaration, the shape of the text, the address -- belongs in the error's
+    details, where it is available for a bug report and stays out of the way.
     """
 
-    if addresses_a_site(url):
-        raise AppError(
-            "PUBLISHER_HOMEPAGE",
-            f"This address is a publisher's home or section page, not an article "
-            f"({reason}). Open the article you want and paste the link to that page.",
-            {"url": url, **details},
-        )
-    raise AppError(
-        "NOT_AN_ARTICLE",
-        f"This page does not read as a news article ({reason}). Paste the link to "
-        f"a single article.",
-        {"url": url, **details},
-    )
+    raise AppError("NOT_AN_ARTICLE", REFUSAL, {"url": url, "reason": reason, **details})
 
 
 def refuse_non_article_text(url: str, html: bytes, text: str) -> None:

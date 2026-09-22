@@ -56,8 +56,8 @@ class SiteAddressTest(unittest.TestCase):
     def test_the_refusal_names_the_homepage_case(self) -> None:
         with self.assertRaises(AppError) as raised:
             refuse_site_address("https://example.org/")
-        self.assertEqual(raised.exception.code, "PUBLISHER_HOMEPAGE")
-        self.assertIn("article", raised.exception.message)
+        self.assertEqual(raised.exception.code, "NOT_AN_ARTICLE")
+        self.assertIn("site or a section", raised.exception.details["reason"])
 
 
 class ProseTest(unittest.TestCase):
@@ -89,14 +89,14 @@ class ProseTest(unittest.TestCase):
 
 
 class RefusalTest(unittest.TestCase):
-    def test_a_wall_of_headlines_at_a_site_address_is_a_homepage(self) -> None:
+    def test_a_wall_of_headlines_is_refused(self) -> None:
         with self.assertRaises(AppError) as raised:
             refuse_non_article_text(
                 "https://example.org/",
                 b"<html><head><meta property='og:type' content='website'></head></html>",
                 "\n\n".join([HEADLINE] * 40),
             )
-        self.assertEqual(raised.exception.code, "PUBLISHER_HOMEPAGE")
+        self.assertEqual(raised.exception.code, "NOT_AN_ARTICLE")
 
     def test_a_page_that_is_simply_not_an_article(self) -> None:
         # A deep URL, no website declaration, and no prose: a video page, a form,
@@ -131,7 +131,7 @@ class RefusalTest(unittest.TestCase):
                 f"{PARAGRAPH}\n\n{PARAGRAPH}\n\n{PARAGRAPH}",
             )
         self.assertEqual(raised.exception.code, "NOT_AN_ARTICLE")
-        self.assertIn("website", raised.exception.message)
+        self.assertIn("website", raised.exception.details["reason"])
 
     def test_an_article_passes(self) -> None:
         refuse_non_article_text(
@@ -139,6 +139,48 @@ class RefusalTest(unittest.TestCase):
             b"<html><head><meta property='og:type' content='article'></head></html>",
             f"{PARAGRAPH}\n\n{PARAGRAPH}",
         )
+
+
+class OneMessageTest(unittest.TestCase):
+    """Every refusal reads the same, whatever decided it.
+
+    The reader's next step is identical in all of them -- find the article and
+    paste its link -- so the distinction lives in the details, for a bug report,
+    and not in a second error code the interface would have to explain.
+    """
+
+    def messages(self) -> set[str]:
+        seen = set()
+        cases = [
+            lambda: refuse_site_address("https://example.org/"),
+            lambda: refuse_non_article_text(
+                "https://example.org/watch/v/8891", b"<html></html>", "Play  Share"),
+            lambda: refuse_non_article_text(
+                "https://example.org/downloads/notes",
+                b"<html><head><meta property='og:type' content='website'></head></html>",
+                f"{PARAGRAPH}\n\n{PARAGRAPH}"),
+        ]
+        for case in cases:
+            with self.assertRaises(AppError) as raised:
+                case()
+            self.assertEqual(raised.exception.code, "NOT_AN_ARTICLE")
+            seen.add(raised.exception.message)
+        return seen
+
+    def test_the_wording_never_changes(self) -> None:
+        self.assertEqual(len(self.messages()), 1)
+
+    def test_but_the_reason_does(self) -> None:
+        reasons = set()
+        for url, html, text in [
+            ("https://example.org/", b"", ""),
+            ("https://example.org/watch/v/8891", b"<html></html>", "Play  Share"),
+        ]:
+            with self.assertRaises(AppError) as raised:
+                (refuse_site_address(url) if url.endswith("/")
+                 else refuse_non_article_text(url, html, text))
+            reasons.add(raised.exception.details["reason"])
+        self.assertEqual(len(reasons), 2)
 
 
 if __name__ == "__main__":

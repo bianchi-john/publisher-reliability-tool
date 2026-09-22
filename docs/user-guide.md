@@ -168,17 +168,14 @@ Common availability messages have distinct meanings:
 - **Training-data leakage**: the local fold was trained on that known dataset
   article. The checkpoints withheld for this reason are named beneath the
   selector, so a hidden option is never unexplained.
-- **This address is a publisher's home or section page**: the URL names a site,
-  not a page. The tool refuses it before fetching anything, while you are still
-  typing, because a front page is a list of links and a class read from it would
-  mean nothing.
-- **This page does not read as a news article**: the page was fetched, but it
-  either calls itself something other than an article or has no continuous body
-  text. A video page, a search result, a download page and a repository page all
-  land here.
+- **This is not a valid article**: the link is a publisher's homepage, a section
+  index, or some other page that is not one news article — a video page, a
+  search result, a download page. The check runs when you start the evaluation,
+  not while you type: until then the only thing tested is that the box holds
+  something URL-shaped, which is what unlocks the model selector.
 
-Both refusals are heuristics, deliberately quiet ones: they catch the obvious
-mistake rather than judge borderline cases, so a page they accept may still be
+That refusal is a heuristic, a deliberately quiet one: it catches the obvious
+mistake rather than judging borderline cases, so a page it accepts may still be
 unusual, and the class is still only a model prediction.
 
 Retrieval, extraction, language, tokenizer, model-loading, and inference

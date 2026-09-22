@@ -68,8 +68,7 @@ contains one of these codes in its `error_code` field.
 | `NETWORK_ERROR` | 502 | DNS, timeout, TLS, robots denial, unsafe address, or upstream HTTP failure |
 | `EXTRACTION_FAILED` | 422 | HTML type/parsing or empty extraction prevents use |
 | `TEXT_TOO_SHORT` | 422 | Extracted text misses the deterministic minimum |
-| `NOT_AN_ARTICLE` | 422 | The page is not one news article: it declares another kind, or its text is not continuous prose |
-| `PUBLISHER_HOMEPAGE` | 422 | The URL addresses a publisher's home or section page rather than one article |
+| `NOT_AN_ARTICLE` | 422 | The URL or the fetched page is not one news article; the deciding signal is in `details.reason` |
 | `NON_ENGLISH` | 422 | Language validation is non-English or indeterminate |
 | `MODEL_NOT_AVAILABLE` | 404 | Requested model identity is absent |
 | `MODEL_NOT_RUNNABLE` | 409 | Historical, missing, incompatible, dependency, or resource state cannot infer |
