@@ -14,6 +14,7 @@
  *   - a chart with nothing to show returns an explanatory note instead of empty axes.
  */
 
+import {CLASS_BANDS, className, classRange} from "./classes.js";
 import {escapeHtml} from "./format.js";
 
 /** The five reliability classes, from least to most reliable. */
@@ -47,8 +48,8 @@ function figure(title, caption, width, height, body, legend = "") {
 }
 
 /** One legend entry: a swatch drawn with the same class as the bars it names. */
-const legendItem = (className, label) =>
-  `<span class="legend-item"><span class="legend-swatch ${escapeHtml(className)}"></span>${escapeHtml(label)}</span>`;
+const legendItem = (swatch, label) =>
+  `<span class="legend-item"><span class="legend-swatch ${escapeHtml(swatch)}"></span>${escapeHtml(label)}</span>`;
 
 /**
  * Horizontal gridlines with their value labels, drawn behind the data.
@@ -66,13 +67,24 @@ function gridlines(width, height, maximum, {steps = 4, format = "auto"} = {}) {
   return parts.join("");
 }
 
-/** The class labels along the bottom of a five-column chart. */
+/** The class labels along the bottom of a five-column chart.
+ *
+ * The band's score range, not its name: five names do not fit across the plot,
+ * and abbreviating them would invent vocabulary the rest of the interface does
+ * not use. The name is in every bar's tooltip, and in the key below the figure.
+ */
 function classAxis(width, height, columnWidth) {
   return CLASSES.map(index => {
     const x = PAD.left + columnWidth * (index + 0.5);
-    return `<text class="axis" x="${x}" y="${height - PAD.bottom + 18}" text-anchor="middle">Class ${index}</text>`;
+    return `<text class="axis" x="${x}" y="${height - PAD.bottom + 18}" text-anchor="middle">${classRange(index)}</text>`;
   }).join("");
 }
+
+/* Said once beneath a figure whose axis is the five bands, so the ranges on it
+   are readable without hovering. */
+const BAND_KEY = `<span class="band-key">Bands, least to most reliable: `
+  + CLASS_BANDS.map(entry => `<b>${entry.range}</b> ${escapeHtml(entry.name)}`).join(" · ")
+  + `</span>`;
 
 /**
  * How many articles landed in each class, optionally beside the weighted counts the
@@ -106,10 +118,10 @@ export function classDistribution(group) {
     const raw = (counts[index] / maximum) * plot;
     const winner = index === group.result_class ? " winner" : "";
     const left = weighted ? x - barWidth - 2 : x - barWidth / 2;
-    let body = `<rect class="bar${winner}" x="${left}" y="${height - PAD.bottom - raw}" width="${barWidth}" height="${Math.max(0, raw)}"><title>Class ${index}: ${counts[index]} articles</title></rect>`;
+    let body = `<rect class="bar${winner}" x="${left}" y="${height - PAD.bottom - raw}" width="${barWidth}" height="${Math.max(0, raw)}"><title>${className(index)} (class ${index}): ${counts[index]} articles</title></rect>`;
     if (weighted) {
       const value = (weighted[index] / maximum) * plot;
-      body += `<rect class="bar weighted" x="${x + 2}" y="${height - PAD.bottom - value}" width="${barWidth}" height="${Math.max(0, value)}"><title>Class ${index}: weight ${number(weighted[index], 3)}</title></rect>`;
+      body += `<rect class="bar weighted" x="${x + 2}" y="${height - PAD.bottom - value}" width="${barWidth}" height="${Math.max(0, value)}"><title>${className(index)} (class ${index}): weight ${number(weighted[index], 3)}</title></rect>`;
     }
     return body;
   }).join("");
@@ -126,7 +138,7 @@ export function classDistribution(group) {
     width,
     height,
     gridlines(width, height, maximum) + bars + classAxis(width, height, columnWidth),
-    legend,
+    legend + BAND_KEY,
   );
 }
 
@@ -166,6 +178,7 @@ export function probabilityProfile(group) {
     width,
     height,
     gridlines(width, height, maximum) + bars + centre + classAxis(width, height, columnWidth),
+    BAND_KEY,
   );
 }
 
@@ -196,7 +209,7 @@ export function articleDispersion(group) {
     const y = height - PAD.bottom - ((confidence - FLOOR) / (1 - FLOOR)) * plot;
     const winner = item.predicted_class === group.result_class ? " winner" : "";
     const adjacent = Math.abs(item.predicted_class - group.result_class) === 1 ? " adjacent" : "";
-    return `<circle class="mark${winner}${adjacent}" cx="${x}" cy="${Math.max(PAD.top, Math.min(height - PAD.bottom, y))}" r="3.5"><title>Class ${item.predicted_class}${item.confidence === null ? "" : `, confidence ${percent(item.confidence)}`}</title></circle>`;
+    return `<circle class="mark${winner}${adjacent}" cx="${x}" cy="${Math.max(PAD.top, Math.min(height - PAD.bottom, y))}" r="3.5"><title>${className(item.predicted_class)}${item.confidence === null ? "" : `, confidence ${percent(item.confidence)}`}</title></circle>`;
   }).join("");
 
   const verdict = group.result_class === null ? "" : (() => {
@@ -221,6 +234,7 @@ export function articleDispersion(group) {
     width,
     height,
     ticks + verdict + marks + classAxis(width, height, columnWidth) + axis,
+    BAND_KEY,
   );
 }
 
@@ -299,7 +313,7 @@ export function modelComparison(groups) {
   }).join("")).join("");
 
   const legend = usable
-    .map((group, model) => legendItem(`bar series-${model % 4}`, `${group.display_name} → class ${group.result_class}`))
+    .map((group, model) => legendItem(`bar series-${model % 4}`, `${group.display_name} → ${className(group.result_class)}`))
     .join("");
 
   return figure(
@@ -308,7 +322,7 @@ export function modelComparison(groups) {
     width,
     height,
     gridlines(width, height, maximum, {format: "percent"}) + bars + classAxis(width, height, columnWidth),
-    legend,
+    legend + BAND_KEY,
   );
 }
 

@@ -404,9 +404,12 @@ tr:last-child td { border-bottom: 0; }
 .result-meta, .result-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin: 18px 0 24px; }
 .evaluation-result-card h3 { margin: 0 0 12px; font-size: 15px; }
 .probability-results { display: grid; gap: 11px; }
-.probability-result { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(180px, 3fr) 90px; align-items: center; gap: 12px; padding: 9px 11px; border-radius: 9px; }
+/* The label column holds a band name, the longest of which is "Proceed with
+   Maximum Caution"; at 130px it wrapped onto three lines and made every row as
+   tall as a paragraph. */
+.probability-result { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(160px, 3fr) 90px; align-items: center; gap: 12px; padding: 9px 11px; border-radius: 9px; }
 .probability-result.predicted { background: var(--accent-soft); }
-.probability-result-label { display: flex; justify-content: space-between; gap: 10px; }
+.probability-result-label { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .probability-track { height: 11px; overflow: hidden; border-radius: 999px; background: var(--track); }
 .probability-track span { display: block; height: 100%; border-radius: inherit; background: var(--track-fill); }
 .probability-result.predicted .probability-track span { background: var(--accent); }
@@ -514,6 +517,10 @@ footer { height: 40px; padding: 10px 30px; border-top: 1px solid var(--frame-lin
 .chart figcaption .muted { font-size: 12px; font-weight: 400; line-height: 1.4; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+/* The key to the five bands, printed under every figure whose axis is the score
+   ranges. Smaller and quieter than a legend: it is reference, not data. */
+.band-key { display: block; width: 100%; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.band-key b { color: var(--ink); font-weight: 650; }
 .legend-item { display: inline-flex; align-items: center; gap: 7px; }
 .legend-swatch { width: 11px; height: 11px; border-radius: 2px; background: var(--track-fill); }
 .legend-swatch.weighted { background: var(--accent-soft); border: 1px solid var(--accent); }

@@ -10,6 +10,7 @@
 import {api} from "../api.js";
 import {CHART_TYPES} from "../charts.js";
 import {errorCard, pager, probabilityCells, table} from "../components.js";
+import {classChip} from "../classes.js";
 import {escapeHtml, modelLabel, provenanceLabel, shortId} from "../format.js";
 import {content, mount} from "../view.js";
 
@@ -25,7 +26,7 @@ const decimal = (value, places = 3) =>
 function storedPredictionRow(run) {
   return `<tr><td><a class="url detail-link" href="#article/${encodeURIComponent(run.article_id)}" title="${escapeHtml(run.canonical_url)}">${escapeHtml(run.canonical_url)}</a></td>
         <td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
-        <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
+        <td>${classChip(run.predicted_class)}</td>${probabilityCells(run)}
         <td>${shortId(run.prediction_run_id)}</td></tr>`;
 }
 
@@ -57,7 +58,7 @@ function verdictCard(group) {
   return `<article class="verdict-card">
     <header><b>${escapeHtml(group.display_name)}</b>
       <span class="muted">${escapeHtml(provenanceLabel(group.provenance))}</span></header>
-    <div class="verdict-class"><span class="class-chip large">Class ${group.result_class}</span>${dispersionPill(group)}</div>
+    <div class="verdict-class">${classChip(group.result_class, {large: true})}${dispersionPill(group)}</div>
     <dl class="verdict-stats">
       <div><dt>Articles counted</dt><dd>${group.used_count} of ${group.available_count}${escapeHtml(excluded)}</dd></div>
       <div><dt>Articles in this class</dt><dd>${percent(group.agreement)}</dd></div>

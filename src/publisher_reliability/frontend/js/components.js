@@ -1,5 +1,6 @@
 /** Small HTML fragments reused across pages. */
 
+import {classDetail, className} from "./classes.js";
 import {escapeHtml, modelLabel, provenanceLabel, shortId} from "./format.js";
 import {render} from "./templates.js";
 
@@ -67,7 +68,7 @@ function probabilityBars(result) {
     const percent = Number(value) * 100;
     const selected = index === Number(result.predicted_class);
     return `<div class="probability-result ${selected ? "predicted" : ""}">
-      <div class="probability-result-label"><span>Class ${index}${selected ? " · predicted" : ""}</span>
+      <div class="probability-result-label"><span title="${escapeHtml(classDetail(index))}">${escapeHtml(className(index))}${selected ? " · predicted" : ""}</span>
         <b>${percent.toFixed(2)}%</b></div>
       <div class="probability-track"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>
       <div class="mono">${Number(value).toFixed(8)}</div>
@@ -78,7 +79,8 @@ function probabilityBars(result) {
 /** The result card shown on Evaluate once a classification completes. */
 export function articlePredictionResult(result) {
   return render("prediction-result", {
-    predictedClass: result.predicted_class,
+    predictedClass: escapeHtml(className(result.predicted_class)),
+    predictedClassDetail: escapeHtml(classDetail(result.predicted_class)),
     sourceClass: result.origin === "local_inference" ? "user-source" : "dataset-source",
     sourceText: escapeHtml(result.reused ? "Stored prediction reused" : "New user evaluation"),
     modelLabel: escapeHtml(modelLabel(result)),

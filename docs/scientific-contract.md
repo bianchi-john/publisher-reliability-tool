@@ -22,8 +22,15 @@ column names only. Source title, text, and author values are also discarded.
 The exact user-supplied upload bytes may exist only in the private temporary
 acquisition file required for that import and are deleted at terminal cleanup;
 they are never copied into authoritative ledgers, warnings, or logs.
-The public classes are displayed only as `Class 0` through `Class 4` and are
-always described as model predictions, not facts or ground truth.
+The public classes are displayed by the name of the NewsGuard reliability band
+they stand for — `Proceed with Maximum Caution` (0–39), `Proceed with Caution`
+(40–59), `Credible with Exceptions` (60–74), `Generally Credible` (75–99) and
+`High Credibility` (100) — with the class number and the score range beside
+them, because the API, the CSV ledgers and the paper all speak in numbers. Those
+names describe the band, never the publisher in front of the reader: every class
+shown is a model's prediction of which band an article or a publisher falls in,
+and is always described as a prediction, not as a fact, a ground truth, or a
+NewsGuard rating. The provider's own ratings and scores remain undistributed.
 
 Project software/documentation uses Apache-2.0. Project-owned prediction
 outputs and database arrangement use the limited CC0 dedication in
@@ -431,9 +438,10 @@ URL to test fold 1 and does not by itself block fold 2.
 
 ## 9. Required result provenance
 
-Classes are always labelled `Class 0` through `Class 4` and always described as
-model predictions, never as facts or ground truth (§1). The demo calculates no
-accuracy, because it holds no reference labels to calculate one against.
+Classes are always labelled by their band name, with the class number and score
+range beside them, and always described as model predictions, never as facts, as
+ground truth, or as the provider's ratings (§1). The demo calculates no accuracy,
+because it holds no reference labels to calculate one against.
 
 Rather than repeat a standing disclaimer beside every result, each result names
 what it actually depends on:

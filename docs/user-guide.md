@@ -103,6 +103,26 @@ and export contract.
 
 ## 3. Evaluate one article
 
+### What the five classes mean
+
+The models output an integer from 0 to 4. Those integers are the NewsGuard
+reliability bands the study trained on, so the interface shows the band's name
+everywhere a class appears, and keeps the number and the score range beside it —
+the API, the CSV exports and the paper all speak in numbers.
+
+| Class | Band | NewsGuard score |
+| --- | --- | --- |
+| 0 | Proceed with Maximum Caution | 0–39 |
+| 1 | Proceed with Caution | 40–59 |
+| 2 | Credible with Exceptions | 60–74 |
+| 3 | Generally Credible | 75–99 |
+| 4 | High Credibility | 100 |
+
+A band names a range of scores, not this publisher. What the tool shows is a
+model's prediction of which band an article or a publisher falls in; it is never
+NewsGuard's rating of it, which this project holds and does not redistribute.
+
+
 1. Open **Evaluate**. One article is the only thing the page classifies.
 2. Enter the full public article URL.
 3. Wait for the application to inspect stored prediction coverage and the local
@@ -136,7 +156,7 @@ New-page retrieval:
 - requires at least 200 characters and 30 words;
 - accepts only text deterministically detected as English.
 
-The completed Evaluate card shows the predicted `Class 0..4`, every probability
+The completed Evaluate card shows the predicted reliability band, every probability
 as a decimal and percentage bar, exact family/fold, stored-versus-new status,
 prediction-run ID, and a link to the complete article history. The card belongs
 to the evaluation you just ran; earlier local predictions are listed under

@@ -2,6 +2,7 @@
 
 import {api} from "../api.js";
 import {articleSourceBadges, errorCard, pager, table} from "../components.js";
+import {classChip} from "../classes.js";
 import {escapeHtml, shortId} from "../format.js";
 import {content, mount} from "../view.js";
 
@@ -13,7 +14,7 @@ function articleRow(row) {
   return `<tr class="${rowClass}"><td><a class="url detail-link" href="#article/${encodeURIComponent(row.article_id)}" title="${escapeHtml(row.canonical_url)}">${escapeHtml(row.canonical_url)}</a>${shortId(row.article_id)}</td>
       <td>${articleSourceBadges(row)}</td>
       <td><a class="detail-link" href="#publisher/${encodeURIComponent(row.publisher_id)}">${escapeHtml(row.normalized_hostname)}</a></td><td>${row.model_count}</td><td>${row.run_count}</td>
-      <td><span class="class-chip">Class ${row.latest_predicted_class}</span></td></tr>`;
+      <td>${classChip(row.latest_predicted_class)}</td></tr>`;
 }
 
 /**

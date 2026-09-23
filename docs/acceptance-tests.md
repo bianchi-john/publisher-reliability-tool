@@ -323,8 +323,9 @@ Evaluate and article/publisher pages show the predicted class, all five
 available probabilities, exact model/fold/run, dataset or user origin,
 contributing articles, method/version, the dispersion and risk band behind a
 publisher class, and accessible tables containing the same values as visual
-probability bars. Classes are labelled `Class 0`–`Class 4` throughout and never
-presented as ground truth. Recent local article predictions
+probability bars. Classes are labelled throughout by the name of the NewsGuard
+band they stand for, with the class number and score range beside them, and are
+never presented as ground truth or as the provider's own rating. Recent local article predictions
 remain visible in Evaluate after refresh.
 
 ### AT-042 — Export privacy

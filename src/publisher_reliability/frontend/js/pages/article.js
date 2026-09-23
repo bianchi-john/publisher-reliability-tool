@@ -2,13 +2,14 @@
 
 import {api} from "../api.js";
 import {articleSourceBadges, probabilityCells, table} from "../components.js";
+import {classChip} from "../classes.js";
 import {escapeHtml, modelLabel, originLabel, provenanceLabel, shortId} from "../format.js";
 import {mount} from "../view.js";
 
 function predictionRow(run) {
   const originClass = run.origin === "local_inference" ? "user-source" : "dataset-source";
   return `<tr><td><b>${escapeHtml(modelLabel(run))}</b><br><span class="muted">${escapeHtml(provenanceLabel(run.model_provenance))}</span></td>
-        <td><span class="class-chip">${run.predicted_class}</span></td>${probabilityCells(run)}
+        <td>${classChip(run.predicted_class)}</td>${probabilityCells(run)}
         <td><span class="source-badge ${originClass}">${escapeHtml(originLabel(run.origin))}</span></td><td>${shortId(run.prediction_run_id)}</td></tr>`;
 }
 
